@@ -258,7 +258,6 @@ func testReplaceTranscriptsRollsBackWhenReplacementFails() throws {
 
     let handle = try databaseHandle(for: index)
     let previousLengthLimit = sqlite3_limit(handle, SQLITE_LIMIT_LENGTH, 64)
-    defer { sqlite3_limit(handle, SQLITE_LIMIT_LENGTH, previousLengthLimit) }
 
     let failingEntries: [(role: String, content: String, timestamp: Date)] = [
         (
@@ -273,6 +272,7 @@ func testReplaceTranscriptsRollsBackWhenReplacementFails() throws {
         Issue.record("Expected transcript replacement to fail when SQLite rejects oversized content.")
     } catch {
     }
+    sqlite3_limit(handle, SQLITE_LIMIT_LENGTH, previousLengthLimit)
 
     #expect(
         try transcriptContents(dbPath: dbPath, sessionId: "s1") == originalEntries.map(\.content)
@@ -512,14 +512,14 @@ func testTranscriptSearchBreaksEqualSessionRanksByNewestMatchingTranscript() thr
     try index.insertTranscript(
         sessionId: "tie-session",
         role: "assistant",
-        content: "needle older result",
-        timestamp: now
+        content: "needle newer result",
+        timestamp: now.addingTimeInterval(1)
     )
     try index.insertTranscript(
         sessionId: "tie-session",
         role: "assistant",
-        content: "needle newer result",
-        timestamp: now.addingTimeInterval(1)
+        content: "needle older result",
+        timestamp: now
     )
 
     let results = try index.search(query: "needle", includeHistory: true)
@@ -533,25 +533,8 @@ func testTranscriptSearchBreaksEqualSessionRanksByNewestSession() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-    let now = Date()
-    try index.upsertSession(
-        id: "older-session",
-        tool: "claude",
-        title: "older session",
-        project: "/p",
-        projectName: "proj",
-        gitBranch: "main",
-        status: "live",
-        startedAt: now,
-        pid: nil
-    )
-    try index.insertTranscript(
-        sessionId: "older-session",
-        role: "assistant",
-        content: "needle shared rank",
-        timestamp: now
-    )
-
+    let base = Date(timeIntervalSince1970: 1_700_000_000)
+    let sharedTranscriptTimestamp = base.addingTimeInterval(0.5)
     try index.upsertSession(
         id: "newer-session",
         tool: "codex",
@@ -560,14 +543,32 @@ func testTranscriptSearchBreaksEqualSessionRanksByNewestSession() throws {
         projectName: "proj",
         gitBranch: "main",
         status: "live",
-        startedAt: now.addingTimeInterval(60),
+        startedAt: base.addingTimeInterval(0.75),
         pid: nil
     )
     try index.insertTranscript(
         sessionId: "newer-session",
         role: "assistant",
         content: "needle shared rank",
-        timestamp: now.addingTimeInterval(60)
+        timestamp: sharedTranscriptTimestamp
+    )
+
+    try index.upsertSession(
+        id: "older-session",
+        tool: "claude",
+        title: "older session",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: base.addingTimeInterval(0.25),
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "older-session",
+        role: "assistant",
+        content: "needle shared rank",
+        timestamp: sharedTranscriptTimestamp
     )
 
     let results = try index.search(query: "needle", includeHistory: true)

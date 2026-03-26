@@ -89,11 +89,11 @@ final class SessionIndex: @unchecked Sendable {
             try statement.bind(index: 5, text: projectName)
             try statement.bind(index: 6, text: gitBranch)
             try statement.bind(index: 7, text: status)
-            try statement.bind(index: 8, int: Int64(startedAt.timeIntervalSince1970))
+            try statement.bind(index: 8, double: startedAt.timeIntervalSince1970)
             if let pid {
                 try statement.bind(index: 9, int: Int64(pid))
             }
-            try statement.bind(index: 10, int: Int64(Date().timeIntervalSince1970))
+            try statement.bind(index: 10, double: Date().timeIntervalSince1970)
         }
     }
 
@@ -157,6 +157,7 @@ final class SessionIndex: @unchecked Sendable {
                     transcripts.session_id,
                     CASE s.status WHEN 'live' THEN 0 ELSE 1 END AS status_priority,
                     s.started_at AS session_started_at,
+                    transcripts.timestamp_str AS transcript_timestamp,
                     rank AS match_rank
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
@@ -169,10 +170,11 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    transcript_timestamp,
                     match_rank,
                     ROW_NUMBER() OVER (
                         PARTITION BY session_id
-                        ORDER BY match_rank, transcript_rowid DESC
+                        ORDER BY match_rank, transcript_timestamp DESC, transcript_rowid DESC
                     ) AS match_row_number
                 FROM ranked_matches
             ),
@@ -182,10 +184,16 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    transcript_timestamp,
                     match_rank
                 FROM session_matches
                 WHERE match_row_number = 1
-                ORDER BY status_priority, match_rank, session_started_at DESC, transcript_rowid DESC
+                ORDER BY
+                    status_priority,
+                    match_rank,
+                    session_started_at DESC,
+                    transcript_timestamp DESC,
+                    transcript_rowid DESC
                 LIMIT 50
             )
             SELECT
@@ -207,6 +215,7 @@ final class SessionIndex: @unchecked Sendable {
                 deduplicated_matches.status_priority,
                 deduplicated_matches.match_rank,
                 deduplicated_matches.session_started_at DESC,
+                deduplicated_matches.transcript_timestamp DESC,
                 deduplicated_matches.transcript_rowid DESC
         """
 
@@ -224,7 +233,7 @@ final class SessionIndex: @unchecked Sendable {
                     s.pid,
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id
-                        ORDER BY transcripts.rowid DESC
+                        ORDER BY transcripts.timestamp_str DESC, transcripts.rowid DESC
                     ) AS match_row_number
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
