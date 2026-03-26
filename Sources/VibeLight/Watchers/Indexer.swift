@@ -153,9 +153,10 @@ final class Indexer {
         let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
         let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
-        let cleanedPreferredTitle = preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedPreferredTitle = preferredTitle.flatMap(SessionTitleNormalizer.titleCandidate(from:))
+            ?? preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
-            ?? messages.first(where: { $0.role == "user" })?.content
+            ?? SessionTitleNormalizer.firstMeaningfulUserTitle(in: messages)
             ?? "Untitled"
         let startedAt = messages.first?.timestamp ?? .distantPast
 
@@ -248,7 +249,7 @@ final class Indexer {
         }
 
         let title = titleMap[sessionId]
-            ?? messages.first(where: { $0.role == "user" })?.content
+            ?? SessionTitleNormalizer.firstMeaningfulUserTitle(in: messages)
             ?? "Untitled"
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
