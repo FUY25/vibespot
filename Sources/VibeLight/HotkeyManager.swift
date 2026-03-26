@@ -14,9 +14,9 @@ final class HotkeyManager {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var callbackContext: Unmanaged<CallbackContext>?
-    private let onToggle: () -> Void
+    private let onToggle: @MainActor @Sendable () -> Void
 
-    init(onToggle: @escaping @Sendable () -> Void) {
+    init(onToggle: @escaping @MainActor @Sendable () -> Void) {
         self.onToggle = onToggle
     }
 

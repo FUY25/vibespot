@@ -36,8 +36,8 @@ func configuresMenuBarApplicationActivationPolicy() {
 
 @MainActor
 @Test
-func createsMenuBarStatusItemTitledVLWhenLaunching() {
-    let delegate = AppDelegate()
+func createsMenuBarStatusItemTitledVLZeroWhenLaunching() {
+    let delegate = AppDelegate(startsRuntimeServices: false)
 
     defer {
         delegate.removeStatusItem()
@@ -47,7 +47,7 @@ func createsMenuBarStatusItemTitledVLWhenLaunching() {
 
     delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
 
-    #expect(delegate.statusItemTitle == "VL")
+    #expect(delegate.statusItemTitle == "VL: 0")
 }
 
 @MainActor
