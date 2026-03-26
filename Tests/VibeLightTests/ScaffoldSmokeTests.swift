@@ -18,11 +18,6 @@ private func withRestoredSharedApplicationState<Result>(
     return body(app)
 }
 
-@Test
-func scaffoldCompiles() {
-    #expect(Bool(true))
-}
-
 @MainActor
 @Test
 func configuresMenuBarApplicationActivationPolicy() {
@@ -37,6 +32,22 @@ func configuresMenuBarApplicationActivationPolicy() {
         #expect(app.activationPolicy() == .accessory)
         #expect(app.delegate === delegate)
     }
+}
+
+@MainActor
+@Test
+func createsMenuBarStatusItemTitledVLWhenLaunching() {
+    let delegate = AppDelegate()
+
+    defer {
+        delegate.removeStatusItem()
+    }
+
+    #expect(delegate.statusItemTitle == nil)
+
+    delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+    #expect(delegate.statusItemTitle == "VL")
 }
 
 @MainActor
