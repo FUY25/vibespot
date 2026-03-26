@@ -52,7 +52,7 @@ func testParseHistoryJSONL() throws {
     #expect(entries[0].sessionId == "session-001")
     #expect(entries[0].prompt == "fix the auth token expiration bug")
     #expect(entries[0].project == "/Users/me/project")
-    #expect(entries[1].sessionId == "")
+    #expect(entries[1].sessionId == "session-002")
 }
 
 @Test
