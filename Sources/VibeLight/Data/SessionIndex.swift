@@ -155,6 +155,7 @@ final class SessionIndex: @unchecked Sendable {
                 SELECT
                     transcripts.rowid AS transcript_rowid,
                     transcripts.session_id,
+                    CASE s.status WHEN 'live' THEN 0 ELSE 1 END AS status_priority,
                     rank AS match_rank
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
@@ -165,6 +166,7 @@ final class SessionIndex: @unchecked Sendable {
                 SELECT
                     transcript_rowid,
                     session_id,
+                    status_priority,
                     match_rank,
                     ROW_NUMBER() OVER (
                         PARTITION BY session_id
@@ -176,10 +178,11 @@ final class SessionIndex: @unchecked Sendable {
                 SELECT
                     transcript_rowid,
                     session_id,
+                    status_priority,
                     match_rank
                 FROM session_matches
                 WHERE match_row_number = 1
-                ORDER BY match_rank
+                ORDER BY status_priority, match_rank
                 LIMIT 50
             )
             SELECT
@@ -197,7 +200,7 @@ final class SessionIndex: @unchecked Sendable {
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
             JOIN sessions s ON s.id = deduplicated_matches.session_id
             WHERE transcripts MATCH ?1
-            ORDER BY deduplicated_matches.match_rank
+            ORDER BY deduplicated_matches.status_priority, deduplicated_matches.match_rank
         """
 
         let literalTranscriptSQL = """

@@ -445,6 +445,54 @@ func testTranscriptMatchesFromClosedSessionsAreExcludedWhenHistoryDisabled() thr
 }
 
 @Test
+func testHistoryTranscriptSearchOrdersLiveSessionsAheadOfClosedSessions() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "live-hit",
+        tool: "claude",
+        title: "active work",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(-60),
+        pid: 17
+    )
+    try index.insertTranscript(
+        sessionId: "live-hit",
+        role: "assistant",
+        content: "needle ranking appears once in the active transcript",
+        timestamp: now.addingTimeInterval(-60)
+    )
+
+    try index.upsertSession(
+        id: "closed-hit",
+        tool: "codex",
+        title: "archived work",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "closed-hit",
+        role: "assistant",
+        content: "needle ranking needle ranking needle ranking in the archived transcript",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "needle ranking", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["live-hit", "closed-hit"])
+    #expect(results.map(\.status) == ["live", "closed"])
+}
+
+@Test
 func testSearchMetadataQueriesWithFTSUnsafeShapes() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
