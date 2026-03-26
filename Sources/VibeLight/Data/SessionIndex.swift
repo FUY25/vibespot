@@ -156,6 +156,7 @@ final class SessionIndex: @unchecked Sendable {
                     transcripts.rowid AS transcript_rowid,
                     transcripts.session_id,
                     CASE s.status WHEN 'live' THEN 0 ELSE 1 END AS status_priority,
+                    s.started_at AS session_started_at,
                     rank AS match_rank
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
@@ -167,10 +168,11 @@ final class SessionIndex: @unchecked Sendable {
                     transcript_rowid,
                     session_id,
                     status_priority,
+                    session_started_at,
                     match_rank,
                     ROW_NUMBER() OVER (
                         PARTITION BY session_id
-                        ORDER BY match_rank
+                        ORDER BY match_rank, transcript_rowid DESC
                     ) AS match_row_number
                 FROM ranked_matches
             ),
@@ -179,10 +181,11 @@ final class SessionIndex: @unchecked Sendable {
                     transcript_rowid,
                     session_id,
                     status_priority,
+                    session_started_at,
                     match_rank
                 FROM session_matches
                 WHERE match_row_number = 1
-                ORDER BY status_priority, match_rank
+                ORDER BY status_priority, match_rank, session_started_at DESC, transcript_rowid DESC
                 LIMIT 50
             )
             SELECT
@@ -200,7 +203,11 @@ final class SessionIndex: @unchecked Sendable {
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
             JOIN sessions s ON s.id = deduplicated_matches.session_id
             WHERE transcripts MATCH ?1
-            ORDER BY deduplicated_matches.status_priority, deduplicated_matches.match_rank
+            ORDER BY
+                deduplicated_matches.status_priority,
+                deduplicated_matches.match_rank,
+                deduplicated_matches.session_started_at DESC,
+                deduplicated_matches.transcript_rowid DESC
         """
 
         let literalTranscriptSQL = """

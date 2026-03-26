@@ -493,6 +493,89 @@ func testHistoryTranscriptSearchOrdersLiveSessionsAheadOfClosedSessions() throws
 }
 
 @Test
+func testTranscriptSearchBreaksEqualSessionRanksByNewestMatchingTranscript() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "tie-session",
+        tool: "claude",
+        title: "tie breaker session",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "tie-session",
+        role: "assistant",
+        content: "needle older result",
+        timestamp: now
+    )
+    try index.insertTranscript(
+        sessionId: "tie-session",
+        role: "assistant",
+        content: "needle newer result",
+        timestamp: now.addingTimeInterval(1)
+    )
+
+    let results = try index.search(query: "needle", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["tie-session"])
+    #expect(results[0].snippet?.contains("newer") == true)
+}
+
+@Test
+func testTranscriptSearchBreaksEqualSessionRanksByNewestSession() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "older-session",
+        tool: "claude",
+        title: "older session",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "older-session",
+        role: "assistant",
+        content: "needle shared rank",
+        timestamp: now
+    )
+
+    try index.upsertSession(
+        id: "newer-session",
+        tool: "codex",
+        title: "newer session",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(60),
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "newer-session",
+        role: "assistant",
+        content: "needle shared rank",
+        timestamp: now.addingTimeInterval(60)
+    )
+
+    let results = try index.search(query: "needle", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["newer-session", "older-session"])
+}
+
+@Test
 func testSearchMetadataQueriesWithFTSUnsafeShapes() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
