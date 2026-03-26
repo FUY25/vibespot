@@ -1,0 +1,270 @@
+import Foundation
+import SQLite3
+
+struct SearchResult: Sendable {
+    let sessionId: String
+    let tool: String
+    let title: String
+    let project: String
+    let projectName: String
+    let gitBranch: String
+    let status: String
+    let startedAt: Date
+    let pid: Int?
+    let snippet: String?
+}
+
+final class SessionIndex: @unchecked Sendable {
+    private let db: Database
+    private let iso8601Formatter = ISO8601DateFormatter()
+
+    init(dbPath: String) throws {
+        db = try Database(path: dbPath)
+        try createSchema()
+    }
+
+    private func createSchema() throws {
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                tool TEXT NOT NULL,
+                title TEXT NOT NULL,
+                project TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                git_branch TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'closed',
+                started_at REAL NOT NULL,
+                pid INTEGER,
+                updated_at REAL NOT NULL DEFAULT 0
+            )
+        """)
+
+        try db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
+                session_id,
+                role,
+                content,
+                timestamp_str UNINDEXED
+            )
+        """)
+
+        try db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)
+        """)
+    }
+
+    func upsertSession(
+        id: String,
+        tool: String,
+        title: String,
+        project: String,
+        projectName: String,
+        gitBranch: String,
+        status: String,
+        startedAt: Date,
+        pid: Int?
+    ) throws {
+        let sql = """
+            INSERT INTO sessions (
+                id, tool, title, project, project_name, git_branch, status, started_at, pid, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+            )
+            ON CONFLICT(id) DO UPDATE SET
+                tool = excluded.tool,
+                title = excluded.title,
+                project = excluded.project,
+                project_name = excluded.project_name,
+                git_branch = excluded.git_branch,
+                status = excluded.status,
+                started_at = excluded.started_at,
+                pid = excluded.pid,
+                updated_at = excluded.updated_at
+        """
+
+        try runStatement(sql) { statement in
+            try statement.bind(index: 1, text: id)
+            try statement.bind(index: 2, text: tool)
+            try statement.bind(index: 3, text: title)
+            try statement.bind(index: 4, text: project)
+            try statement.bind(index: 5, text: projectName)
+            try statement.bind(index: 6, text: gitBranch)
+            try statement.bind(index: 7, text: status)
+            try statement.bind(index: 8, int: Int64(startedAt.timeIntervalSince1970))
+            if let pid {
+                try statement.bind(index: 9, int: Int64(pid))
+            }
+            try statement.bind(index: 10, int: Int64(Date().timeIntervalSince1970))
+        }
+    }
+
+    func insertTranscript(sessionId: String, role: String, content: String, timestamp: Date) throws {
+        try runStatement(
+            "INSERT INTO transcripts (session_id, role, content, timestamp_str) VALUES (?1, ?2, ?3, ?4)"
+        ) { statement in
+            try statement.bind(index: 1, text: sessionId)
+            try statement.bind(index: 2, text: role)
+            try statement.bind(index: 3, text: content)
+            try statement.bind(index: 4, text: iso8601Formatter.string(from: timestamp))
+        }
+    }
+
+    func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return try listSessions(includeHistory: includeHistory)
+        }
+
+        let statusClause = includeHistory ? "" : "AND status = 'live'"
+        let metadataSQL = """
+            SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
+            FROM sessions
+            WHERE (
+                title LIKE ?1 OR
+                project LIKE ?1 OR
+                project_name LIKE ?1 OR
+                tool LIKE ?1 OR
+                git_branch LIKE ?1
+            )
+            \(statusClause)
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            LIMIT 50
+        """
+
+        var results = try db.query(
+            metadataSQL,
+            bind: { statement in
+                try statement.bind(index: 1, text: "%\(trimmed)%")
+            },
+            map: mapRow
+        )
+
+        let existingIDs = Set(results.map(\.sessionId))
+        let transcriptSQL = """
+            SELECT
+                matches.session_id,
+                s.tool,
+                s.title,
+                s.project,
+                s.project_name,
+                s.git_branch,
+                s.status,
+                s.started_at,
+                s.pid,
+                matches.snippet
+            FROM (
+                SELECT
+                    session_id,
+                    snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet,
+                    rank
+                FROM transcripts
+                WHERE transcripts MATCH ?1
+                ORDER BY rank
+                LIMIT 50
+            ) matches
+            JOIN sessions s ON s.id = matches.session_id
+            \(includeHistory ? "" : "WHERE s.status = 'live'")
+            ORDER BY matches.rank
+        """
+
+        let transcriptMatches = try db.query(
+            transcriptSQL,
+            bind: { statement in
+                try statement.bind(index: 1, text: makeFTSQuery(from: trimmed))
+            },
+            map: mapRow
+        )
+
+        var seenIDs = existingIDs
+        for result in transcriptMatches where !seenIDs.contains(result.sessionId) {
+            results.append(result)
+            seenIDs.insert(result.sessionId)
+        }
+
+        if results.count > 50 {
+            results.removeSubrange(50...)
+        }
+
+        return results
+    }
+
+    func liveSessionCount() throws -> Int {
+        let counts = try db.query("SELECT COUNT(*) FROM sessions WHERE status = 'live'") { statement in
+            Int(sqlite3_column_int64(statement, 0))
+        }
+        return counts.first ?? 0
+    }
+
+    func updateStatus(sessionId: String, status: String) throws {
+        try runStatement(
+            "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3"
+        ) { statement in
+            try statement.bind(index: 1, text: status)
+            try statement.bind(index: 2, int: Int64(Date().timeIntervalSince1970))
+            try statement.bind(index: 3, text: sessionId)
+        }
+    }
+
+    private func listSessions(includeHistory: Bool) throws -> [SearchResult] {
+        let sql = """
+            SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
+            FROM sessions
+            \(includeHistory ? "" : "WHERE status = 'live'")
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            LIMIT 50
+        """
+
+        return try db.query(sql, map: mapRow)
+    }
+
+    private func runStatement(
+        _ sql: String,
+        bind: (Database.Statement) throws -> Void
+    ) throws {
+        let statement = try db.prepare(sql)
+        try bind(statement)
+        let result = statement.step()
+
+        guard result == SQLITE_DONE else {
+            throw DatabaseError.stepFailed(statement.connectionErrorMessage())
+        }
+    }
+
+    private func makeFTSQuery(from query: String) -> String {
+        query
+            .split(whereSeparator: \.isWhitespace)
+            .map { token in
+                "\"\(token.replacing("\"", with: "\"\""))\""
+            }
+            .joined(separator: " ")
+    }
+
+    private func mapRow(_ statement: OpaquePointer) -> SearchResult {
+        SearchResult(
+            sessionId: textColumn(statement, index: 0),
+            tool: textColumn(statement, index: 1),
+            title: textColumn(statement, index: 2),
+            project: textColumn(statement, index: 3),
+            projectName: textColumn(statement, index: 4),
+            gitBranch: textColumn(statement, index: 5),
+            status: textColumn(statement, index: 6),
+            startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
+            pid: sqlite3_column_type(statement, 8) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 8)),
+            snippet: optionalTextColumn(statement, index: 9)
+        )
+    }
+
+    private func textColumn(_ statement: OpaquePointer, index: Int32) -> String {
+        guard let value = sqlite3_column_text(statement, index) else {
+            return ""
+        }
+        return String(cString: value)
+    }
+
+    private func optionalTextColumn(_ statement: OpaquePointer, index: Int32) -> String? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+            return nil
+        }
+        return textColumn(statement, index: index)
+    }
+}
