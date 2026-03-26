@@ -93,3 +93,52 @@ func testPreparedStatementRetainsDatabaseDuringBindResetAndReuse() throws {
     #expect(rows[1].0 == "beta")
     #expect(rows[1].1 == 2)
 }
+
+@Test
+func testParameterizedReadQueryBindsBeforeStepping() throws {
+    let (db, dbPath) = try makeTemporaryDatabase()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try db.execute("CREATE TABLE test (name TEXT NOT NULL)")
+    try db.execute("INSERT INTO test (name) VALUES ('alpha')")
+    try db.execute("INSERT INTO test (name) VALUES ('alphabet')")
+    try db.execute("INSERT INTO test (name) VALUES ('beta')")
+
+    let rows = try db.query(
+        "SELECT name FROM test WHERE name LIKE ?1 ORDER BY name",
+        bind: { statement in
+            statement.bind(index: 1, text: "alpha%")
+        },
+        map: { stmt in
+            String(cString: sqlite3_column_text(stmt, 0))
+        }
+    )
+
+    #expect(rows == ["alpha", "alphabet"])
+}
+
+@Test
+func testCloseThrowsWhenStatementIsStillOpen() throws {
+    let (db, dbPath) = try makeTemporaryDatabase()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try db.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)")
+
+    var statement: Database.Statement? = try db.prepare("INSERT INTO test (id) VALUES (?)")
+    #expect(statement != nil)
+
+    do {
+        try db.close()
+        Issue.record("Expected closing the database to fail while a prepared statement is still open.")
+    } catch let error as DatabaseError {
+        switch error {
+        case .closeFailed:
+            break
+        default:
+            Issue.record("Expected a closeFailed error, got \(error).")
+        }
+    }
+
+    statement = nil
+    try db.close()
+}

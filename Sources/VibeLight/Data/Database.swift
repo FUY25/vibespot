@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 
 final class Database: @unchecked Sendable {
-    private let db: OpaquePointer
+    private var db: OpaquePointer?
 
     init(path: String) throws {
         var handle: OpaquePointer?
@@ -23,13 +23,16 @@ final class Database: @unchecked Sendable {
     }
 
     deinit {
-        let rc = sqlite3_close(db)
+        guard let db else { return }
+
+        let rc = sqlite3_close_v2(db)
         if rc != SQLITE_OK {
             assertionFailure(DatabaseError.closeFailed(String(cString: sqlite3_errmsg(db))).localizedDescription)
         }
     }
 
     func execute(_ sql: String) throws {
+        let db = try requireOpenDatabase()
         var errorMessage: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
 
@@ -41,24 +44,26 @@ final class Database: @unchecked Sendable {
     }
 
     func query<T>(_ sql: String, map: (OpaquePointer) -> T) throws -> [T] {
-        var statement: OpaquePointer?
-        let rc = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        try query(sql, bind: { _ in }, map: map)
+    }
 
-        guard rc == SQLITE_OK, let statement else {
-            throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
-        }
+    func query<T>(
+        _ sql: String,
+        bind: (Statement) throws -> Void,
+        map: (OpaquePointer) -> T
+    ) throws -> [T] {
+        let db = try requireOpenDatabase()
+        let statement = try prepare(sql)
 
-        defer {
-            sqlite3_finalize(statement)
-        }
+        try bind(statement)
 
         var results: [T] = []
         while true {
-            let stepResult = sqlite3_step(statement)
+            let stepResult = sqlite3_step(statement.stmt)
 
             switch stepResult {
             case SQLITE_ROW:
-                results.append(map(statement))
+                results.append(map(statement.stmt))
             case SQLITE_DONE:
                 return results
             default:
@@ -67,7 +72,25 @@ final class Database: @unchecked Sendable {
         }
     }
 
+    func close() throws {
+        guard let db else { return }
+
+        let rc = sqlite3_close(db)
+
+        guard rc == SQLITE_OK else {
+            throw DatabaseError.closeFailed(String(cString: sqlite3_errmsg(db)))
+        }
+
+        self.db = nil
+    }
+
     func prepare(_ sql: String) throws -> Statement {
+        let statement = try prepareStatement(sql)
+        return Statement(owner: self, stmt: statement)
+    }
+
+    private func prepareStatement(_ sql: String) throws -> OpaquePointer {
+        let db = try requireOpenDatabase()
         var statement: OpaquePointer?
         let rc = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
 
@@ -75,7 +98,7 @@ final class Database: @unchecked Sendable {
             throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
         }
 
-        return Statement(owner: self, stmt: statement)
+        return statement
     }
 
     final class Statement {
@@ -113,6 +136,14 @@ final class Database: @unchecked Sendable {
             sqlite3_reset(stmt)
             sqlite3_clear_bindings(stmt)
         }
+    }
+
+    private func requireOpenDatabase() throws -> OpaquePointer {
+        guard let db else {
+            throw DatabaseError.closeFailed("Database is already closed.")
+        }
+
+        return db
     }
 }
 
