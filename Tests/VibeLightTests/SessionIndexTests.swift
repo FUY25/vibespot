@@ -237,3 +237,89 @@ func testUpdateStatusChangesLiveQueriesAndCounts() throws {
     #expect(try index.search(query: "", includeHistory: false).isEmpty)
     #expect(try index.search(query: "", includeHistory: true).map(\.status) == ["closed"])
 }
+
+@Test
+func testSearchMetadataQueriesWithFTSUnsafeShapes() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    let sessions: [(id: String, title: String, project: String, projectName: String, gitBranch: String)] = [
+        ("slash", "auth work", "/repo/app", "terminalrail", "feat/auth"),
+        ("dash", "branch cleanup", "/repo/app", "terminalrail", "fix-auth"),
+        ("path", "swift file touch", "/repo/src/App.swift", "terminalrail", "main"),
+        ("underscore", "search branch", "/repo/app", "terminalrail", "feature_search"),
+        ("underscore-decoy", "search branch", "/repo/app", "terminalrail", "featureXsearch"),
+        ("punctuation", "review: api", "/repo/app", "terminalrail", "main"),
+    ]
+
+    for session in sessions {
+        try index.upsertSession(
+            id: session.id,
+            tool: "claude",
+            title: session.title,
+            project: session.project,
+            projectName: session.projectName,
+            gitBranch: session.gitBranch,
+            status: "live",
+            startedAt: now,
+            pid: nil
+        )
+    }
+
+    let cases: [(query: String, expectedIDs: Set<String>)] = [
+        ("feat/auth", ["slash"]),
+        ("fix-auth", ["dash"]),
+        ("src/App.swift", ["path"]),
+        ("feature_search", ["underscore"]),
+        (":", ["punctuation"]),
+    ]
+
+    for queryCase in cases {
+        let results = try index.search(query: queryCase.query, includeHistory: true)
+        #expect(
+            Set(results.map(\.sessionId)) == queryCase.expectedIDs,
+            "query=\(queryCase.query) results=\(results.map(\.sessionId))"
+        )
+    }
+}
+
+@Test
+func testSearchMetadataTreatsLikeWildcardsLiterally() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    let sessions: [(id: String, title: String, project: String)] = [
+        ("percent", "progress 100% done", "/repo/app"),
+        ("percent-decoy", "progress 100x done", "/repo/app"),
+        ("backslash", "windows path", #"C:\repo\app"#),
+        ("backslash-decoy", "unix path", "C:/repo/app"),
+    ]
+
+    for session in sessions {
+        try index.upsertSession(
+            id: session.id,
+            tool: "claude",
+            title: session.title,
+            project: session.project,
+            projectName: "terminalrail",
+            gitBranch: "main",
+            status: "live",
+            startedAt: now,
+            pid: nil
+        )
+    }
+
+    let percentResults = try index.search(query: "100%", includeHistory: true)
+    #expect(Set(percentResults.map(\.sessionId)) == ["percent"])
+
+    let backslashResults = try index.search(query: #"C:\repo"#, includeHistory: true)
+    #expect(Set(backslashResults.map(\.sessionId)) == ["backslash"])
+}
+
+private func makeTestIndex() throws -> (SessionIndex, String) {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    return (try SessionIndex(dbPath: dbPath), dbPath)
+}

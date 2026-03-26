@@ -120,11 +120,11 @@ final class SessionIndex: @unchecked Sendable {
             SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
             FROM sessions
             WHERE (
-                title LIKE ?1 OR
-                project LIKE ?1 OR
-                project_name LIKE ?1 OR
-                tool LIKE ?1 OR
-                git_branch LIKE ?1
+                title LIKE ?1 ESCAPE '\\' OR
+                project LIKE ?1 ESCAPE '\\' OR
+                project_name LIKE ?1 ESCAPE '\\' OR
+                tool LIKE ?1 ESCAPE '\\' OR
+                git_branch LIKE ?1 ESCAPE '\\'
             )
             \(statusClause)
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -134,7 +134,7 @@ final class SessionIndex: @unchecked Sendable {
         var results = try db.query(
             metadataSQL,
             bind: { statement in
-                try statement.bind(index: 1, text: "%\(trimmed)%")
+                try statement.bind(index: 1, text: makeMetadataPattern(from: trimmed))
             },
             map: mapRow
         )
@@ -190,13 +190,18 @@ final class SessionIndex: @unchecked Sendable {
             ORDER BY deduplicated_matches.match_rank
         """
 
-        let transcriptMatches = try db.query(
-            transcriptSQL,
-            bind: { statement in
-                try statement.bind(index: 1, text: makeFTSQuery(from: trimmed))
-            },
-            map: mapRow
-        )
+        let transcriptMatches: [SearchResult]
+        if let ftsQuery = makeFTSQuery(from: trimmed) {
+            transcriptMatches = try db.query(
+                transcriptSQL,
+                bind: { statement in
+                    try statement.bind(index: 1, text: ftsQuery)
+                },
+                map: mapRow
+            )
+        } else {
+            transcriptMatches = []
+        }
 
         var seenIDs = existingIDs
         for result in transcriptMatches where !seenIDs.contains(result.sessionId) {
@@ -253,9 +258,34 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
-    private func makeFTSQuery(from query: String) -> String {
-        query
-            .split(whereSeparator: \.isWhitespace)
+    private func makeMetadataPattern(from query: String) -> String {
+        "%\(escapeLikeLiteral(query))%"
+    }
+
+    private func escapeLikeLiteral(_ text: String) -> String {
+        var escaped = ""
+        escaped.reserveCapacity(text.count)
+
+        for character in text {
+            if character == "\\" || character == "%" || character == "_" {
+                escaped.append("\\")
+            }
+            escaped.append(character)
+        }
+
+        return escaped
+    }
+
+    private func makeFTSQuery(from query: String) -> String? {
+        let safeTerms = query
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+
+        guard !safeTerms.isEmpty else {
+            return nil
+        }
+
+        return safeTerms
             .map { token in
                 "\"\(token.replacing("\"", with: "\"\""))\""
             }
