@@ -2,6 +2,8 @@ import Foundation
 import SQLite3
 
 final class Database: @unchecked Sendable {
+    // One lock protects the handle and every statement lifecycle transition.
+    private let lock = NSRecursiveLock()
     private var db: OpaquePointer?
 
     init(path: String) throws {
@@ -23,6 +25,9 @@ final class Database: @unchecked Sendable {
     }
 
     deinit {
+        lock.lock()
+        defer { lock.unlock() }
+
         guard let db else { return }
 
         let rc = sqlite3_close_v2(db)
@@ -32,14 +37,16 @@ final class Database: @unchecked Sendable {
     }
 
     func execute(_ sql: String) throws {
-        let db = try requireOpenDatabase()
-        var errorMessage: UnsafeMutablePointer<CChar>?
-        let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+        try withLock {
+            let db = try requireOpenDatabase()
+            var errorMessage: UnsafeMutablePointer<CChar>?
+            let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
 
-        if rc != SQLITE_OK {
-            let message = errorMessage.map { String(cString: $0) } ?? "unknown"
-            sqlite3_free(errorMessage)
-            throw DatabaseError.execFailed(message)
+            if rc != SQLITE_OK {
+                let message = errorMessage.map { String(cString: $0) } ?? "unknown"
+                sqlite3_free(errorMessage)
+                throw DatabaseError.execFailed(message)
+            }
         }
     }
 
@@ -52,36 +59,37 @@ final class Database: @unchecked Sendable {
         bind: (Statement) throws -> Void,
         map: (OpaquePointer) -> T
     ) throws -> [T] {
-        let db = try requireOpenDatabase()
         let statement = try prepare(sql)
 
         try bind(statement)
 
         var results: [T] = []
         while true {
-            let stepResult = sqlite3_step(statement.stmt)
+            let stepResult = statement.step()
 
             switch stepResult {
             case SQLITE_ROW:
-                results.append(map(statement.stmt))
+                results.append(statement.withRawStatement(map))
             case SQLITE_DONE:
                 return results
             default:
-                throw DatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+                throw DatabaseError.stepFailed(statement.connectionErrorMessage())
             }
         }
     }
 
     func close() throws {
-        guard let db else { return }
+        try withLock {
+            guard let db else { return }
 
-        let rc = sqlite3_close(db)
+            let rc = sqlite3_close(db)
 
-        guard rc == SQLITE_OK else {
-            throw DatabaseError.closeFailed(String(cString: sqlite3_errmsg(db)))
+            guard rc == SQLITE_OK else {
+                throw DatabaseError.closeFailed(String(cString: sqlite3_errmsg(db)))
+            }
+
+            self.db = nil
         }
-
-        self.db = nil
     }
 
     func prepare(_ sql: String) throws -> Statement {
@@ -90,15 +98,17 @@ final class Database: @unchecked Sendable {
     }
 
     private func prepareStatement(_ sql: String) throws -> OpaquePointer {
-        let db = try requireOpenDatabase()
-        var statement: OpaquePointer?
-        let rc = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        try withLock {
+            let db = try requireOpenDatabase()
+            var statement: OpaquePointer?
+            let rc = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
 
-        guard rc == SQLITE_OK, let statement else {
-            throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            guard rc == SQLITE_OK, let statement else {
+                throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+
+            return statement
         }
-
-        return statement
     }
 
     final class Statement {
@@ -111,30 +121,64 @@ final class Database: @unchecked Sendable {
         }
 
         deinit {
+            owner.lock.lock()
+            defer { owner.lock.unlock() }
             sqlite3_finalize(stmt)
         }
 
-        func bind(index: Int32, text: String) {
-            sqlite3_bind_text(
-                stmt,
-                index,
-                (text as NSString).utf8String,
-                -1,
-                unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-            )
+        func bind(index: Int32, text: String) throws {
+            let rc = owner.withLock {
+                sqlite3_bind_text(
+                    stmt,
+                    index,
+                    (text as NSString).utf8String,
+                    -1,
+                    unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+                )
+            }
+
+            guard rc == SQLITE_OK else {
+                throw DatabaseError.bindFailed(connectionErrorMessage())
+            }
         }
 
-        func bind(index: Int32, int: Int64) {
-            sqlite3_bind_int64(stmt, index, int)
+        func bind(index: Int32, int: Int64) throws {
+            let rc = owner.withLock {
+                sqlite3_bind_int64(stmt, index, int)
+            }
+
+            guard rc == SQLITE_OK else {
+                throw DatabaseError.bindFailed(connectionErrorMessage())
+            }
         }
 
         func step() -> Int32 {
-            sqlite3_step(stmt)
+            owner.withLock {
+                sqlite3_step(stmt)
+            }
         }
 
         func reset() {
-            sqlite3_reset(stmt)
-            sqlite3_clear_bindings(stmt)
+            owner.withLock {
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+            }
+        }
+
+        func withRawStatement<T>(_ operation: (OpaquePointer) -> T) -> T {
+            owner.withLock {
+                operation(stmt)
+            }
+        }
+
+        func connectionErrorMessage() -> String {
+            owner.withLock {
+                guard let db = sqlite3_db_handle(stmt) else {
+                    return "unknown"
+                }
+
+                return String(cString: sqlite3_errmsg(db))
+            }
         }
     }
 
@@ -145,12 +189,19 @@ final class Database: @unchecked Sendable {
 
         return db
     }
+
+    private func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
+    }
 }
 
 enum DatabaseError: Error, LocalizedError {
     case openFailed(String)
     case execFailed(String)
     case prepareFailed(String)
+    case bindFailed(String)
     case stepFailed(String)
     case closeFailed(String)
 
@@ -162,6 +213,8 @@ enum DatabaseError: Error, LocalizedError {
             "SQL execution failed: \(message)"
         case .prepareFailed(let message):
             "Failed to prepare statement: \(message)"
+        case .bindFailed(let message):
+            "Failed to bind statement parameter: \(message)"
         case .stepFailed(let message):
             "Failed to step statement: \(message)"
         case .closeFailed(let message):

@@ -71,13 +71,13 @@ func testPreparedStatementRetainsDatabaseDuringBindResetAndReuse() throws {
         return
     }
 
-    insert.bind(index: 1, text: "alpha")
-    insert.bind(index: 2, int: 1)
+    try insert.bind(index: 1, text: "alpha")
+    try insert.bind(index: 2, int: 1)
     #expect(insert.step() == SQLITE_DONE)
 
     insert.reset()
-    insert.bind(index: 1, text: "beta")
-    insert.bind(index: 2, int: 2)
+    try insert.bind(index: 1, text: "beta")
+    try insert.bind(index: 2, int: 2)
     #expect(insert.step() == SQLITE_DONE)
 
     let rows = try retainedDatabase.query("SELECT name, count FROM test ORDER BY id") { stmt in
@@ -107,7 +107,7 @@ func testParameterizedReadQueryBindsBeforeStepping() throws {
     let rows = try db.query(
         "SELECT name FROM test WHERE name LIKE ?1 ORDER BY name",
         bind: { statement in
-            statement.bind(index: 1, text: "alpha%")
+            try statement.bind(index: 1, text: "alpha%")
         },
         map: { stmt in
             String(cString: sqlite3_column_text(stmt, 0))
@@ -115,6 +115,27 @@ func testParameterizedReadQueryBindsBeforeStepping() throws {
     )
 
     #expect(rows == ["alpha", "alphabet"])
+}
+
+@Test
+func testPreparedStatementBindThrowsWhenParameterIndexIsOutOfRange() throws {
+    let (db, dbPath) = try makeTemporaryDatabase()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let statement = try db.prepare("SELECT ?1")
+    let bindText: (Int32, String) throws -> Void = statement.bind(index:text:)
+
+    do {
+        try bindText(2, "alpha")
+        Issue.record("Expected binding an out-of-range parameter index to fail.")
+    } catch let error as DatabaseError {
+        switch error {
+        case .bindFailed(let message):
+            #expect(!message.isEmpty)
+        default:
+            Issue.record("Expected a bindFailed error, got \(error).")
+        }
+    }
 }
 
 @Test
