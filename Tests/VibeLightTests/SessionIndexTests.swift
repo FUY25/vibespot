@@ -75,6 +75,59 @@ func testSearchMetadataOnly() throws {
 }
 
 @Test
+func testTranscriptSearchDeduplicatesSessionsBeforeLimit() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "session one",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 1
+    )
+    try index.upsertSession(
+        id: "s2",
+        tool: "codex",
+        title: "session two",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(-1),
+        pid: 2
+    )
+
+    for indexValue in 0..<60 {
+        try index.insertTranscript(
+            sessionId: "s1",
+            role: "user",
+            content: "needle phrase repeated \(indexValue)",
+            timestamp: now.addingTimeInterval(TimeInterval(indexValue))
+        )
+    }
+
+    try index.insertTranscript(
+        sessionId: "s2",
+        role: "assistant",
+        content: "needle phrase appears once here",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "needle phrase", includeHistory: false)
+
+    #expect(Set(results.map(\.sessionId)) == ["s1", "s2"])
+}
+
+@Test
 func testLiveSessionCount() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path

@@ -141,8 +141,39 @@ final class SessionIndex: @unchecked Sendable {
 
         let existingIDs = Set(results.map(\.sessionId))
         let transcriptSQL = """
+            WITH ranked_matches AS (
+                SELECT
+                    transcripts.rowid AS transcript_rowid,
+                    transcripts.session_id,
+                    rank AS match_rank
+                FROM transcripts
+                JOIN sessions s ON s.id = transcripts.session_id
+                WHERE transcripts MATCH ?1
+                \(includeHistory ? "" : "AND s.status = 'live'")
+            ),
+            session_matches AS (
+                SELECT
+                    transcript_rowid,
+                    session_id,
+                    match_rank,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY session_id
+                        ORDER BY match_rank
+                    ) AS match_row_number
+                FROM ranked_matches
+            ),
+            deduplicated_matches AS (
+                SELECT
+                    transcript_rowid,
+                    session_id,
+                    match_rank
+                FROM session_matches
+                WHERE match_row_number = 1
+                ORDER BY match_rank
+                LIMIT 50
+            )
             SELECT
-                matches.session_id,
+                deduplicated_matches.session_id,
                 s.tool,
                 s.title,
                 s.project,
@@ -151,20 +182,12 @@ final class SessionIndex: @unchecked Sendable {
                 s.status,
                 s.started_at,
                 s.pid,
-                matches.snippet
-            FROM (
-                SELECT
-                    session_id,
-                    snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet,
-                    rank
-                FROM transcripts
-                WHERE transcripts MATCH ?1
-                ORDER BY rank
-                LIMIT 50
-            ) matches
-            JOIN sessions s ON s.id = matches.session_id
-            \(includeHistory ? "" : "WHERE s.status = 'live'")
-            ORDER BY matches.rank
+                snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet
+            FROM deduplicated_matches
+            JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
+            JOIN sessions s ON s.id = deduplicated_matches.session_id
+            WHERE transcripts MATCH ?1
+            ORDER BY deduplicated_matches.match_rank
         """
 
         let transcriptMatches = try db.query(
