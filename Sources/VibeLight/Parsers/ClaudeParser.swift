@@ -23,6 +23,10 @@ enum ClaudeParser {
                 continue
             }
 
+            if type == "user", boolValue(record["isMeta"]) == true {
+                continue
+            }
+
             let message = record["message"] as? [String: Any] ?? [:]
             if type == "assistant", message["model"] as? String == "<synthetic>" {
                 continue
@@ -151,6 +155,93 @@ enum ClaudeParser {
     }
 
     static func decodeProjectPath(_ encoded: String) -> String {
+        decodeProjectPath(
+            encoded,
+            projectsRoot: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/projects", isDirectory: true)
+        )
+    }
+
+    static func decodeProjectPath(_ encoded: String, projectsRoot: URL) -> String {
+        if let projectPath = projectPathFromEncodedDirectory(encoded, projectsRoot: projectsRoot) {
+            return projectPath
+        }
+
+        return fallbackDecodeProjectPath(encoded)
+    }
+
+    private static func projectPathFromEncodedDirectory(_ encoded: String, projectsRoot: URL) -> String? {
+        guard !encoded.isEmpty else {
+            return nil
+        }
+
+        let fileManager = FileManager.default
+        let encodedDirectory = projectsRoot.appendingPathComponent(encoded, isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: encodedDirectory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
+
+        let sessionsIndexURL = encodedDirectory.appendingPathComponent("sessions-index.json")
+        if let projectPath = projectPathFromSessionsIndex(url: sessionsIndexURL) {
+            return projectPath
+        }
+
+        return projectPathFromSessionJSONL(directory: encodedDirectory)
+    }
+
+    private static func projectPathFromSessionsIndex(url: URL) -> String? {
+        guard
+            let data = try? Data(contentsOf: url),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let entries = json["entries"] as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        for entry in entries {
+            if let projectPath = (entry["projectPath"] as? String)?.nonEmpty {
+                return projectPath
+            }
+        }
+
+        return nil
+    }
+
+    private static func projectPathFromSessionJSONL(directory: URL) -> String? {
+        let fileManager = FileManager.default
+        guard let fileURLs = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return nil
+        }
+
+        let sortedJSONLFiles = fileURLs
+            .filter { $0.pathExtension == "jsonl" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        for fileURL in sortedJSONLFiles {
+            guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+                continue
+            }
+
+            for line in text.split(whereSeparator: \.isNewline) {
+                guard
+                    let record = jsonObject(from: String(line)),
+                    let cwd = (record["cwd"] as? String)?.nonEmpty
+                else {
+                    continue
+                }
+
+                return cwd
+            }
+        }
+
+        return nil
+    }
+
+    private static func fallbackDecodeProjectPath(_ encoded: String) -> String {
         guard !encoded.isEmpty else {
             return "/"
         }

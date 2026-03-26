@@ -16,6 +16,7 @@ func testParseSessionJSONL() throws {
     #expect(messages.count == 5)
     #expect(messages[0].role == "user")
     #expect(messages[0].content.contains("auth token expiration"))
+    #expect(messages.first(where: { $0.content.contains("boilerplate instructions that should be ignored") }) == nil)
     #expect(toolMessage.toolCalls == ["Read: /Users/me/project/auth/token.go"])
     #expect(toolResultMessage.content.contains("RefreshToken"))
     #expect(finalAssistantMessage.content.contains("refreshToken was never persisted"))
@@ -73,4 +74,34 @@ func testDecodeProjectPath() {
     let decoded = ClaudeParser.decodeProjectPath("-Users-fuyuming-Desktop-project-terminalrail")
 
     #expect(decoded == "/Users/fuyuming/Desktop/project/terminalrail")
+}
+
+@Test
+func testDecodeProjectPathPrefersFilesystemProbeForHyphenatedPaths() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ClaudeParserTests-\(UUID().uuidString)", isDirectory: true)
+    let projectsRoot = tempRoot.appendingPathComponent("projects", isDirectory: true)
+    let encoded = "-Users-me-work-my-project-with-hyphen"
+    let encodedDir = projectsRoot.appendingPathComponent(encoded, isDirectory: true)
+    let expectedPath = "/Users/me/work/my-project-with-hyphen"
+
+    try FileManager.default.createDirectory(at: encodedDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let sessionsIndexURL = encodedDir.appendingPathComponent("sessions-index.json")
+    let sessionsIndexJSON = """
+    {
+      "entries": [
+        {
+          "sessionId": "session-001",
+          "projectPath": "\(expectedPath)"
+        }
+      ]
+    }
+    """
+    try sessionsIndexJSON.write(to: sessionsIndexURL, atomically: true, encoding: .utf8)
+
+    let decoded = ClaudeParser.decodeProjectPath(encoded, projectsRoot: projectsRoot)
+
+    #expect(decoded == expectedPath)
 }
