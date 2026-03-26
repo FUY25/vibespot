@@ -23,7 +23,10 @@ final class Database: @unchecked Sendable {
     }
 
     deinit {
-        sqlite3_close(db)
+        let rc = sqlite3_close(db)
+        if rc != SQLITE_OK {
+            assertionFailure(DatabaseError.closeFailed(String(cString: sqlite3_errmsg(db))).localizedDescription)
+        }
     }
 
     func execute(_ sql: String) throws {
@@ -50,11 +53,18 @@ final class Database: @unchecked Sendable {
         }
 
         var results: [T] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            results.append(map(statement))
-        }
+        while true {
+            let stepResult = sqlite3_step(statement)
 
-        return results
+            switch stepResult {
+            case SQLITE_ROW:
+                results.append(map(statement))
+            case SQLITE_DONE:
+                return results
+            default:
+                throw DatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+            }
+        }
     }
 
     func prepare(_ sql: String) throws -> Statement {
@@ -65,13 +75,15 @@ final class Database: @unchecked Sendable {
             throw DatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
         }
 
-        return Statement(stmt: statement)
+        return Statement(owner: self, stmt: statement)
     }
 
     final class Statement {
+        private let owner: Database
         let stmt: OpaquePointer
 
-        init(stmt: OpaquePointer) {
+        init(owner: Database, stmt: OpaquePointer) {
+            self.owner = owner
             self.stmt = stmt
         }
 
@@ -108,6 +120,8 @@ enum DatabaseError: Error, LocalizedError {
     case openFailed(String)
     case execFailed(String)
     case prepareFailed(String)
+    case stepFailed(String)
+    case closeFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -117,6 +131,10 @@ enum DatabaseError: Error, LocalizedError {
             "SQL execution failed: \(message)"
         case .prepareFailed(let message):
             "Failed to prepare statement: \(message)"
+        case .stepFailed(let message):
+            "Failed to step statement: \(message)"
+        case .closeFailed(let message):
+            "Failed to close database: \(message)"
         }
     }
 }

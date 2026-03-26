@@ -3,13 +3,25 @@ import SQLite3
 import Testing
 @testable import VibeLight
 
-@Test
-func testDatabaseOpenClose() throws {
+private func makeTemporaryDatabase() throws -> (Database, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    return (try Database(path: dbPath), dbPath)
+}
+
+private final class WeakDatabaseRef {
+    weak var value: Database?
+
+    init(_ value: Database?) {
+        self.value = value
+    }
+}
+
+@Test
+func testDatabaseOpenClose() throws {
+    let (db, dbPath) = try makeTemporaryDatabase()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-    let db = try Database(path: dbPath)
     try db.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
     try db.execute("INSERT INTO test (name) VALUES ('hello')")
 
@@ -22,11 +34,9 @@ func testDatabaseOpenClose() throws {
 
 @Test
 func testDatabaseFTS5() throws {
-    let tmpDir = FileManager.default.temporaryDirectory
-    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    let (db, dbPath) = try makeTemporaryDatabase()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-    let db = try Database(path: dbPath)
     try db.execute("CREATE VIRTUAL TABLE docs USING fts5(title, body)")
     try db.execute("INSERT INTO docs (title, body) VALUES ('Auth Bug', 'JWT token expires because refreshToken was never persisted')")
     try db.execute("INSERT INTO docs (title, body) VALUES ('API Tests', 'wrote unit tests for payment endpoint')")
@@ -41,4 +51,45 @@ func testDatabaseFTS5() throws {
     #expect(results.count == 1)
     #expect(results[0].0 == "Auth Bug")
     #expect(results[0].1.contains("token"))
+}
+
+@Test
+func testPreparedStatementRetainsDatabaseDuringBindResetAndReuse() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    var db: Database? = try Database(path: dbPath)
+    let weakDatabase = WeakDatabaseRef(db)
+    try db?.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT NOT NULL, count INTEGER NOT NULL)")
+
+    let insert = try db!.prepare("INSERT INTO test (name, count) VALUES (?, ?)")
+    db = nil
+
+    guard let retainedDatabase = weakDatabase.value else {
+        Issue.record("Prepared statements should retain their owning database while still in use.")
+        return
+    }
+
+    insert.bind(index: 1, text: "alpha")
+    insert.bind(index: 2, int: 1)
+    #expect(insert.step() == SQLITE_DONE)
+
+    insert.reset()
+    insert.bind(index: 1, text: "beta")
+    insert.bind(index: 2, int: 2)
+    #expect(insert.step() == SQLITE_DONE)
+
+    let rows = try retainedDatabase.query("SELECT name, count FROM test ORDER BY id") { stmt in
+        (
+            String(cString: sqlite3_column_text(stmt, 0)),
+            sqlite3_column_int64(stmt, 1)
+        )
+    }
+
+    #expect(rows.count == 2)
+    #expect(rows[0].0 == "alpha")
+    #expect(rows[0].1 == 1)
+    #expect(rows[1].0 == "beta")
+    #expect(rows[1].1 == 2)
 }
