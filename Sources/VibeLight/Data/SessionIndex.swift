@@ -16,7 +16,6 @@ struct SearchResult: Sendable {
 
 final class SessionIndex: @unchecked Sendable {
     private let db: Database
-    private let iso8601Formatter = ISO8601DateFormatter()
 
     init(dbPath: String) throws {
         db = try Database(path: dbPath)
@@ -105,7 +104,7 @@ final class SessionIndex: @unchecked Sendable {
             try statement.bind(index: 1, text: sessionId)
             try statement.bind(index: 2, text: role)
             try statement.bind(index: 3, text: content)
-            try statement.bind(index: 4, text: iso8601Formatter.string(from: timestamp))
+            try statement.bind(index: 4, text: makeTimestampString(from: timestamp))
         }
     }
 
@@ -131,15 +130,6 @@ final class SessionIndex: @unchecked Sendable {
             LIMIT 50
         """
 
-        var results = try db.query(
-            metadataSQL,
-            bind: { statement in
-                try statement.bind(index: 1, text: makeMetadataPattern(from: trimmed))
-            },
-            map: mapRow
-        )
-
-        let existingIDs = Set(results.map(\.sessionId))
         let transcriptSQL = """
             WITH ranked_matches AS (
                 SELECT
@@ -203,17 +193,26 @@ final class SessionIndex: @unchecked Sendable {
             transcriptMatches = []
         }
 
-        var seenIDs = existingIDs
-        for result in transcriptMatches where !seenIDs.contains(result.sessionId) {
+        var results = transcriptMatches
+        var seenIDs = Set(transcriptMatches.map(\.sessionId))
+        let metadataMatches = try db.query(
+            metadataSQL,
+            bind: { statement in
+                try statement.bind(index: 1, text: makeMetadataPattern(from: trimmed))
+            },
+            map: mapRow
+        )
+
+        for result in metadataMatches where !seenIDs.contains(result.sessionId) {
             results.append(result)
             seenIDs.insert(result.sessionId)
+
+            if results.count == 50 {
+                break
+            }
         }
 
-        if results.count > 50 {
-            results.removeSubrange(50...)
-        }
-
-        return results
+        return Array(results.prefix(50))
     }
 
     func liveSessionCount() throws -> Int {
@@ -285,11 +284,18 @@ final class SessionIndex: @unchecked Sendable {
             return nil
         }
 
-        return safeTerms
+        let contentTerms = safeTerms
             .map { token in
                 "\"\(token.replacing("\"", with: "\"\""))\""
             }
             .joined(separator: " ")
+
+        return "content : (\(contentTerms))"
+    }
+
+    private func makeTimestampString(from timestamp: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        return formatter.string(from: timestamp)
     }
 
     private func mapRow(_ statement: OpaquePointer) -> SearchResult {

@@ -128,6 +128,81 @@ func testTranscriptSearchDeduplicatesSessionsBeforeLimit() throws {
 }
 
 @Test
+func testTranscriptSearchIgnoresRoleAndSessionIDMatchesWithoutContentMatch() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "session-needle-123",
+        tool: "claude",
+        title: "transcript decoy",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 11
+    )
+
+    try index.insertTranscript(
+        sessionId: "session-needle-123",
+        role: "assistant",
+        content: "completely unrelated transcript content",
+        timestamp: now
+    )
+
+    #expect(try index.search(query: "assistant", includeHistory: true).isEmpty)
+    #expect(try index.search(query: "needle", includeHistory: true).isEmpty)
+}
+
+@Test
+func testTranscriptMatchesStillSurfaceWhenMetadataAlreadyHasFiftyHits() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    for offset in 0..<50 {
+        try index.upsertSession(
+            id: "metadata-\(offset)",
+            tool: "claude",
+            title: "needle metadata \(offset)",
+            project: "/p",
+            projectName: "proj",
+            gitBranch: "main",
+            status: "live",
+            startedAt: now.addingTimeInterval(TimeInterval(-offset)),
+            pid: nil
+        )
+    }
+
+    try index.upsertSession(
+        id: "transcript-only",
+        tool: "codex",
+        title: "content match only",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(60),
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "transcript-only",
+        role: "user",
+        content: "needle appears only inside transcript content",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "needle", includeHistory: true)
+    let sessionIDs = results.map(\.sessionId)
+
+    #expect(results.count == 50)
+    #expect(sessionIDs.contains("transcript-only"))
+    #expect(sessionIDs.filter { $0.hasPrefix("metadata-") }.count == 49)
+}
+
+@Test
 func testLiveSessionCount() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
