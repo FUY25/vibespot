@@ -315,12 +315,19 @@ final class SessionIndex: @unchecked Sendable {
     }
 
     func updateStatus(sessionId: String, status: String) throws {
+        try updateRuntimeState(sessionId: sessionId, status: status, pid: nil)
+    }
+
+    func updateRuntimeState(sessionId: String, status: String, pid: Int?) throws {
         try runStatement(
-            "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3"
+            "UPDATE sessions SET status = ?1, pid = ?2, updated_at = ?3 WHERE id = ?4"
         ) { statement in
             try statement.bind(index: 1, text: status)
-            try statement.bind(index: 2, int: Int64(Date().timeIntervalSince1970))
-            try statement.bind(index: 3, text: sessionId)
+            if let pid {
+                try statement.bind(index: 2, int: Int64(pid))
+            }
+            try statement.bind(index: 3, int: Int64(Date().timeIntervalSince1970))
+            try statement.bind(index: 4, text: sessionId)
         }
     }
 

@@ -280,6 +280,11 @@ final class Indexer {
 
     private func refreshLiveSessions() {
         let liveSessions = LiveSessionRegistry.scan()
+        let aliveSessionsByID = Dictionary(
+            uniqueKeysWithValues: liveSessions
+                .filter(\.isAlive)
+                .map { ($0.sessionId, $0) }
+        )
         let aliveSessionIDs = Set(
             liveSessions
                 .filter(\.isAlive)
@@ -287,12 +292,16 @@ final class Indexer {
         )
 
         for sessionId in aliveSessionIDs {
-            try? sessionIndex.updateStatus(sessionId: sessionId, status: "live")
+            try? sessionIndex.updateRuntimeState(
+                sessionId: sessionId,
+                status: "live",
+                pid: aliveSessionsByID[sessionId]?.pid
+            )
         }
 
         let indexedLiveSessionIDs = (try? sessionIndex.liveSessionIDs()) ?? []
         for sessionId in indexedLiveSessionIDs.subtracting(aliveSessionIDs) {
-            try? sessionIndex.updateStatus(sessionId: sessionId, status: "closed")
+            try? sessionIndex.updateRuntimeState(sessionId: sessionId, status: "closed", pid: nil)
         }
     }
 

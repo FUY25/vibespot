@@ -394,6 +394,42 @@ func testUpdateStatusChangesLiveQueriesAndCounts() throws {
 }
 
 @Test
+func testUpdateRuntimeStatePersistsPIDForLiveResults() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let startedAt = Date(timeIntervalSince1970: 1_774_505_680)
+
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "jump target",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: startedAt,
+        pid: nil
+    )
+
+    try index.updateRuntimeState(sessionId: "s1", status: "live", pid: 72611)
+
+    let liveResults = try index.search(query: "", includeHistory: false)
+    #expect(liveResults.map(\.sessionId) == ["s1"])
+    #expect(liveResults.first?.status == "live")
+    #expect(liveResults.first?.pid == 72611)
+
+    try index.updateRuntimeState(sessionId: "s1", status: "closed", pid: nil)
+
+    let allResults = try index.search(query: "", includeHistory: true)
+    #expect(allResults.map(\.sessionId) == ["s1"])
+    #expect(allResults.first?.status == "closed")
+    #expect(allResults.first?.pid == nil)
+}
+
+@Test
 func testTranscriptMatchesFromClosedSessionsAreExcludedWhenHistoryDisabled() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

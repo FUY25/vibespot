@@ -5,6 +5,7 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     var onSelect: ((SearchResult) -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
+    var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
 
     private let panel: SearchPanel
     private let visualEffectView = NSVisualEffectView(frame: .zero)
@@ -136,7 +137,7 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.hidesOnDeactivate = false
+        panel.hidesOnDeactivate = true
         panel.isMovableByWindowBackground = true
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true

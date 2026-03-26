@@ -31,7 +31,7 @@ final class ResultRowView: NSTableCellView {
         toolBadge.text = result.tool.uppercased()
         titleLabel.stringValue = result.title
         metadataLabel.stringValue = makeMetadataText(for: result)
-        statusLabel.stringValue = result.status == "live" ? "Live" : "Closed"
+        statusLabel.stringValue = Self.makeStatusText(status: result.status, startedAt: result.startedAt)
         statusDot.layer?.backgroundColor = statusColor(for: result.status).cgColor
 
         if let snippet = normalizedSnippet(from: result.snippet) {
@@ -47,6 +47,16 @@ final class ResultRowView: NSTableCellView {
 
     static func height(for result: SearchResult) -> CGFloat {
         normalizedSnippet(from: result.snippet) == nil ? rowHeightWithoutSnippet : rowHeightWithSnippet
+    }
+
+    static func makeStatusText(
+        status: String,
+        startedAt: Date,
+        formatter: DateFormatter? = nil
+    ) -> String {
+        let statusText = status == "live" ? "Live" : "Closed"
+        let timestamp = (formatter ?? makeDefaultTimeFormatter()).string(from: startedAt)
+        return "\(statusText) \(timestamp)"
     }
 
     private func configure() {
@@ -123,6 +133,15 @@ final class ResultRowView: NSTableCellView {
 
     private func statusColor(for status: String) -> NSColor {
         status == "live" ? NSColor.systemGreen : NSColor.systemGray
+    }
+
+    private static func makeDefaultTimeFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
     }
 
     private func updateTextColors() {
