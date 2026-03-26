@@ -233,6 +233,56 @@ func testReplacingTranscriptContentTwiceDoesNotDuplicateTranscriptRows() throws 
 }
 
 @Test
+func testReplaceTranscriptsRollsBackWhenReplacementFails() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "transactional transcript replacement",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 202
+    )
+
+    let originalEntries: [(role: String, content: String, timestamp: Date)] = [
+        ("user", "keep this original transcript entry", now),
+        ("assistant", "keep this reply too", now.addingTimeInterval(1)),
+    ]
+    try index.replaceTranscripts(sessionId: "s1", entries: originalEntries)
+
+    let handle = try databaseHandle(for: index)
+    let previousLengthLimit = sqlite3_limit(handle, SQLITE_LIMIT_LENGTH, 64)
+    defer { sqlite3_limit(handle, SQLITE_LIMIT_LENGTH, previousLengthLimit) }
+
+    let failingEntries: [(role: String, content: String, timestamp: Date)] = [
+        (
+            "user",
+            String(repeating: "replacement that should fail ", count: 8),
+            now.addingTimeInterval(2)
+        ),
+    ]
+
+    do {
+        try index.replaceTranscripts(sessionId: "s1", entries: failingEntries)
+        Issue.record("Expected transcript replacement to fail when SQLite rejects oversized content.")
+    } catch {
+    }
+
+    #expect(
+        try transcriptContents(dbPath: dbPath, sessionId: "s1") == originalEntries.map(\.content)
+    )
+    #expect(
+        try index.search(query: "original transcript entry", includeHistory: true).map(\.sessionId) == ["s1"]
+    )
+}
+
+@Test
 func testLiveSessionCount() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
@@ -341,6 +391,57 @@ func testUpdateStatusChangesLiveQueriesAndCounts() throws {
     #expect(try index.liveSessionCount() == 0)
     #expect(try index.search(query: "", includeHistory: false).isEmpty)
     #expect(try index.search(query: "", includeHistory: true).map(\.status) == ["closed"])
+}
+
+@Test
+func testTranscriptMatchesFromClosedSessionsAreExcludedWhenHistoryDisabled() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "closed-hit",
+        tool: "claude",
+        title: "archived work",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "closed-hit",
+        role: "user",
+        content: "history only transcript needle",
+        timestamp: now
+    )
+
+    try index.upsertSession(
+        id: "live-decoy",
+        tool: "codex",
+        title: "active work",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(1),
+        pid: 7
+    )
+    try index.insertTranscript(
+        sessionId: "live-decoy",
+        role: "assistant",
+        content: "completely unrelated active transcript",
+        timestamp: now.addingTimeInterval(1)
+    )
+
+    #expect(
+        try index.search(query: "history only transcript needle", includeHistory: true).map(\.sessionId)
+            == ["closed-hit"]
+    )
+    #expect(
+        try index.search(query: "history only transcript needle", includeHistory: false).isEmpty
+    )
 }
 
 @Test
@@ -559,11 +660,72 @@ private func transcriptRowCount(dbPath: String, sessionId: String) throws -> Int
     return Int(sqlite3_column_int64(statement, 0))
 }
 
+private func transcriptContents(dbPath: String, sessionId: String) throws -> [String] {
+    var connection: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        defer { sqlite3_close(connection) }
+        throw TestDatabaseError.openFailed
+    }
+    defer { sqlite3_close(connection) }
+
+    let sql = "SELECT content FROM transcripts WHERE session_id = ?1 ORDER BY rowid"
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK else {
+        defer { sqlite3_finalize(statement) }
+        throw TestDatabaseError.prepareFailed
+    }
+    defer { sqlite3_finalize(statement) }
+
+    guard sqlite3_bind_text(statement, 1, sessionId, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+
+    var results: [String] = []
+    while true {
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            guard let value = sqlite3_column_text(statement, 0) else {
+                throw TestDatabaseError.stepFailed
+            }
+            results.append(String(cString: value))
+        case SQLITE_DONE:
+            return results
+        default:
+            throw TestDatabaseError.stepFailed
+        }
+    }
+}
+
+private func databaseHandle(for index: SessionIndex) throws -> OpaquePointer {
+    let indexMirror = Mirror(reflecting: index)
+    guard
+        let database = indexMirror.children.first(where: { $0.label == "db" })?.value as? Database
+    else {
+        throw TestDatabaseError.handleLookupFailed
+    }
+
+    let databaseMirror = Mirror(reflecting: database)
+    guard let handleValue = databaseMirror.children.first(where: { $0.label == "db" })?.value else {
+        throw TestDatabaseError.handleLookupFailed
+    }
+
+    let handleMirror = Mirror(reflecting: handleValue)
+    guard
+        handleMirror.displayStyle == .optional,
+        let handle = handleMirror.children.first?.value as? OpaquePointer
+    else {
+        throw TestDatabaseError.handleLookupFailed
+    }
+
+    return handle
+}
+
 private enum TestDatabaseError: Error {
     case openFailed
     case prepareFailed
     case bindFailed
     case stepFailed
+    case handleLookupFailed
 }
 
 private let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
