@@ -39,13 +39,22 @@ final class Database: @unchecked Sendable {
     func execute(_ sql: String) throws {
         try withLock {
             let db = try requireOpenDatabase()
-            var errorMessage: UnsafeMutablePointer<CChar>?
-            let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+            try executeLocked(sql, on: db)
+        }
+    }
 
-            if rc != SQLITE_OK {
-                let message = errorMessage.map { String(cString: $0) } ?? "unknown"
-                sqlite3_free(errorMessage)
-                throw DatabaseError.execFailed(message)
+    func transaction<T>(_ operation: () throws -> T) throws -> T {
+        try withLock {
+            let db = try requireOpenDatabase()
+            try executeLocked("BEGIN IMMEDIATE TRANSACTION", on: db)
+
+            do {
+                let result = try operation()
+                try executeLocked("COMMIT TRANSACTION", on: db)
+                return result
+            } catch {
+                try? executeLocked("ROLLBACK TRANSACTION", on: db)
+                throw error
             }
         }
     }
@@ -108,6 +117,17 @@ final class Database: @unchecked Sendable {
             }
 
             return statement
+        }
+    }
+
+    private func executeLocked(_ sql: String, on db: OpaquePointer) throws {
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let rc = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+
+        if rc != SQLITE_OK {
+            let message = errorMessage.map { String(cString: $0) } ?? "unknown"
+            sqlite3_free(errorMessage)
+            throw DatabaseError.execFailed(message)
         }
     }
 

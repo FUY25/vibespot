@@ -390,6 +390,51 @@ func testSearchMetadataQueriesWithFTSUnsafeShapes() throws {
 }
 
 @Test
+func testPunctuationHeavyMetadataQuerySkipsTranscriptFTSFalsePositives() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "path-hit",
+        tool: "claude",
+        title: "path lookup",
+        project: "/repo/src/App.swift",
+        projectName: "terminalrail",
+        gitBranch: "feature/src/App.swift",
+        status: "live",
+        startedAt: now.addingTimeInterval(120),
+        pid: nil
+    )
+
+    for offset in 0..<60 {
+        let sessionID = "transcript-decoy-\(offset)"
+        try index.upsertSession(
+            id: sessionID,
+            tool: "codex",
+            title: "decoy \(offset)",
+            project: "/repo/other",
+            projectName: "terminalrail",
+            gitBranch: "main",
+            status: "live",
+            startedAt: now.addingTimeInterval(TimeInterval(-offset)),
+            pid: nil
+        )
+        try index.insertTranscript(
+            sessionId: sessionID,
+            role: "assistant",
+            content: "Discussed src App swift refactor number \(offset)",
+            timestamp: now.addingTimeInterval(TimeInterval(offset))
+        )
+    }
+
+    let results = try index.search(query: "src/App.swift", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["path-hit"])
+    #expect(results[0].snippet == nil)
+}
+
+@Test
 func testSearchMetadataTreatsLikeWildcardsLiterally() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

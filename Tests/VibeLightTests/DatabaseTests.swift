@@ -3,6 +3,10 @@ import SQLite3
 import Testing
 @testable import VibeLight
 
+private enum TransactionTestError: Error {
+    case rollbackSentinel
+}
+
 private func makeTemporaryDatabase() throws -> (Database, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
@@ -162,4 +166,29 @@ func testCloseThrowsWhenStatementIsStillOpen() throws {
 
     statement = nil
     try db.close()
+}
+
+@Test
+func testTransactionRollsBackWhenOperationThrows() throws {
+    let (db, dbPath) = try makeTemporaryDatabase()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try db.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+    try db.execute("INSERT INTO test (name) VALUES ('before')")
+
+    do {
+        try db.transaction {
+            try db.execute("DELETE FROM test")
+            try db.execute("INSERT INTO test (name) VALUES ('during')")
+            throw TransactionTestError.rollbackSentinel
+        }
+        Issue.record("Expected the transaction body to throw.")
+    } catch TransactionTestError.rollbackSentinel {
+    }
+
+    let rows = try db.query("SELECT name FROM test ORDER BY id") { stmt in
+        String(cString: sqlite3_column_text(stmt, 0))
+    }
+
+    #expect(rows == ["before"])
 }

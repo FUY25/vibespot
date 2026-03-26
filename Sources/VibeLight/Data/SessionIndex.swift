@@ -112,17 +112,19 @@ final class SessionIndex: @unchecked Sendable {
         sessionId: String,
         entries: [(role: String, content: String, timestamp: Date)]
     ) throws {
-        try runStatement("DELETE FROM transcripts WHERE session_id = ?1") { statement in
-            try statement.bind(index: 1, text: sessionId)
-        }
+        try db.transaction {
+            try runStatement("DELETE FROM transcripts WHERE session_id = ?1") { statement in
+                try statement.bind(index: 1, text: sessionId)
+            }
 
-        for entry in entries {
-            try insertTranscript(
-                sessionId: sessionId,
-                role: entry.role,
-                content: entry.content,
-                timestamp: entry.timestamp
-            )
+            for entry in entries {
+                try insertTranscript(
+                    sessionId: sessionId,
+                    role: entry.role,
+                    content: entry.content,
+                    timestamp: entry.timestamp
+                )
+            }
         }
     }
 
@@ -302,6 +304,10 @@ final class SessionIndex: @unchecked Sendable {
             return nil
         }
 
+        guard normalizeForFTSComparison(query) == safeTerms.joined(separator: " ") else {
+            return nil
+        }
+
         let contentTerms = safeTerms
             .map { token in
                 "\"\(token.replacing("\"", with: "\"\""))\""
@@ -309,6 +315,13 @@ final class SessionIndex: @unchecked Sendable {
             .joined(separator: " ")
 
         return "content : (\(contentTerms))"
+    }
+
+    private func normalizeForFTSComparison(_ query: String) -> String {
+        query
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private func makeTimestampString(from timestamp: Date) -> String {
