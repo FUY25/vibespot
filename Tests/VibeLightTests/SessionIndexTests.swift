@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import VibeLight
 
@@ -203,6 +204,35 @@ func testTranscriptMatchesStillSurfaceWhenMetadataAlreadyHasFiftyHits() throws {
 }
 
 @Test
+func testReplacingTranscriptContentTwiceDoesNotDuplicateTranscriptRows() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "idempotent transcript indexing",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 101
+    )
+
+    let entries: [(role: String, content: String, timestamp: Date)] = [
+        ("user", "first transcript line", now),
+        ("assistant", "second transcript line", now.addingTimeInterval(1)),
+    ]
+
+    try index.replaceTranscripts(sessionId: "s1", entries: entries)
+    try index.replaceTranscripts(sessionId: "s1", entries: entries)
+
+    #expect(try transcriptRowCount(dbPath: dbPath, sessionId: "s1") == 2)
+}
+
+@Test
 func testLiveSessionCount() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
@@ -398,3 +428,39 @@ private func makeTestIndex() throws -> (SessionIndex, String) {
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
     return (try SessionIndex(dbPath: dbPath), dbPath)
 }
+
+private func transcriptRowCount(dbPath: String, sessionId: String) throws -> Int {
+    var connection: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        defer { sqlite3_close(connection) }
+        throw TestDatabaseError.openFailed
+    }
+    defer { sqlite3_close(connection) }
+
+    let sql = "SELECT COUNT(*) FROM transcripts WHERE session_id = ?1"
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK else {
+        defer { sqlite3_finalize(statement) }
+        throw TestDatabaseError.prepareFailed
+    }
+    defer { sqlite3_finalize(statement) }
+
+    guard sqlite3_bind_text(statement, 1, sessionId, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+        throw TestDatabaseError.stepFailed
+    }
+
+    return Int(sqlite3_column_int64(statement, 0))
+}
+
+private enum TestDatabaseError: Error {
+    case openFailed
+    case prepareFailed
+    case bindFailed
+    case stepFailed
+}
+
+private let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

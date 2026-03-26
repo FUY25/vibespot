@@ -108,6 +108,24 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func replaceTranscripts(
+        sessionId: String,
+        entries: [(role: String, content: String, timestamp: Date)]
+    ) throws {
+        try runStatement("DELETE FROM transcripts WHERE session_id = ?1") { statement in
+            try statement.bind(index: 1, text: sessionId)
+        }
+
+        for entry in entries {
+            try insertTranscript(
+                sessionId: sessionId,
+                role: entry.role,
+                content: entry.content,
+                timestamp: entry.timestamp
+            )
+        }
+    }
+
     func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
