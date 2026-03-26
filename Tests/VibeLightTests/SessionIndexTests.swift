@@ -613,6 +613,35 @@ func testPunctuationHeavyTranscriptQueryFallsBackToLiteralContentSearch() throws
 }
 
 @Test
+func testPunctuationOnlyTranscriptQueryFallsBackToLiteralContentSearch() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "transcript-punctuation-hit",
+        tool: "claude",
+        title: "content only punctuation hit",
+        project: "/repo/other",
+        projectName: "terminalrail",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "transcript-punctuation-hit",
+        role: "assistant",
+        content: "The parser maps tokens -> AST nodes before rendering.",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "->", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["transcript-punctuation-hit"])
+}
+
+@Test
 func testPunctuationHeavyTranscriptFallbackIgnoresRoleAndSessionIDMatchesWithoutContentMatch() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

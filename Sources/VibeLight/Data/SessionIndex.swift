@@ -374,23 +374,19 @@ final class SessionIndex: @unchecked Sendable {
     }
 
     private func shouldUseLiteralTranscriptFallback(for query: String) -> Bool {
-        var containsAlphanumeric = false
         var containsPunctuation = false
 
         for scalar in query.unicodeScalars {
-            if CharacterSet.alphanumerics.contains(scalar) {
-                containsAlphanumeric = true
-                continue
-            }
-
             if CharacterSet.whitespacesAndNewlines.contains(scalar) {
                 continue
             }
 
-            containsPunctuation = true
+            if !CharacterSet.alphanumerics.contains(scalar) {
+                containsPunctuation = true
+            }
         }
 
-        return containsAlphanumeric && containsPunctuation
+        return containsPunctuation
     }
 
     private func makeTimestampString(from timestamp: Date) -> String {
