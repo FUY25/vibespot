@@ -119,11 +119,12 @@ final class Indexer {
     ) {
         let projectPath = meta.projectPath.isEmpty ? fallbackProjectPath : meta.projectPath
         let projectName = projectPath.isEmpty ? fallbackProjectName : (projectPath as NSString).lastPathComponent
+        let title = normalizedDisplayTitle(from: meta.title) ?? "Untitled"
 
         try? sessionIndex.upsertSession(
             id: meta.sessionId,
             tool: "claude",
-            title: meta.title,
+            title: title,
             project: projectPath,
             projectName: projectName,
             gitBranch: meta.gitBranch,
@@ -153,10 +154,9 @@ final class Indexer {
         let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
         let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
-        let cleanedPreferredTitle = preferredTitle.flatMap(SessionTitleNormalizer.titleCandidate(from:))
-            ?? preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedPreferredTitle = preferredTitle.flatMap(normalizedDisplayTitle(from:))
         let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
-            ?? SessionTitleNormalizer.firstMeaningfulUserTitle(in: messages)
+            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let startedAt = messages.first?.timestamp ?? .distantPast
 
@@ -215,11 +215,12 @@ final class Indexer {
 
         var titleMap: [String: String] = [:]
         for meta in metas {
-            titleMap[meta.sessionId] = meta.title
+            let title = normalizedDisplayTitle(from: meta.title) ?? "Untitled"
+            titleMap[meta.sessionId] = title
             try? sessionIndex.upsertSession(
                 id: meta.sessionId,
                 tool: "codex",
-                title: meta.title,
+                title: title,
                 project: "",
                 projectName: "",
                 gitBranch: "",
@@ -249,7 +250,7 @@ final class Indexer {
         }
 
         let title = titleMap[sessionId]
-            ?? SessionTitleNormalizer.firstMeaningfulUserTitle(in: messages)
+            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -430,6 +431,19 @@ final class Indexer {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+
+    private func normalizedDisplayTitle(from rawTitle: String) -> String? {
+        if let displayTitle = SessionTitleNormalizer.displayTitleCandidate(from: rawTitle) {
+            return displayTitle
+        }
+
+        if let parserTitle = SessionTitleNormalizer.titleCandidate(from: rawTitle) {
+            return parserTitle
+        }
+
+        let trimmedTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedTitle.isEmpty ? nil : trimmedTitle
     }
 
     private static let uuidRegex = try? NSRegularExpression(
