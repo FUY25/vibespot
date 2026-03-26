@@ -307,6 +307,13 @@ final class SessionIndex: @unchecked Sendable {
         return counts.first ?? 0
     }
 
+    func liveSessionIDs() throws -> Set<String> {
+        let ids = try db.query("SELECT id FROM sessions WHERE status = 'live'") { statement in
+            textColumn(statement, index: 0)
+        }
+        return Set(ids)
+    }
+
     func updateStatus(sessionId: String, status: String) throws {
         try runStatement(
             "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3"

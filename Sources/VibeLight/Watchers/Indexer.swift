@@ -1,0 +1,443 @@
+import Foundation
+
+@MainActor
+final class Indexer {
+    let sessionIndex: SessionIndex
+
+    private var fileWatcher: FileWatcher?
+    private var refreshTimer: Timer?
+    private var processedFiles: Set<String> = []
+    private var codexTitleMap: [String: String] = [:]
+
+    init(sessionIndex: SessionIndex) {
+        self.sessionIndex = sessionIndex
+    }
+
+    func start() {
+        stop()
+
+        Task { @MainActor [weak self] in
+            self?.performFullScan()
+        }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let watchPaths = [
+            home + "/.claude",
+            home + "/.codex",
+        ].filter { FileManager.default.fileExists(atPath: $0) }
+
+        if !watchPaths.isEmpty {
+            fileWatcher = FileWatcher(paths: watchPaths) { [weak self] changedPaths in
+                Task { @MainActor [weak self] in
+                    self?.handleChanges(changedPaths)
+                }
+            }
+            fileWatcher?.start()
+        }
+
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshLiveSessions()
+            }
+        }
+    }
+
+    func stop() {
+        fileWatcher?.stop()
+        fileWatcher = nil
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    // MARK: - Full scan
+
+    private func performFullScan() {
+        scanClaudeSessions()
+        scanCodexSessions()
+        refreshLiveSessions()
+    }
+
+    private func scanClaudeSessions() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let projectsPath = home + "/.claude/projects"
+        let fileManager = FileManager.default
+
+        guard let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) else {
+            return
+        }
+
+        for encodedProjectPath in projectDirectories {
+            let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: directoryPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+
+            let decodedProjectPath = ClaudeParser.decodeProjectPath(encodedProjectPath)
+            let projectName = (decodedProjectPath as NSString).lastPathComponent
+            let projectDirectoryURL = URL(fileURLWithPath: directoryPath, isDirectory: true)
+            let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
+
+            for meta in metadataBySessionId.values {
+                guard claudeRawSessionFileExists(sessionId: meta.sessionId, in: projectDirectoryURL) else {
+                    continue
+                }
+
+                indexClaudeSession(
+                    meta: meta,
+                    fallbackProjectPath: decodedProjectPath,
+                    fallbackProjectName: projectName
+                )
+            }
+
+            guard let files = try? fileManager.contentsOfDirectory(atPath: directoryPath) else {
+                continue
+            }
+
+            for file in files where file.hasSuffix(".jsonl") {
+                let filePath = (directoryPath as NSString).appendingPathComponent(file)
+                let sessionId = (file as NSString).deletingPathExtension
+                guard isUUID(sessionId) else {
+                    continue
+                }
+
+                indexClaudeSessionFile(
+                    path: filePath,
+                    sessionId: sessionId,
+                    projectPath: decodedProjectPath,
+                    projectName: projectName,
+                    preferredTitle: metadataBySessionId[sessionId]?.title
+                )
+            }
+        }
+    }
+
+    private func indexClaudeSession(
+        meta: ParsedSessionMeta,
+        fallbackProjectPath: String,
+        fallbackProjectName: String
+    ) {
+        let projectPath = meta.projectPath.isEmpty ? fallbackProjectPath : meta.projectPath
+        let projectName = projectPath.isEmpty ? fallbackProjectName : (projectPath as NSString).lastPathComponent
+
+        try? sessionIndex.upsertSession(
+            id: meta.sessionId,
+            tool: "claude",
+            title: meta.title,
+            project: projectPath,
+            projectName: projectName,
+            gitBranch: meta.gitBranch,
+            status: "closed",
+            startedAt: meta.startedAt,
+            pid: nil
+        )
+    }
+
+    private func indexClaudeSessionFile(
+        path: String,
+        sessionId: String,
+        projectPath: String,
+        projectName: String,
+        preferredTitle: String? = nil
+    ) {
+        guard !processedFiles.contains(path) else {
+            return
+        }
+        processedFiles.insert(path)
+
+        let url = URL(fileURLWithPath: path)
+        guard let messages = try? ClaudeParser.parseSessionFile(url: url) else {
+            return
+        }
+
+        let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
+        let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
+        let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
+        let cleanedPreferredTitle = preferredTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
+            ?? messages.first(where: { $0.role == "user" })?.content
+            ?? "Untitled"
+        let startedAt = messages.first?.timestamp ?? .distantPast
+
+        try? sessionIndex.upsertSession(
+            id: sessionId,
+            tool: "claude",
+            title: String(title.prefix(200)),
+            project: cwd,
+            projectName: resolvedProjectName,
+            gitBranch: gitBranch,
+            status: "closed",
+            startedAt: startedAt,
+            pid: nil
+        )
+
+        let transcriptEntries = messages.map { message in
+            (
+                role: message.role,
+                content: searchableContent(from: message),
+                timestamp: message.timestamp
+            )
+        }
+        try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+    }
+
+    private func scanCodexSessions() {
+        codexTitleMap = loadCodexTitleMap()
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let sessionsPath = home + "/.codex/sessions"
+        let fileManager = FileManager.default
+
+        guard
+            let enumerator = fileManager.enumerator(
+                at: URL(fileURLWithPath: sessionsPath),
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return
+        }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "jsonl" else {
+                continue
+            }
+
+            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+        }
+    }
+
+    private func loadCodexTitleMap() -> [String: String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let indexURL = URL(fileURLWithPath: home + "/.codex/session_index.jsonl")
+        let metas = (try? CodexParser.parseSessionIndex(url: indexURL)) ?? []
+
+        var titleMap: [String: String] = [:]
+        for meta in metas {
+            titleMap[meta.sessionId] = meta.title
+            try? sessionIndex.upsertSession(
+                id: meta.sessionId,
+                tool: "codex",
+                title: meta.title,
+                project: "",
+                projectName: "",
+                gitBranch: "",
+                status: "closed",
+                startedAt: meta.startedAt,
+                pid: nil
+            )
+        }
+        return titleMap
+    }
+
+    private func indexCodexSessionFile(path: String, titleMap: [String: String]) {
+        guard !processedFiles.contains(path) else {
+            return
+        }
+        processedFiles.insert(path)
+
+        let url = URL(fileURLWithPath: path)
+        guard let (meta, messages) = try? CodexParser.parseSessionFile(url: url) else {
+            return
+        }
+
+        let metaID = meta?.id.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sessionId = metaID.isEmpty ? messages.compactMap(\.sessionId).first : metaID
+        guard let sessionId, !sessionId.isEmpty else {
+            return
+        }
+
+        let title = titleMap[sessionId]
+            ?? messages.first(where: { $0.role == "user" })?.content
+            ?? "Untitled"
+        let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        try? sessionIndex.upsertSession(
+            id: sessionId,
+            tool: "codex",
+            title: String(title.prefix(200)),
+            project: cwd,
+            projectName: cwd.isEmpty ? "" : (cwd as NSString).lastPathComponent,
+            gitBranch: "",
+            status: "closed",
+            startedAt: messages.first?.timestamp ?? .distantPast,
+            pid: nil
+        )
+
+        let transcriptEntries = messages.map { message in
+            (
+                role: message.role,
+                content: searchableContent(from: message),
+                timestamp: message.timestamp
+            )
+        }
+        try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+    }
+
+    // MARK: - Live sessions
+
+    private func refreshLiveSessions() {
+        let liveSessions = LiveSessionRegistry.scan()
+        let aliveSessionIDs = Set(
+            liveSessions
+                .filter(\.isAlive)
+                .map(\.sessionId)
+        )
+
+        for sessionId in aliveSessionIDs {
+            try? sessionIndex.updateStatus(sessionId: sessionId, status: "live")
+        }
+
+        let indexedLiveSessionIDs = (try? sessionIndex.liveSessionIDs()) ?? []
+        for sessionId in indexedLiveSessionIDs.subtracting(aliveSessionIDs) {
+            try? sessionIndex.updateStatus(sessionId: sessionId, status: "closed")
+        }
+    }
+
+    // MARK: - Change handling
+
+    private func handleChanges(_ paths: [String]) {
+        for path in paths {
+            if path.contains("/.claude/sessions/"), path.hasSuffix(".json") {
+                refreshLiveSessions()
+                continue
+            }
+
+            if path.hasSuffix("/sessions-index.json"), path.contains("/.claude/projects/") {
+                reindexClaudeSessionsIndex(at: path)
+                continue
+            }
+
+            if path.hasSuffix("/session_index.jsonl"), path.contains("/.codex/") {
+                codexTitleMap = loadCodexTitleMap()
+                reindexAllCodexSessionFiles()
+                continue
+            }
+
+            if !path.hasSuffix(".jsonl") {
+                continue
+            }
+
+            if path.contains("/.claude/projects/") {
+                reindexClaudeSessionFile(at: path)
+            } else if path.contains("/.codex/sessions/") {
+                processedFiles.remove(path)
+                indexCodexSessionFile(path: path, titleMap: codexTitleMap)
+            }
+        }
+    }
+
+    private func reindexClaudeSessionsIndex(at path: String) {
+        let indexURL = URL(fileURLWithPath: path)
+        let projectDirectoryURL = indexURL.deletingLastPathComponent()
+        let encodedProjectPath = projectDirectoryURL.lastPathComponent
+        let decodedProjectPath = ClaudeParser.decodeProjectPath(encodedProjectPath)
+        let projectName = (decodedProjectPath as NSString).lastPathComponent
+        let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
+
+        for meta in metadataBySessionId.values {
+            guard claudeRawSessionFileExists(sessionId: meta.sessionId, in: projectDirectoryURL) else {
+                continue
+            }
+
+            let rawSessionPath = projectDirectoryURL
+                .appendingPathComponent(meta.sessionId)
+                .appendingPathExtension("jsonl")
+                .path
+            processedFiles.remove(rawSessionPath)
+            indexClaudeSessionFile(
+                path: rawSessionPath,
+                sessionId: meta.sessionId,
+                projectPath: decodedProjectPath,
+                projectName: projectName,
+                preferredTitle: meta.title
+            )
+        }
+    }
+
+    private func reindexAllCodexSessionFiles() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let sessionsPath = home + "/.codex/sessions"
+        let fileManager = FileManager.default
+
+        guard
+            let enumerator = fileManager.enumerator(
+                at: URL(fileURLWithPath: sessionsPath),
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return
+        }
+
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
+            processedFiles.remove(fileURL.path)
+            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+        }
+    }
+
+    private func reindexClaudeSessionFile(at path: String) {
+        let fileURL = URL(fileURLWithPath: path)
+        let sessionId = fileURL.deletingPathExtension().lastPathComponent
+        guard isUUID(sessionId) else {
+            return
+        }
+
+        processedFiles.remove(path)
+
+        let projectDirectoryURL = fileURL.deletingLastPathComponent()
+        let encodedProjectPath = projectDirectoryURL.lastPathComponent
+        let decodedProjectPath = ClaudeParser.decodeProjectPath(encodedProjectPath)
+        let projectName = (decodedProjectPath as NSString).lastPathComponent
+        let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
+        indexClaudeSessionFile(
+            path: path,
+            sessionId: sessionId,
+            projectPath: decodedProjectPath,
+            projectName: projectName,
+            preferredTitle: metadataBySessionId[sessionId]?.title
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func claudeSessionMetadataBySessionId(in projectDirectoryURL: URL) -> [String: ParsedSessionMeta] {
+        let sessionsIndexURL = projectDirectoryURL.appendingPathComponent("sessions-index.json")
+        guard let metas = try? ClaudeParser.parseSessionsIndex(url: sessionsIndexURL) else {
+            return [:]
+        }
+
+        var metadataBySessionId: [String: ParsedSessionMeta] = [:]
+        for meta in metas where !meta.isSidechain {
+            metadataBySessionId[meta.sessionId] = meta
+        }
+        return metadataBySessionId
+    }
+
+    private func claudeRawSessionFileExists(sessionId: String, in projectDirectoryURL: URL) -> Bool {
+        guard !sessionId.isEmpty else {
+            return false
+        }
+
+        let rawSessionURL = projectDirectoryURL.appendingPathComponent(sessionId).appendingPathExtension("jsonl")
+        return FileManager.default.fileExists(atPath: rawSessionURL.path)
+    }
+
+    private func searchableContent(from message: ParsedMessage) -> String {
+        let combined = [message.content] + message.toolCalls
+        return combined
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static let uuidRegex = try? NSRegularExpression(
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        options: [.caseInsensitive]
+    )
+
+    private func isUUID(_ value: String) -> Bool {
+        let range = NSRange(value.startIndex..., in: value)
+        return Self.uuidRegex?.firstMatch(in: value, range: range) != nil
+    }
+}
