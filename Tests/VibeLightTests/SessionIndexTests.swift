@@ -435,6 +435,64 @@ func testPunctuationHeavyMetadataQuerySkipsTranscriptFTSFalsePositives() throws 
 }
 
 @Test
+func testPunctuationHeavyTranscriptQueryFallsBackToLiteralContentSearch() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "transcript-path-hit",
+        tool: "claude",
+        title: "content-only hit",
+        project: "/repo/other",
+        projectName: "terminalrail",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "transcript-path-hit",
+        role: "assistant",
+        content: "Touched src/App.swift while tracing the renderer issue.",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "src/App.swift", includeHistory: true)
+
+    #expect(results.map(\.sessionId) == ["transcript-path-hit"])
+}
+
+@Test
+func testPunctuationHeavyTranscriptFallbackIgnoresRoleAndSessionIDMatchesWithoutContentMatch() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.upsertSession(
+        id: "session-feature_search-123",
+        tool: "claude",
+        title: "decoy",
+        project: "/repo/other",
+        projectName: "terminalrail",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: nil
+    )
+    try index.insertTranscript(
+        sessionId: "session-feature_search-123",
+        role: "assistant",
+        content: "completely unrelated transcript content",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "feature_search", includeHistory: true)
+
+    #expect(results.isEmpty)
+}
+
+@Test
 func testSearchMetadataTreatsLikeWildcardsLiterally() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

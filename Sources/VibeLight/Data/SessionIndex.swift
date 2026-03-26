@@ -200,12 +200,58 @@ final class SessionIndex: @unchecked Sendable {
             ORDER BY deduplicated_matches.match_rank
         """
 
+        let literalTranscriptSQL = """
+            WITH session_matches AS (
+                SELECT
+                    s.id AS session_id,
+                    s.tool,
+                    s.title,
+                    s.project,
+                    s.project_name,
+                    s.git_branch,
+                    s.status,
+                    s.started_at,
+                    s.pid,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY s.id
+                        ORDER BY transcripts.rowid DESC
+                    ) AS match_row_number
+                FROM transcripts
+                JOIN sessions s ON s.id = transcripts.session_id
+                WHERE transcripts.content LIKE ?1 ESCAPE '\\'
+                \(includeHistory ? "" : "AND s.status = 'live'")
+            )
+            SELECT
+                session_id,
+                tool,
+                title,
+                project,
+                project_name,
+                git_branch,
+                status,
+                started_at,
+                pid,
+                NULL AS snippet
+            FROM session_matches
+            WHERE match_row_number = 1
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            LIMIT 50
+        """
+
         let transcriptMatches: [SearchResult]
         if let ftsQuery = makeFTSQuery(from: trimmed) {
             transcriptMatches = try db.query(
                 transcriptSQL,
                 bind: { statement in
                     try statement.bind(index: 1, text: ftsQuery)
+                },
+                map: mapRow
+            )
+        } else if shouldUseLiteralTranscriptFallback(for: trimmed) {
+            transcriptMatches = try db.query(
+                literalTranscriptSQL,
+                bind: { statement in
+                    try statement.bind(index: 1, text: makeMetadataPattern(from: trimmed))
                 },
                 map: mapRow
             )
@@ -322,6 +368,26 @@ final class SessionIndex: @unchecked Sendable {
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    private func shouldUseLiteralTranscriptFallback(for query: String) -> Bool {
+        var containsAlphanumeric = false
+        var containsPunctuation = false
+
+        for scalar in query.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                containsAlphanumeric = true
+                continue
+            }
+
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                continue
+            }
+
+            containsPunctuation = true
+        }
+
+        return containsAlphanumeric && containsPunctuation
     }
 
     private func makeTimestampString(from timestamp: Date) -> String {
