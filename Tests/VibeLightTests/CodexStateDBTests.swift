@@ -102,6 +102,7 @@ func gitBranchMapReturnsBranchesAndFiltersEmptyBranch() throws {
         try exec("INSERT INTO threads (id, cwd, updated_at, git_branch) VALUES ('thread-2', '/tmp/project-b', 200, '')", on: db)
         try exec("INSERT INTO threads (id, cwd, updated_at, git_branch) VALUES ('thread-3', '/tmp/project-c', 300, 'feature/search')", on: db)
         try exec("INSERT INTO threads (id, cwd, updated_at, git_branch) VALUES ('thread-4', '/tmp/project-d', 400, NULL)", on: db)
+        try exec("INSERT INTO threads (id, cwd, updated_at, git_branch) VALUES ('thread-5', '/tmp/project-e', 500, '   ')", on: db)
     }
 
     let stateDB = CodexStateDB(path: dbPath)

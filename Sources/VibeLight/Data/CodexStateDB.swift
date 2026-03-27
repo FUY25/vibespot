@@ -9,7 +9,11 @@ struct CodexStateDB {
     }
 
     init() {
-        self.init(path: FileManager.default.homeDirectoryForCurrentUser.path + "/.codex/state_5.sqlite")
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+            .appendingPathComponent("state_5.sqlite")
+            .path
+        self.init(path: path)
     }
 
     func sessionIdByCwd(_ cwd: String) -> String? {
@@ -24,17 +28,24 @@ struct CodexStateDB {
 
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                Self.logSQLiteError(db, context: "prepare sessionIdByCwd")
                 return nil
             }
             defer { sqlite3_finalize(statement) }
 
             guard sqlite3_bind_text(statement, 1, (cwd as NSString).utf8String, -1, Self.transientDestructor) == SQLITE_OK else {
+                Self.logSQLiteError(db, context: "bind sessionIdByCwd")
                 return nil
             }
 
-            guard sqlite3_step(statement) == SQLITE_ROW,
-                  let id = sqlite3_column_text(statement, 0)
-            else {
+            let rc = sqlite3_step(statement)
+            guard rc == SQLITE_ROW else {
+                if rc != SQLITE_DONE {
+                    Self.logSQLiteError(db, context: "step sessionIdByCwd", code: rc)
+                }
+                return nil
+            }
+            guard let id = sqlite3_column_text(statement, 0) else {
                 return nil
             }
 
@@ -53,13 +64,23 @@ struct CodexStateDB {
 
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                Self.logSQLiteError(db, context: "prepare gitBranchMap")
                 return [:]
             }
             defer { sqlite3_finalize(statement) }
 
             var branches: [String: String] = [:]
 
-            while sqlite3_step(statement) == SQLITE_ROW {
+            while true {
+                let rc = sqlite3_step(statement)
+                if rc == SQLITE_DONE {
+                    break
+                }
+                if rc != SQLITE_ROW {
+                    Self.logSQLiteError(db, context: "step gitBranchMap", code: rc)
+                    break
+                }
+
                 guard let idText = sqlite3_column_text(statement, 0),
                       let branchText = sqlite3_column_text(statement, 1)
                 else {
@@ -84,14 +105,31 @@ struct CodexStateDB {
 
         guard rc == SQLITE_OK, let db = handle else {
             if let handle {
-                sqlite3_close(handle)
+                Self.logSQLiteError(handle, context: "open read-only database", code: rc)
+                sqlite3_close_v2(handle)
             }
             return nil
         }
 
-        defer { sqlite3_close(db) }
+        if sqlite3_busy_timeout(db, 300) != SQLITE_OK {
+            Self.logSQLiteError(db, context: "configure busy timeout")
+        }
+
+        defer {
+            let closeRC = sqlite3_close_v2(db)
+            if closeRC != SQLITE_OK {
+                Self.logSQLiteError(db, context: "close read-only database", code: closeRC)
+            }
+        }
         return operation(db)
     }
 
+    private static func logSQLiteError(_ db: OpaquePointer?, context: String, code: Int32? = nil) {
+        let rc = code ?? sqlite3_errcode(db)
+        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+        print("CodexStateDB: \(context) failed (\(rc)): \(message)")
+    }
+
+    // Equivalent to SQLITE_TRANSIENT for sqlite3_bind_text.
     private static let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 }
