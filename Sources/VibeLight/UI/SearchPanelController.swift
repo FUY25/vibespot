@@ -36,12 +36,12 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private var deactivationObserver: NSObjectProtocol?
     private var panelResignKeyObserver: NSObjectProtocol?
 
-    private let panelWidth: CGFloat = 720
+    private let panelWidth: CGFloat = DesignTokens.Spacing.panelWidth
     private let minPanelHeight: CGFloat = 104
-    private let maxVisibleRows = 7
-    private let searchFieldHeight: CGFloat = 40
-    private let topInset: CGFloat = 18
-    private let bottomInset: CGFloat = 16
+    private let maxVisibleRows = DesignTokens.Spacing.maxVisibleRows
+    private let searchFieldHeight: CGFloat = DesignTokens.Spacing.searchFieldHeight
+    private let topInset: CGFloat = DesignTokens.Spacing.searchBarTopPadding
+    private let bottomInset: CGFloat = DesignTokens.Spacing.resultsBottomPadding
     private let resultsTopSpacing: CGFloat = 10
     private let separatorTopSpacing: CGFloat = 14
     private let separatorHeight: CGFloat = 1
@@ -195,10 +195,10 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         visualEffectView.state = .active
         visualEffectView.blendingMode = .withinWindow
         visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 28
+        visualEffectView.layer?.cornerRadius = DesignTokens.Radius.panel
         visualEffectView.layer?.masksToBounds = true
-        visualEffectView.layer?.borderWidth = 0.8
-        visualEffectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.24).cgColor
+        visualEffectView.layer?.borderWidth = 1
+        visualEffectView.layer?.borderColor = DesignTokens.Color.ghostBorder.cgColor
 
         searchIconView.translatesAutoresizingMaskIntoConstraints = false
         searchIconView.image = NSImage(
@@ -210,7 +210,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         searchIconView.imageScaling = .scaleProportionallyUpOrDown
 
         actionHintLabel.translatesAutoresizingMaskIntoConstraints = false
-        actionHintLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        actionHintLabel.font = DesignTokens.Font.actionHint
         actionHintLabel.textColor = .tertiaryLabelColor
         actionHintLabel.alignment = .right
         actionHintLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -244,7 +244,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         visualEffectView.addSubview(resultsScrollView)
 
         NSLayoutConstraint.activate([
-            searchIconView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 24),
+            searchIconView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: DesignTokens.Spacing.searchBarHorizontalPadding),
             searchIconView.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
             searchIconView.widthAnchor.constraint(equalToConstant: 18),
             searchIconView.heightAnchor.constraint(equalToConstant: 18),
@@ -257,18 +257,18 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             actionHintLabel.trailingAnchor.constraint(equalTo: searchBarProductIcon.leadingAnchor, constant: -8),
             actionHintLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
 
-            searchBarProductIcon.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
+            searchBarProductIcon.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -DesignTokens.Spacing.searchBarHorizontalPadding),
             searchBarProductIcon.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            searchBarProductIcon.widthAnchor.constraint(equalToConstant: 22),
-            searchBarProductIcon.heightAnchor.constraint(equalToConstant: 22),
+            searchBarProductIcon.widthAnchor.constraint(equalToConstant: DesignTokens.Spacing.toolIconSize),
+            searchBarProductIcon.heightAnchor.constraint(equalToConstant: DesignTokens.Spacing.toolIconSize),
 
             separatorBox.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 20),
             separatorBox.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -20),
             separatorBox.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: separatorTopSpacing),
             separatorBox.heightAnchor.constraint(equalToConstant: separatorHeight),
 
-            resultsScrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 14),
-            resultsScrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -14),
+            resultsScrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: DesignTokens.Spacing.resultsHorizontalPadding),
+            resultsScrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -DesignTokens.Spacing.resultsHorizontalPadding),
             resultsScrollView.topAnchor.constraint(equalTo: separatorBox.bottomAnchor, constant: resultsTopSpacing),
             resultsScrollView.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -bottomInset),
             resultsHeightConstraint,
@@ -426,7 +426,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         }
 
         let result = results[row]
-        searchBarProductIcon.image = ToolIcon.image(for: result.tool, size: 22)
+        searchBarProductIcon.image = ToolIcon.image(for: result.tool, size: DesignTokens.Spacing.toolIconSize)
 
         if result.status == "action" {
             actionHintLabel.stringValue = "↩ Launch"
