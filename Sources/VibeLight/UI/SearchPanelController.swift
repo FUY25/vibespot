@@ -34,6 +34,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     private var results: [SearchResult] = []
     private var deactivationObserver: NSObjectProtocol?
+    private var panelResignKeyObserver: NSObjectProtocol?
 
     private let panelWidth: CGFloat = 720
     private let minPanelHeight: CGFloat = 104
@@ -264,15 +265,36 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         deactivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
-            self?.hide()
+            Task { @MainActor [weak self] in
+                self?.hide()
+            }
+        }
+        panelResignKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard NSApp.isActive else { return }
+
+                // Avoid hiding during transient key-window churn while showing/focusing controls.
+                try? await Task.sleep(for: .milliseconds(50))
+                guard panel.isVisible, !panel.isKeyWindow, NSApp.isActive else { return }
+                guard let keyWindow = NSApp.keyWindow, keyWindow !== panel else { return }
+                hide()
+            }
         }
     }
 
     @MainActor
     deinit {
         if let observer = deactivationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = panelResignKeyObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }

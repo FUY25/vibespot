@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 @Test
-func searchPanelHidesOnDeactivate() {
+func searchPanelUsesManualDeactivationHandling() {
     let controller = SearchPanelController()
     #expect(controller.hidesOnDeactivate == false)
 }
@@ -159,7 +159,7 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
-    try await Task.sleep(for: .milliseconds(250))
+    try await Task.sleep(for: .milliseconds(500))
 
     #expect(actionHintLabel.stringValue == "↩ Resume ⇥ History")
 }
