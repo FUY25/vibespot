@@ -11,7 +11,7 @@ func parseCodexPIDsExtractsOnlyCodexPIDs() {
       501  555 codex-helper
     """
 
-    #expect(LiveSessionRegistry.parseCodexPIDs(from: psOutput) == [111, 333, 555])
+    #expect(LiveSessionRegistry.parseCodexPIDs(from: psOutput) == [111, 333])
 }
 
 @Test

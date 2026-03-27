@@ -11,6 +11,7 @@ enum LiveSessionRegistry {
     private static let sessionsPath: String = {
         FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/sessions"
     }()
+    private static let commandTimeout: DispatchTimeInterval = .seconds(2)
 
     static func scan() -> [LiveSession] {
         scanClaudeSessions() + scanCodexSessions()
@@ -71,7 +72,7 @@ enum LiveSessionRegistry {
                 guard let pid = Int(fields[1]) else { return nil }
 
                 let command = String(fields[2]).lowercased()
-                guard command.contains("codex") else { return nil }
+                guard command == "codex" || command.hasSuffix("/codex") else { return nil }
                 return pid
             }
     }
@@ -97,8 +98,11 @@ enum LiveSessionRegistry {
     }
 
     private static func isProcessAlive(pid: Int) -> Bool {
-        // kill(pid, 0) returns 0 if process exists
-        kill(Int32(pid), 0) == 0
+        guard pid > 0 else { return false }
+        if kill(Int32(pid), 0) == 0 {
+            return true
+        }
+        return errno == EPERM
     }
 
     private static func runCommand(executablePath: String, arguments: [String]) -> String? {
@@ -113,16 +117,42 @@ enum LiveSessionRegistry {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return nil
         }
 
-        guard process.terminationStatus == 0 else {
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+        let stderrHandle = stderrPipe.fileHandleForReading
+
+        var stdoutData = Data()
+        var stderrData = Data()
+        let readGroup = DispatchGroup()
+
+        readGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stdoutData = stdoutHandle.readDataToEndOfFile()
+            readGroup.leave()
+        }
+
+        readGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderrData = stderrHandle.readDataToEndOfFile()
+            readGroup.leave()
+        }
+
+        if readGroup.wait(timeout: .now() + commandTimeout) == .timedOut {
+            process.terminate()
+            process.waitUntilExit()
             return nil
         }
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            _ = stderrData
+            return nil
+        }
+
+        _ = stderrData
         return String(data: stdoutData, encoding: .utf8)
     }
 }
