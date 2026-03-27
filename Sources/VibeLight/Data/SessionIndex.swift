@@ -409,7 +409,10 @@ final class SessionIndex: @unchecked Sendable {
             FROM sessions
             WHERE TRIM(project) <> ''
               AND TRIM(project_name) <> ''
-            ORDER BY last_activity_at DESC
+            ORDER BY COALESCE(last_activity_at, started_at, updated_at) DESC,
+                     started_at DESC,
+                     updated_at DESC,
+                     id DESC
             LIMIT 1
             """
         ) { statement in

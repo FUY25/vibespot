@@ -432,9 +432,18 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             actionHintLabel.stringValue = "↩ Launch"
         } else if result.status == "live" {
             actionHintLabel.stringValue = "↩ Switch"
+        } else if hasPendingGhostSuggestion() {
+            actionHintLabel.stringValue = "↩ Resume ⇥ Complete"
         } else {
             actionHintLabel.stringValue = "↩ Resume ⇥ History"
         }
+    }
+
+    private func hasPendingGhostSuggestion() -> Bool {
+        guard let suggestion = searchField.ghostSuggestion, !suggestion.isEmpty else {
+            return false
+        }
+        return suggestion != searchField.stringValue
     }
 
     private func drillIntoSelectedHistory() -> Bool {

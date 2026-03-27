@@ -406,6 +406,42 @@ func testMostRecentProjectSkipsRowsWithEmptyProjectName() throws {
 }
 
 @Test
+func testMostRecentProjectUsesStartedAtWhenLastActivityIsNil() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try index.upsertSession(
+        id: "older-nil-last-activity",
+        tool: "claude",
+        title: "older",
+        project: "/Users/me/older-fallback",
+        projectName: "older-fallback",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-120),
+        pid: nil,
+        lastActivityAt: nil
+    )
+    try index.upsertSession(
+        id: "newer-nil-last-activity",
+        tool: "codex",
+        title: "newer",
+        project: "/Users/me/newer-fallback",
+        projectName: "newer-fallback",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now,
+        pid: nil,
+        lastActivityAt: nil
+    )
+
+    let mostRecent = try index.mostRecentProject()
+    #expect(mostRecent?.project == "/Users/me/newer-fallback")
+    #expect(mostRecent?.projectName == "newer-fallback")
+}
+
+@Test
 func testEmptyQueryListsSessionsRespectingHistoryMode() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path

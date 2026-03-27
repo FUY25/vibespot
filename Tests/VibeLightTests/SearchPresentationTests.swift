@@ -177,7 +177,14 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
         Notification(name: NSTableView.selectionDidChangeNotification, object: resultsTableView)
     )
 
-    #expect(actionHintLabel.stringValue == "↩ Resume ⇥ History")
+    let hasPendingSuggestion = {
+        guard let suggestion = searchField.ghostSuggestion, !suggestion.isEmpty else {
+            return false
+        }
+        return suggestion != searchField.stringValue
+    }()
+    let expectedHint = hasPendingSuggestion ? "↩ Resume ⇥ Complete" : "↩ Resume ⇥ History"
+    #expect(actionHintLabel.stringValue == expectedHint)
 }
 
 @MainActor
