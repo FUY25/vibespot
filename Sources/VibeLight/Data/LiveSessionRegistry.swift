@@ -109,11 +109,15 @@ enum LiveSessionRegistry {
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let terminationSignal = DispatchSemaphore(value: 0)
 
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        process.terminationHandler = { _ in
+            terminationSignal.signal()
+        }
 
         do {
             try process.run()
@@ -142,11 +146,21 @@ enum LiveSessionRegistry {
 
         if readGroup.wait(timeout: .now() + commandTimeout) == .timedOut {
             process.terminate()
-            process.waitUntilExit()
+            _ = terminationSignal.wait(timeout: .now() + .milliseconds(200))
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                _ = terminationSignal.wait(timeout: .now() + .milliseconds(200))
+            }
             return nil
         }
 
-        process.waitUntilExit()
+        _ = terminationSignal.wait(timeout: .now() + .milliseconds(200))
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+            _ = terminationSignal.wait(timeout: .now() + .milliseconds(200))
+            return nil
+        }
+
         guard process.terminationStatus == 0 else {
             _ = stderrData
             return nil
