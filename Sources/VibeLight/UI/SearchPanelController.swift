@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class SearchPanelController: NSObject, WebBridgeDelegate {
+final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDelegate {
     var onSelect: ((SearchResult) -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
@@ -17,6 +17,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate {
     private var deactivationObserver: NSObjectProtocol?
     private var panelResignKeyObserver: NSObjectProtocol?
     private var lastPushedResultsJSON: String = ""
+    private var isWebViewReady = false
+    private var pendingResetAndFocus = false
+    private var pendingTheme: String?
+    private var pendingResultsJSON: String?
+    private var iconBaseURL: String?
 
     private let panelWidth: CGFloat = 720
     private let minPanelHeight: CGFloat = 104
@@ -70,7 +75,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
 
-        webView.evaluateJavaScript("resetAndFocus()", completionHandler: nil)
+        requestResetAndFocus()
         pushTheme()
         refreshResults(query: "")
     }
@@ -136,16 +141,23 @@ final class SearchPanelController: NSObject, WebBridgeDelegate {
         // Skip push if results haven't changed
         guard json != lastPushedResultsJSON else { return }
         lastPushedResultsJSON = json
+        pendingResultsJSON = json
 
-        let escaped = json.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
+        guard isWebViewReady else { return }
+        pushResultsJSONIfNeeded()
+    }
+
+    private func pushResultsJSONIfNeeded() {
+        guard let json = pendingResultsJSON else { return }
+        pendingResultsJSON = nil
+        let escaped = escapeForSingleQuotedJavaScriptString(json)
         webView.evaluateJavaScript("updateResults('\(escaped)')", completionHandler: nil)
-
         updateGhostSuggestion()
     }
 
     private func updateGhostSuggestion() {
+        guard isWebViewReady else { return }
+
         // Get the current search query from JS and compute ghost
         webView.evaluateJavaScript("document.getElementById('searchInput').value") { [weak self] value, _ in
             guard let self, let query = value as? String, !query.isEmpty else {
@@ -210,7 +222,45 @@ final class SearchPanelController: NSObject, WebBridgeDelegate {
     private func pushTheme() {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let theme = isDark ? "dark" : "light"
+        pendingTheme = theme
+
+        guard isWebViewReady else { return }
+        pushThemeIfNeeded()
+    }
+
+    private func pushThemeIfNeeded() {
+        guard let theme = pendingTheme else { return }
+        pendingTheme = nil
         webView.evaluateJavaScript("setTheme('\(theme)')", completionHandler: nil)
+    }
+
+    private func requestResetAndFocus() {
+        pendingResetAndFocus = true
+        guard isWebViewReady else { return }
+        flushPendingWebViewState()
+    }
+
+    private func flushPendingWebViewState() {
+        if let iconBaseURL {
+            let escapedBaseURL = escapeForSingleQuotedJavaScriptString(iconBaseURL)
+            webView.evaluateJavaScript("setIconBaseURL('\(escapedBaseURL)')", completionHandler: nil)
+            self.iconBaseURL = nil
+        }
+
+        pushThemeIfNeeded()
+
+        if pendingResetAndFocus {
+            pendingResetAndFocus = false
+            webView.evaluateJavaScript("resetAndFocus()", completionHandler: nil)
+        }
+
+        pushResultsJSONIfNeeded()
+    }
+
+    private func escapeForSingleQuotedJavaScriptString(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
     }
 
     private func configurePanel() {
@@ -229,25 +279,39 @@ final class SearchPanelController: NSObject, WebBridgeDelegate {
 
     private func configureWebView() {
         webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
 
-        panel.contentView = webView
+        let container = NSView(frame: panel.frame)
+        container.translatesAutoresizingMaskIntoConstraints = false
+        panel.contentView = container
+        container.addSubview(webView)
 
         NSLayoutConstraint.activate([
-            webView.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: panel.contentView!.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: panel.contentView!.bottomAnchor),
+            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: container.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+
+        isWebViewReady = false
 
         // Load panel.html from bundle
         if let htmlURL = Bundle.module.url(forResource: "panel", withExtension: "html", subdirectory: "Web") {
-            // Set icon base URL for JS
-            let iconDir = Bundle.module.url(forResource: "claude-icon", withExtension: "png")?.deletingLastPathComponent()
-            if let iconDir {
-                webView.evaluateJavaScript("setIconBaseURL('\(iconDir.absoluteString)')", completionHandler: nil)
-            }
-            webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
+            iconBaseURL = Bundle.module.url(forResource: "claude-icon", withExtension: "png")?
+                .deletingLastPathComponent()
+                .absoluteString
+
+            let readAccessRoot = Bundle.module.resourceURL ?? htmlURL.deletingLastPathComponent()
+            webView.loadFileURL(htmlURL, allowingReadAccessTo: readAccessRoot)
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            isWebViewReady = true
+            flushPendingWebViewState()
         }
     }
 
