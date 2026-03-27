@@ -9,6 +9,10 @@ final class ResultRowView: NSTableCellView {
     private let metadataLabel = NSTextField(labelWithString: "")
     private let statusTextLabel = NSTextField(labelWithString: "")
     private let activityLabel = NSTextField(labelWithString: "")
+    private let typingDotsView = NSStackView()
+
+    private var currentActivityStatus: SessionActivityStatus = .closed
+    private var currentActivityPreview: ActivityPreview?
 
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
@@ -31,6 +35,8 @@ final class ResultRowView: NSTableCellView {
         titleLabel.stringValue = result.title
         metadataLabel.stringValue = makeMetadataText(for: result)
         statusTextLabel.stringValue = makeStatusText(for: result)
+        currentActivityStatus = result.activityStatus
+        currentActivityPreview = result.activityPreview
 
         if let activityPreview = result.activityPreview, result.activityStatus != .closed {
             activityLabel.stringValue = activityPreview.text
@@ -41,7 +47,9 @@ final class ResultRowView: NSTableCellView {
             activityLabel.isHidden = true
         }
 
+        resetStateAppearance()
         updateTextColors()
+        applyActivityState(result.activityStatus)
     }
 
     static func height(for result: SearchResult) -> CGFloat {
@@ -65,17 +73,27 @@ final class ResultRowView: NSTableCellView {
         statusTextLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
         statusTextLabel.alignment = .right
         statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        statusTextLabel.wantsLayer = true
 
         activityLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         activityLabel.lineBreakMode = .byTruncatingTail
         activityLabel.maximumNumberOfLines = 1
+
+        titleLabel.wantsLayer = true
+
+        configureTypingDots()
 
         let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = 9
 
-        let headerRow = NSStackView(views: [titleRow, statusTextLabel])
+        let statusContainer = NSStackView(views: [statusTextLabel, typingDotsView])
+        statusContainer.orientation = .horizontal
+        statusContainer.alignment = .centerY
+        statusContainer.spacing = 6
+
+        let headerRow = NSStackView(views: [titleRow, statusContainer])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.distribution = .fill
@@ -145,10 +163,18 @@ final class ResultRowView: NSTableCellView {
 
     private func updateTextColors() {
         let emphasized = backgroundStyle == .emphasized
+        let titleAlpha = currentActivityStatus == .closed ? 0.55 : 1.0
+        let iconAlpha = currentActivityStatus == .closed ? 0.55 : (emphasized ? 1.0 : 0.96)
+
         titleLabel.textColor = emphasized ? .white : .labelColor
+        titleLabel.alphaValue = titleAlpha
         metadataLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .secondaryLabelColor
-        statusTextLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
-        toolIcon.alphaValue = emphasized ? 1.0 : 0.96
+        if currentActivityStatus == .waiting {
+            statusTextLabel.textColor = NSColor(red: 0.94, green: 0.75, blue: 0.38, alpha: 1.0)
+        } else {
+            statusTextLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
+        }
+        toolIcon.alphaValue = iconAlpha
     }
 
     private func applyActivityStyle(for activityPreview: ActivityPreview) {
@@ -165,5 +191,106 @@ final class ResultRowView: NSTableCellView {
                 activityLabel.font = .systemFont(ofSize: 10.5)
             }
         }
+    }
+
+    private func applyActivityState(_ state: SessionActivityStatus) {
+        switch state {
+        case .working:
+            statusTextLabel.isHidden = true
+            typingDotsView.isHidden = false
+            applyShimmer()
+            startTypingDots()
+        case .waiting:
+            statusTextLabel.isHidden = false
+            typingDotsView.isHidden = true
+            applyWaitingBreathing()
+        case .closed:
+            statusTextLabel.isHidden = false
+            typingDotsView.isHidden = true
+        }
+    }
+
+    private func resetStateAppearance() {
+        titleLabel.layer?.mask = nil
+        titleLabel.layer?.removeAllAnimations()
+        statusTextLabel.layer?.removeAllAnimations()
+        statusTextLabel.alphaValue = 1.0
+        typingDotsView.isHidden = true
+        statusTextLabel.isHidden = false
+
+        for dot in typingDotsView.arrangedSubviews {
+            dot.layer?.removeAllAnimations()
+        }
+    }
+
+    private func configureTypingDots() {
+        typingDotsView.orientation = .horizontal
+        typingDotsView.alignment = .centerY
+        typingDotsView.spacing = 3
+        typingDotsView.translatesAutoresizingMaskIntoConstraints = false
+        typingDotsView.isHidden = true
+
+        for _ in 0..<3 {
+            let dot = NSView(frame: NSRect(x: 0, y: 0, width: 4, height: 4))
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 2
+            dot.layer?.backgroundColor = NSColor.secondaryLabelColor.cgColor
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: 4),
+                dot.heightAnchor.constraint(equalToConstant: 4),
+            ])
+            typingDotsView.addArrangedSubview(dot)
+        }
+    }
+
+    private func startTypingDots() {
+        for (index, dot) in typingDotsView.arrangedSubviews.enumerated() {
+            let bounce = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            bounce.values = [0, -3, 0]
+            bounce.keyTimes = [0, 0.3, 0.6]
+            bounce.duration = 1.4
+            bounce.repeatCount = .infinity
+            bounce.beginTime = CACurrentMediaTime() + Double(index) * 0.2
+            dot.layer?.add(bounce, forKey: "bounce")
+        }
+    }
+
+    private func applyWaitingBreathing() {
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 0.6
+        breathe.toValue = 0.9
+        breathe.duration = 3.0
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        statusTextLabel.layer?.add(breathe, forKey: "breathe")
+    }
+
+    private func applyShimmer() {
+        titleLabel.layoutSubtreeIfNeeded()
+        guard let titleLayer = titleLabel.layer else {
+            return
+        }
+
+        let gradient = CAGradientLayer()
+        gradient.colors = [
+            NSColor.labelColor.cgColor,
+            NSColor(red: 0.51, green: 0.69, blue: 1.0, alpha: 1.0).cgColor,
+            NSColor.labelColor.cgColor,
+        ]
+        gradient.locations = [0.0, 0.5, 1.0]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        gradient.frame = titleLayer.bounds
+
+        let animation = CABasicAnimation(keyPath: "locations")
+        animation.fromValue = [-0.3, -0.15, 0.0]
+        animation.toValue = [1.0, 1.15, 1.3]
+        animation.duration = 2.5
+        animation.repeatCount = .infinity
+        gradient.add(animation, forKey: "shimmer")
+
+        titleLayer.mask = gradient
     }
 }
