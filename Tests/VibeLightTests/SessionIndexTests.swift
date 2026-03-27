@@ -370,7 +370,7 @@ func testMostRecentProjectReturnsNilWhenEmpty() throws {
 }
 
 @Test
-func testMostRecentProjectSkipsRowsWithEmptyProjectName() throws {
+func testMostRecentProjectReturnsNewestRowEvenWhenProjectNameIsEmpty() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
@@ -401,8 +401,8 @@ func testMostRecentProjectSkipsRowsWithEmptyProjectName() throws {
     )
 
     let mostRecent = try index.mostRecentProject()
-    #expect(mostRecent?.project == "/Users/me/named")
-    #expect(mostRecent?.projectName == "named")
+    #expect(mostRecent?.project == "/Users/me/empty")
+    #expect(mostRecent?.projectName == "")
 }
 
 @Test
