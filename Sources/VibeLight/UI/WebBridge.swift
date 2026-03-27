@@ -48,11 +48,10 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        guard let body = message.body as? [String: Any] else { return }
-        guard let parsed = Message.parse(body) else { return }
-
         Task { @MainActor [weak self] in
             guard let self else { return }
+            guard let body = message.body as? [String: Any] else { return }
+            guard let parsed = Message.parse(body) else { return }
             switch parsed {
             case .search(let query):
                 delegate?.webBridge(self, didReceiveSearch: query)
