@@ -402,6 +402,38 @@ final class SessionIndex: @unchecked Sendable {
         return Set(ids)
     }
 
+    func startedAtBySessionID(_ sessionIDs: Set<String>) throws -> [String: Date] {
+        guard !sessionIDs.isEmpty else {
+            return [:]
+        }
+
+        let orderedIDs = Array(sessionIDs).sorted()
+        let placeholders = (1...orderedIDs.count).map { "?\($0)" }.joined(separator: ", ")
+        let sql = "SELECT id, started_at FROM sessions WHERE id IN (\(placeholders))"
+
+        let rows = try db.query(
+            sql,
+            bind: { statement in
+                for (offset, sessionID) in orderedIDs.enumerated() {
+                    try statement.bind(index: Int32(offset + 1), text: sessionID)
+                }
+            },
+            map: { statement in
+                (
+                    id: textColumn(statement, index: 0),
+                    startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
+                )
+            }
+        )
+
+        var startedAtBySessionID: [String: Date] = [:]
+        startedAtBySessionID.reserveCapacity(rows.count)
+        for row in rows {
+            startedAtBySessionID[row.id] = row.startedAt
+        }
+        return startedAtBySessionID
+    }
+
     func mostRecentProject() throws -> (project: String, projectName: String)? {
         let rows = try db.query(
             """

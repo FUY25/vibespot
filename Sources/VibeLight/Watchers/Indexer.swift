@@ -383,15 +383,13 @@ final class Indexer {
     }
 
     private func deduplicateSharedPIDSessions(aliveSessionsByID: [String: LiveSession]) {
+        let aliveSessionIDs = Set(aliveSessionsByID.keys)
+        let startedAtBySessionID = (try? sessionIndex.startedAtBySessionID(aliveSessionIDs)) ?? [:]
+
         // Build (sessionId, pid, startedAt) tuples for alive sessions
         var tuples: [(sessionId: String, pid: Int, startedAt: Date)] = []
         for (sessionId, liveSession) in aliveSessionsByID {
-            let startedAt: Date
-            if let rows = try? sessionIndex.search(query: "", liveOnly: true) {
-                startedAt = rows.first(where: { $0.sessionId == sessionId })?.startedAt ?? .distantPast
-            } else {
-                startedAt = .distantPast
-            }
+            let startedAt = startedAtBySessionID[sessionId] ?? .distantPast
             tuples.append((sessionId, liveSession.pid, startedAt))
         }
 
