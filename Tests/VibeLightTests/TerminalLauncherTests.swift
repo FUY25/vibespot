@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import VibeLight
 
@@ -32,5 +33,48 @@ func testBuildScriptHandlesSimpleCommand() {
         directory: "/Users/me/project"
     )
 
-    #expect(script.contains("\"cd \" & quoted form of \"/Users/me/project\" & \" && claude\""))
+    #expect(script.contains("do script \"cd \" & quoted form of \"/Users/me/project\" & \" && claude\""))
+}
+
+@Test
+func testBuildScriptOmitsAndForEmptyCommand() {
+    let script = TerminalLauncher.buildScript(
+        command: "   ",
+        directory: "/Users/me/project"
+    )
+
+    #expect(script.contains("do script \"cd \" & quoted form of \"/Users/me/project\""))
+    #expect(!script.contains("&&"))
+}
+
+@Test
+func testBuildScriptExpandsTildeDirectory() {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let script = TerminalLauncher.buildScript(
+        command: "claude",
+        directory: "~/project"
+    )
+
+    #expect(script.contains("quoted form of \"\(home)/project\""))
+}
+
+@Test
+func testBuildScriptEscapesQuotesInDirectory() {
+    let script = TerminalLauncher.buildScript(
+        command: "claude",
+        directory: "/Users/me/project\"name"
+    )
+
+    #expect(script.contains("quoted form of \"/Users/me/project\\\"name\""))
+}
+
+@Test
+func testBuildScriptReplacesCommandNewlines() {
+    let script = TerminalLauncher.buildScript(
+        command: "claude\n--resume abc",
+        directory: "/Users/me/project"
+    )
+
+    #expect(script.contains("&& claude --resume abc"))
+    #expect(!script.contains("&& claude\n--resume abc"))
 }
