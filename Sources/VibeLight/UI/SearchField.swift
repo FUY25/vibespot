@@ -1,6 +1,6 @@
 import AppKit
 
-final class SearchField: NSSearchField {
+final class SearchField: NSTextField {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         configure()
@@ -13,22 +13,33 @@ final class SearchField: NSSearchField {
 
     override var intrinsicContentSize: NSSize {
         var size = super.intrinsicContentSize
-        size.height = max(size.height, 34)
+        size.height = max(size.height, 40)
         return size
     }
 
     private func configure() {
         translatesAutoresizingMaskIntoConstraints = false
-        placeholderString = "Search sessions"
+        isBordered = false
+        isBezeled = false
+        drawsBackground = false
         focusRingType = .none
-        font = .systemFont(ofSize: 18, weight: .medium)
-        maximumRecents = 0
-        recentsAutosaveName = nil
+        font = .systemFont(ofSize: 28, weight: .medium)
+        textColor = .labelColor
+        placeholderString = "Search sessions"
+        lineBreakMode = .byTruncatingTail
 
-        if let searchCell = cell as? NSSearchFieldCell {
-            searchCell.sendsWholeSearchString = false
-            searchCell.sendsSearchStringImmediately = true
-            searchCell.placeholderString = "Search sessions"
+        if let textCell = cell as? NSTextFieldCell {
+            textCell.wraps = false
+            textCell.isScrollable = true
+            textCell.usesSingleLineMode = true
+            textCell.lineBreakMode = .byTruncatingTail
+            textCell.placeholderAttributedString = NSAttributedString(
+                string: "Search sessions",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 28, weight: .medium),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ]
+            )
         }
     }
 }

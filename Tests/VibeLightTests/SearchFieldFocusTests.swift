@@ -29,7 +29,7 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
     defer { controller.hide() }
 
     let searchField = try #require(
-        Mirror(reflecting: controller).children.first(where: { $0.label == "searchField" })?.value as? NSSearchField
+        Mirror(reflecting: controller).children.first(where: { $0.label == "searchField" })?.value as? SearchField
     )
 
     searchField.stringValue = "auth bug"

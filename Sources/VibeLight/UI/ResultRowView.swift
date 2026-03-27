@@ -1,8 +1,8 @@
 import AppKit
 
 final class ResultRowView: NSTableCellView {
-    static let rowHeightWithoutSnippet: CGFloat = 56
-    static let rowHeightWithSnippet: CGFloat = 78
+    static let rowHeightWithoutSnippet: CGFloat = 60
+    static let rowHeightWithSnippet: CGFloat = 84
 
     private let toolIcon = NSImageView(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
@@ -66,11 +66,11 @@ final class ResultRowView: NSTableCellView {
         toolIcon.translatesAutoresizingMaskIntoConstraints = false
         toolIcon.imageScaling = .scaleProportionallyUpOrDown
 
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        metadataLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        metadataLabel.font = .systemFont(ofSize: 11, weight: .regular)
         metadataLabel.lineBreakMode = .byTruncatingTail
 
         statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
@@ -87,7 +87,7 @@ final class ResultRowView: NSTableCellView {
         let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
-        titleRow.spacing = 8
+        titleRow.spacing = 9
 
         let statusStack = NSStackView(views: [statusDot, statusLabel])
         statusStack.orientation = .horizontal
@@ -102,22 +102,22 @@ final class ResultRowView: NSTableCellView {
         let bodyStack = NSStackView(views: [headerRow, metadataLabel, snippetLabel])
         bodyStack.orientation = .vertical
         bodyStack.alignment = .leading
-        bodyStack.spacing = 4
+        bodyStack.spacing = 3
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(bodyStack)
 
         NSLayoutConstraint.activate([
-            toolIcon.widthAnchor.constraint(equalToConstant: 20),
-            toolIcon.heightAnchor.constraint(equalToConstant: 20),
-            statusDot.widthAnchor.constraint(equalToConstant: 8),
-            statusDot.heightAnchor.constraint(equalToConstant: 8),
+            toolIcon.widthAnchor.constraint(equalToConstant: 18),
+            toolIcon.heightAnchor.constraint(equalToConstant: 18),
+            statusDot.widthAnchor.constraint(equalToConstant: 7),
+            statusDot.heightAnchor.constraint(equalToConstant: 7),
             headerRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
 
-            bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
+            bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
 
         updateTextColors()

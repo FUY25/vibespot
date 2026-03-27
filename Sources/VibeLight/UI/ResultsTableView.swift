@@ -21,7 +21,7 @@ final class ResultsTableView: NSTableView {
         backgroundColor = .clear
         usesAlternatingRowBackgroundColors = false
         selectionHighlightStyle = .regular
-        intercellSpacing = NSSize(width: 0, height: 6)
+        intercellSpacing = NSSize(width: 0, height: 4)
         rowSizeStyle = .custom
         gridStyleMask = []
         allowsTypeSelect = false
@@ -43,9 +43,9 @@ final class ResultsTableRowView: NSTableRowView {
             return
         }
 
-        let selectionRect = bounds.insetBy(dx: 4, dy: 1)
-        let path = NSBezierPath(roundedRect: selectionRect, xRadius: 12, yRadius: 12)
-        let color = NSColor.controlAccentColor.withAlphaComponent(isEmphasized ? 0.24 : 0.14)
+        let selectionRect = bounds.insetBy(dx: 8, dy: 1)
+        let path = NSBezierPath(roundedRect: selectionRect, xRadius: 10, yRadius: 10)
+        let color = NSColor.controlAccentColor.withAlphaComponent(isEmphasized ? 0.18 : 0.12)
         color.setFill()
         path.fill()
     }

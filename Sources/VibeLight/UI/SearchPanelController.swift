@@ -1,7 +1,20 @@
+// Research notes for Task 5 (2026-03-27):
+// - Apple Support's current Spotlight article ("Search for anything with Spotlight on Mac")
+//   shows the Sequoia Spotlight window in an official screenshot asset
+//   (`SharedArt/S2861_SpotlightSearch.png`, served at 1144x745 on 2026-03-27). The article
+//   also explicitly says Spotlight can be dragged anywhere on the desktop and resized, so the
+//   window is no longer a tiny fixed center popup.
+// - The Apple screenshot and the Sequoia screenshot-library references both show Spotlight as a
+//   wide, softly rounded translucent panel parked in the upper portion of the screen rather than
+//   dead center. The top chrome is visually integrated: large plain text input, magnifying glass
+//   on the left, subtle separator below, and a light material instead of the older dark HUD look.
+// - Exact measurements are not published, so the values below are approximations inferred from the
+//   current screenshots: width roughly ~700-740 px, corner radius ~28 px, search text around the
+//   high-20 pt range, compact result rows with gentle inset selection, and a very soft border/shadow.
 import AppKit
 
 @MainActor
-final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     var onSelect: ((SearchResult) -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
@@ -9,8 +22,10 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
 
     private let panel: SearchPanel
     private let visualEffectView = NSVisualEffectView(frame: .zero)
+    private let searchIconView = NSImageView(frame: .zero)
     private let searchField = SearchField(frame: .zero)
     private let modeLabel = NSTextField(labelWithString: "")
+    private let separatorBox = NSBox(frame: .zero)
     private let resultsScrollView = NSScrollView(frame: .zero)
     private let resultsTableView = ResultsTableView(frame: .zero)
     private let resultsHeightConstraint: NSLayoutConstraint
@@ -19,13 +34,15 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     private var includeHistory = false
     private var results: [SearchResult] = []
 
-    private let panelWidth: CGFloat = 600
-    private let minPanelHeight: CGFloat = 80
-    private let maxVisibleRows = 8
-    private let searchFieldHeight: CGFloat = 34
-    private let topInset: CGFloat = 16
-    private let bottomInset: CGFloat = 14
+    private let panelWidth: CGFloat = 720
+    private let minPanelHeight: CGFloat = 104
+    private let maxVisibleRows = 7
+    private let searchFieldHeight: CGFloat = 40
+    private let topInset: CGFloat = 18
+    private let bottomInset: CGFloat = 16
     private let resultsTopSpacing: CGFloat = 10
+    private let separatorTopSpacing: CGFloat = 14
+    private let separatorHeight: CGFloat = 1
 
     override init() {
         self.panel = SearchPanel(
@@ -153,20 +170,32 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
 
     private func configureViews() {
         visualEffectView.translatesAutoresizingMaskIntoConstraints = false
-        visualEffectView.material = .hudWindow
+        visualEffectView.material = .popover
         visualEffectView.state = .active
         visualEffectView.blendingMode = .withinWindow
         visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 20
+        visualEffectView.layer?.cornerRadius = 28
         visualEffectView.layer?.masksToBounds = true
-        visualEffectView.layer?.borderWidth = 1
-        visualEffectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        visualEffectView.layer?.borderWidth = 0.8
+        visualEffectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.24).cgColor
+
+        searchIconView.translatesAutoresizingMaskIntoConstraints = false
+        searchIconView.image = NSImage(
+            systemSymbolName: "magnifyingglass",
+            accessibilityDescription: "Search"
+        )
+        searchIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        searchIconView.contentTintColor = .secondaryLabelColor
+        searchIconView.imageScaling = .scaleProportionallyUpOrDown
 
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
-        modeLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        modeLabel.textColor = .secondaryLabelColor
+        modeLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        modeLabel.textColor = .tertiaryLabelColor
         modeLabel.alignment = .right
         modeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        separatorBox.translatesAutoresizingMaskIntoConstraints = false
+        separatorBox.boxType = .separator
 
         resultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         resultsScrollView.drawsBackground = false
@@ -182,22 +211,34 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
         resultsTableView.target = self
 
         panel.contentView = visualEffectView
+        visualEffectView.addSubview(searchIconView)
         visualEffectView.addSubview(searchField)
         visualEffectView.addSubview(modeLabel)
+        visualEffectView.addSubview(separatorBox)
         visualEffectView.addSubview(resultsScrollView)
 
         NSLayoutConstraint.activate([
-            searchField.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 16),
+            searchIconView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 24),
+            searchIconView.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            searchIconView.widthAnchor.constraint(equalToConstant: 18),
+            searchIconView.heightAnchor.constraint(equalToConstant: 18),
+
+            searchField.leadingAnchor.constraint(equalTo: searchIconView.trailingAnchor, constant: 12),
             searchField.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: topInset),
             searchField.trailingAnchor.constraint(equalTo: modeLabel.leadingAnchor, constant: -12),
             searchField.heightAnchor.constraint(equalToConstant: searchFieldHeight),
 
-            modeLabel.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -16),
+            modeLabel.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
             modeLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
 
-            resultsScrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 10),
-            resultsScrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -10),
-            resultsScrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: resultsTopSpacing),
+            separatorBox.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 20),
+            separatorBox.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -20),
+            separatorBox.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: separatorTopSpacing),
+            separatorBox.heightAnchor.constraint(equalToConstant: separatorHeight),
+
+            resultsScrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 14),
+            resultsScrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -14),
+            resultsScrollView.topAnchor.constraint(equalTo: separatorBox.bottomAnchor, constant: resultsTopSpacing),
             resultsScrollView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor, constant: -bottomInset),
             resultsHeightConstraint,
         ])
@@ -299,7 +340,8 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
 
         let targetHeight = max(
             minPanelHeight,
-            topInset + searchFieldHeight + (results.isEmpty ? 0 : resultsTopSpacing + scrollHeight) + bottomInset
+            topInset + searchFieldHeight + separatorTopSpacing + separatorHeight +
+                (results.isEmpty ? 0 : resultsTopSpacing + scrollHeight) + bottomInset
         )
 
         var frame = panel.frame
@@ -317,9 +359,10 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
         }
 
         let visibleFrame = screen.visibleFrame
+        let topOffset = max(visibleFrame.height * 0.18, 96)
         let origin = NSPoint(
             x: visibleFrame.midX - panelWidth / 2,
-            y: visibleFrame.midY - panel.frame.height / 2
+            y: max(visibleFrame.minY + 24, visibleFrame.maxY - panel.frame.height - topOffset)
         )
         panel.setFrameOrigin(origin)
     }
