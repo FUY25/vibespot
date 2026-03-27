@@ -105,11 +105,12 @@ func waitingRowsShowAwaitingInputWithBreathingAnimation() throws {
 
     let statusLabel = try #require(statusTextField(in: rowView))
     #expect(statusLabel.isHidden == false)
-    #expect(statusLabel.stringValue == "Awaiting input")
+    #expect(statusLabel.stringValue == "AWAITING")
     let textColor = try #require(statusLabel.textColor?.usingColorSpace(.deviceRGB))
-    #expect(abs(textColor.redComponent - 0.94) < 0.01)
-    #expect(abs(textColor.greenComponent - 0.75) < 0.01)
-    #expect(abs(textColor.blueComponent - 0.38) < 0.01)
+    // #FFC965 = (1.0, 0.788, 0.396)
+    #expect(abs(textColor.redComponent - 1.0) < 0.01)
+    #expect(abs(textColor.greenComponent - 0.788) < 0.02)
+    #expect(abs(textColor.blueComponent - 0.396) < 0.02)
     let layer = try #require(statusLabel.layer)
     #expect(layer.animation(forKey: "breathe") != nil)
 }

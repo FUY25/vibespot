@@ -1,8 +1,8 @@
 import AppKit
 
 final class ResultRowView: NSTableCellView {
-    static let rowHeightWithoutActivity: CGFloat = 54
-    static let rowHeightWithActivity: CGFloat = 72
+    static let rowHeightWithoutActivity: CGFloat = DesignTokens.Spacing.rowHeightClosed   // 56
+    static let rowHeightWithActivity: CGFloat = DesignTokens.Spacing.rowHeightActive      // 74
 
     private let toolIcon = NSImageView(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
@@ -31,7 +31,7 @@ final class ResultRowView: NSTableCellView {
     }
 
     func configure(with result: SearchResult) {
-        toolIcon.image = ToolIcon.image(for: result.tool, size: 18)
+        toolIcon.image = ToolIcon.image(for: result.tool, size: DesignTokens.Spacing.toolIconSize)
         titleLabel.stringValue = result.title
         metadataLabel.stringValue = makeMetadataText(for: result)
         statusTextLabel.stringValue = makeStatusText(for: result)
@@ -63,19 +63,19 @@ final class ResultRowView: NSTableCellView {
         toolIcon.translatesAutoresizingMaskIntoConstraints = false
         toolIcon.imageScaling = .scaleProportionallyUpOrDown
 
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.font = DesignTokens.Font.sessionTitle
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        metadataLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        metadataLabel.font = DesignTokens.Font.metadata
         metadataLabel.lineBreakMode = .byTruncatingTail
 
-        statusTextLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        statusTextLabel.font = DesignTokens.Font.statusLabel
         statusTextLabel.alignment = .right
         statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusTextLabel.wantsLayer = true
 
-        activityLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        activityLabel.font = DesignTokens.Font.activity
         activityLabel.lineBreakMode = .byTruncatingTail
         activityLabel.maximumNumberOfLines = 1
 
@@ -86,7 +86,7 @@ final class ResultRowView: NSTableCellView {
         let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
-        titleRow.spacing = 9
+        titleRow.spacing = DesignTokens.Spacing.logoToTextGap
 
         let statusContainer = NSStackView(views: [statusTextLabel, typingDotsView])
         statusContainer.orientation = .horizontal
@@ -107,14 +107,14 @@ final class ResultRowView: NSTableCellView {
         addSubview(bodyStack)
 
         NSLayoutConstraint.activate([
-            toolIcon.widthAnchor.constraint(equalToConstant: 18),
-            toolIcon.heightAnchor.constraint(equalToConstant: 18),
+            toolIcon.widthAnchor.constraint(equalToConstant: DesignTokens.Spacing.toolIconSize),
+            toolIcon.heightAnchor.constraint(equalToConstant: DesignTokens.Spacing.toolIconSize),
             headerRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
 
-            bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
+            bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DesignTokens.Spacing.rowHorizontalPadding),
+            bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -DesignTokens.Spacing.rowHorizontalPadding),
+            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: DesignTokens.Spacing.rowVerticalPadding),
+            bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -DesignTokens.Spacing.rowVerticalPadding),
         ])
 
         updateTextColors()
@@ -145,9 +145,9 @@ final class ResultRowView: NSTableCellView {
     private func makeStatusText(for result: SearchResult) -> String {
         switch result.activityStatus {
         case .working:
-            return "Working"
+            return "WORKING"
         case .waiting:
-            return "Awaiting input"
+            return "AWAITING"
         case .closed:
             return ""
         }
@@ -163,14 +163,14 @@ final class ResultRowView: NSTableCellView {
 
     private func updateTextColors() {
         let emphasized = backgroundStyle == .emphasized
-        let titleAlpha = currentActivityStatus == .closed ? 0.55 : 1.0
-        let iconAlpha = currentActivityStatus == .closed ? 0.55 : (emphasized ? 1.0 : 0.96)
+        let titleAlpha = currentActivityStatus == .closed ? DesignTokens.Color.closedTitleAlpha : 1.0
+        let iconAlpha = currentActivityStatus == .closed ? DesignTokens.Color.closedTitleAlpha : (emphasized ? 1.0 : 0.96)
 
         titleLabel.textColor = emphasized ? .white : .labelColor
         titleLabel.alphaValue = titleAlpha
         metadataLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .secondaryLabelColor
         if currentActivityStatus == .waiting {
-            statusTextLabel.textColor = NSColor(red: 0.94, green: 0.75, blue: 0.38, alpha: 1.0)
+            statusTextLabel.textColor = DesignTokens.Color.waitingAmber
         } else {
             statusTextLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
         }
@@ -180,15 +180,16 @@ final class ResultRowView: NSTableCellView {
     private func applyActivityStyle(for activityPreview: ActivityPreview) {
         switch activityPreview.kind {
         case .tool, .fileEdit:
-            activityLabel.textColor = NSColor(red: 0.54, green: 0.70, blue: 0.97, alpha: 1.0)
-            activityLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            activityLabel.textColor = DesignTokens.Color.activityCyan
+            activityLabel.font = DesignTokens.Font.activity
         case .assistant:
-            activityLabel.textColor = NSColor.secondaryLabelColor.withAlphaComponent(0.72)
-            let italicDescriptor = NSFont.systemFont(ofSize: 10.5).fontDescriptor.withSymbolicTraits(.italic)
-            if let italicFont = NSFont(descriptor: italicDescriptor, size: 10.5) {
+            activityLabel.textColor = NSColor.secondaryLabelColor.withAlphaComponent(0.55)
+            let activitySize = DesignTokens.Font.activity.pointSize
+            let italicDescriptor = NSFont.systemFont(ofSize: activitySize).fontDescriptor.withSymbolicTraits(.italic)
+            if let italicFont = NSFont(descriptor: italicDescriptor, size: activitySize) {
                 activityLabel.font = italicFont
             } else {
-                activityLabel.font = .systemFont(ofSize: 10.5)
+                activityLabel.font = .systemFont(ofSize: activitySize)
             }
         }
     }
@@ -231,14 +232,15 @@ final class ResultRowView: NSTableCellView {
         typingDotsView.isHidden = true
 
         for _ in 0..<3 {
-            let dot = NSView(frame: NSRect(x: 0, y: 0, width: 4, height: 4))
+            let dotSize = DesignTokens.Animation.typingDotSize
+            let dot = NSView(frame: NSRect(x: 0, y: 0, width: dotSize, height: dotSize))
             dot.translatesAutoresizingMaskIntoConstraints = false
             dot.wantsLayer = true
-            dot.layer?.cornerRadius = 2
+            dot.layer?.cornerRadius = dotSize / 2
             dot.layer?.backgroundColor = NSColor.secondaryLabelColor.cgColor
             NSLayoutConstraint.activate([
-                dot.widthAnchor.constraint(equalToConstant: 4),
-                dot.heightAnchor.constraint(equalToConstant: 4),
+                dot.widthAnchor.constraint(equalToConstant: dotSize),
+                dot.heightAnchor.constraint(equalToConstant: dotSize),
             ])
             typingDotsView.addArrangedSubview(dot)
         }
@@ -247,20 +249,20 @@ final class ResultRowView: NSTableCellView {
     private func startTypingDots() {
         for (index, dot) in typingDotsView.arrangedSubviews.enumerated() {
             let bounce = CAKeyframeAnimation(keyPath: "transform.translation.y")
-            bounce.values = [0, -3, 0]
+            bounce.values = [0, DesignTokens.Animation.typingDotBounce, 0]
             bounce.keyTimes = [0, 0.3, 0.6]
-            bounce.duration = 1.4
+            bounce.duration = DesignTokens.Animation.typingDotDuration
             bounce.repeatCount = .infinity
-            bounce.beginTime = CACurrentMediaTime() + Double(index) * 0.2
+            bounce.beginTime = CACurrentMediaTime() + Double(index) * DesignTokens.Animation.typingDotStagger
             dot.layer?.add(bounce, forKey: "bounce")
         }
     }
 
     private func applyWaitingBreathing() {
         let breathe = CABasicAnimation(keyPath: "opacity")
-        breathe.fromValue = 0.6
-        breathe.toValue = 0.9
-        breathe.duration = 3.0
+        breathe.fromValue = DesignTokens.Animation.breathingFromOpacity
+        breathe.toValue = DesignTokens.Animation.breathingToOpacity
+        breathe.duration = DesignTokens.Animation.breathingDuration
         breathe.autoreverses = true
         breathe.repeatCount = .infinity
         breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -276,7 +278,7 @@ final class ResultRowView: NSTableCellView {
         let gradient = CAGradientLayer()
         gradient.colors = [
             NSColor.labelColor.cgColor,
-            NSColor(red: 0.51, green: 0.69, blue: 1.0, alpha: 1.0).cgColor,
+            DesignTokens.Color.workingBlue.cgColor,
             NSColor.labelColor.cgColor,
         ]
         gradient.locations = [0.0, 0.5, 1.0]
@@ -287,7 +289,7 @@ final class ResultRowView: NSTableCellView {
         let animation = CABasicAnimation(keyPath: "locations")
         animation.fromValue = [-0.3, -0.15, 0.0]
         animation.toValue = [1.0, 1.15, 1.3]
-        animation.duration = 2.5
+        animation.duration = DesignTokens.Animation.shimmerDuration
         animation.repeatCount = .infinity
         gradient.add(animation, forKey: "shimmer")
 
