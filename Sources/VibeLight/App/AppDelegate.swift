@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let panelController = SearchPanelController()
             panelController.sessionIndex = sessionIndex
             panelController.onSelect = { result in
-                WindowJumper.jumpToSession(result)
+                Self.routeSelection(result)
             }
 
             let hotkeyManager = HotkeyManager { [weak self] in
@@ -128,6 +128,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeStatusItemTitle(count: Int) -> String {
         "VL: \(count)"
+    }
+
+    static func routeSelection(
+        _ result: SearchResult,
+        launch: (String, String) -> Void = { command, directory in
+            TerminalLauncher.launch(command: command, directory: directory)
+        },
+        jump: (SearchResult) -> Void = { result in
+            WindowJumper.jumpToSession(result)
+        }
+    ) {
+        if result.status == "action" {
+            let command = result.sessionId == "new-codex" ? "codex" : "claude"
+            launch(command, result.project)
+            return
+        }
+
+        if result.status == "live" {
+            jump(result)
+            return
+        }
+
+        let command: String
+        if result.tool == "codex" {
+            command = "codex resume \(result.sessionId)"
+        } else {
+            command = "claude --resume \(result.sessionId)"
+        }
+        launch(command, result.project)
     }
 
     private func makeSessionIndex() throws -> SessionIndex {
