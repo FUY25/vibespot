@@ -1,88 +1,32 @@
 import Foundation
 
-@MainActor
-final class Indexer {
+struct IndexScanner {
     let sessionIndex: SessionIndex
+    let homeDirectoryPath: String
 
-    private let homeDirectoryPath: String
-    private var fileWatcher: FileWatcher?
-    private var refreshTimer: Timer?
-    private var startupScanTask: Task<Void, Never>?
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
 
-    init(
-        sessionIndex: SessionIndex,
-        homeDirectoryPath: String = FileManager.default.homeDirectoryForCurrentUser.path
-    ) {
+    init(sessionIndex: SessionIndex, homeDirectoryPath: String) {
         self.sessionIndex = sessionIndex
         self.homeDirectoryPath = homeDirectoryPath
     }
 
-    func start() {
-        stop()
-
-        let sessionIndex = sessionIndex
-        let homeDirectoryPath = homeDirectoryPath
-        startupScanTask = Task.detached(priority: .utility) { [weak self] in
-            var scanner = IndexScanner(
-                sessionIndex: sessionIndex,
-                homeDirectoryPath: homeDirectoryPath
-            )
-            scanner.performFullScan()
-
-            guard !Task.isCancelled else {
-                return
-            }
-
-            await MainActor.run { [weak self] in
-                self?.refreshLiveSessions()
-            }
+    mutating func performFullScan() {
+        guard !Task.isCancelled else {
+            return
         }
-
-        let watchPaths = [
-            homeDirectoryPath + "/.claude",
-            homeDirectoryPath + "/.codex",
-        ].filter { FileManager.default.fileExists(atPath: $0) }
-
-        if !watchPaths.isEmpty {
-            fileWatcher = FileWatcher(paths: watchPaths) { [weak self] changedPaths in
-                Task { @MainActor [weak self] in
-                    self?.handleChanges(changedPaths)
-                }
-            }
-            fileWatcher?.start()
+        scanClaudeSessions()
+        guard !Task.isCancelled else {
+            return
         }
-
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshLiveSessions()
-            }
-        }
+        scanCodexSessions()
     }
 
-    func stop() {
-        startupScanTask?.cancel()
-        startupScanTask = nil
-
-        fileWatcher?.stop()
-        fileWatcher = nil
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-
-    // MARK: - Full scan
-
-    func performFullScan() {
-        var scanner = IndexScanner(
-            sessionIndex: sessionIndex,
-            homeDirectoryPath: homeDirectoryPath
-        )
-        scanner.performFullScan()
-        refreshLiveSessions()
-    }
-
-    private func scanClaudeSessions() {
+    mutating func scanClaudeSessions() {
+        guard !Task.isCancelled else {
+            return
+        }
         let projectsPath = homeDirectoryPath + "/.claude/projects"
         let fileManager = FileManager.default
 
@@ -91,6 +35,9 @@ final class Indexer {
         }
 
         for encodedProjectPath in projectDirectories {
+            if Task.isCancelled {
+                return
+            }
             let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: directoryPath, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -103,6 +50,9 @@ final class Indexer {
             let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
 
             for meta in metadataBySessionId.values {
+                if Task.isCancelled {
+                    return
+                }
                 guard claudeRawSessionFileExists(sessionId: meta.sessionId, in: projectDirectoryURL) else {
                     continue
                 }
@@ -119,6 +69,9 @@ final class Indexer {
             }
 
             for file in files where file.hasSuffix(".jsonl") {
+                if Task.isCancelled {
+                    return
+                }
                 let filePath = (directoryPath as NSString).appendingPathComponent(file)
                 let sessionId = (file as NSString).deletingPathExtension
                 guard isUUID(sessionId) else {
@@ -136,11 +89,45 @@ final class Indexer {
         }
     }
 
+    mutating func scanCodexSessions() {
+        guard !Task.isCancelled else {
+            return
+        }
+        codexTitleMap = loadCodexTitleMap()
+
+        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
+        let fileManager = FileManager.default
+
+        guard
+            let enumerator = fileManager.enumerator(
+                at: URL(fileURLWithPath: sessionsPath),
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return
+        }
+
+        for case let fileURL as URL in enumerator {
+            if Task.isCancelled {
+                return
+            }
+            guard fileURL.pathExtension == "jsonl" else {
+                continue
+            }
+
+            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+        }
+    }
+
     private func indexClaudeSession(
         meta: ParsedSessionMeta,
         fallbackProjectPath: String,
         fallbackProjectName: String
     ) {
+        guard !Task.isCancelled else {
+            return
+        }
         let projectPath = meta.projectPath.isEmpty ? fallbackProjectPath : meta.projectPath
         let projectName = projectPath.isEmpty ? fallbackProjectName : (projectPath as NSString).lastPathComponent
         let title = normalizedDisplayTitle(from: meta.title) ?? "Untitled"
@@ -159,13 +146,16 @@ final class Indexer {
         )
     }
 
-    private func indexClaudeSessionFile(
+    private mutating func indexClaudeSessionFile(
         path: String,
         sessionId: String,
         projectPath: String,
         projectName: String,
         preferredTitle: String? = nil
     ) {
+        guard !Task.isCancelled else {
+            return
+        }
         guard !processedFiles.contains(path) else {
             return
         }
@@ -177,6 +167,9 @@ final class Indexer {
 
         let url = URL(fileURLWithPath: path)
         guard let messages = try? ClaudeParser.parseSessionFile(url: url) else {
+            return
+        }
+        if fileMtimeDidChange(at: path, expected: mtime) {
             return
         }
 
@@ -218,31 +211,6 @@ final class Indexer {
         try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
     }
 
-    private func scanCodexSessions() {
-        codexTitleMap = loadCodexTitleMap()
-
-        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
-        let fileManager = FileManager.default
-
-        guard
-            let enumerator = fileManager.enumerator(
-                at: URL(fileURLWithPath: sessionsPath),
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return
-        }
-
-        for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension == "jsonl" else {
-                continue
-            }
-
-            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
-        }
-    }
-
     private func loadCodexTitleMap() -> [String: String] {
         let indexURL = URL(fileURLWithPath: homeDirectoryPath + "/.codex/session_index.jsonl")
         let metas = (try? CodexParser.parseSessionIndex(url: indexURL)) ?? []
@@ -255,7 +223,10 @@ final class Indexer {
         return titleMap
     }
 
-    private func indexCodexSessionFile(path: String, titleMap: [String: String]) {
+    private mutating func indexCodexSessionFile(path: String, titleMap: [String: String]) {
+        guard !Task.isCancelled else {
+            return
+        }
         guard !processedFiles.contains(path) else {
             return
         }
@@ -267,6 +238,7 @@ final class Indexer {
            shouldSkipFile(path: path, sessionId: sessionIdFromPath) {
             return
         }
+        let parseStartMtime = fileMtime(at: path)
 
         let url = URL(fileURLWithPath: path)
         guard let (meta, messages) = try? CodexParser.parseSessionFile(url: url) else {
@@ -284,7 +256,10 @@ final class Indexer {
         if shouldSkipFile(path: path, sessionId: sessionId) {
             return
         }
-        let mtime = fileMtime(at: path)
+        if fileMtimeDidChange(at: path, expected: parseStartMtime) {
+            return
+        }
+        let mtime = parseStartMtime ?? fileMtime(at: path)
 
         let title = titleMap[sessionId]
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
@@ -320,141 +295,6 @@ final class Indexer {
         try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
     }
 
-    // MARK: - Live sessions
-
-    private func refreshLiveSessions() {
-        let liveSessions = LiveSessionRegistry.scan()
-        let aliveSessionsByID = Dictionary(
-            uniqueKeysWithValues: liveSessions
-                .filter(\.isAlive)
-                .map { ($0.sessionId, $0) }
-        )
-        let aliveSessionIDs = Set(
-            liveSessions
-                .filter(\.isAlive)
-                .map(\.sessionId)
-        )
-
-        for sessionId in aliveSessionIDs {
-            try? sessionIndex.updateRuntimeState(
-                sessionId: sessionId,
-                status: "live",
-                pid: aliveSessionsByID[sessionId]?.pid
-            )
-        }
-
-        let indexedLiveSessionIDs = (try? sessionIndex.liveSessionIDs()) ?? []
-        for sessionId in indexedLiveSessionIDs.subtracting(aliveSessionIDs) {
-            try? sessionIndex.updateRuntimeState(sessionId: sessionId, status: "closed", pid: nil)
-        }
-    }
-
-    // MARK: - Change handling
-
-    private func handleChanges(_ paths: [String]) {
-        for path in paths {
-            if path.contains("/.claude/sessions/"), path.hasSuffix(".json") {
-                refreshLiveSessions()
-                continue
-            }
-
-            if path.hasSuffix("/sessions-index.json"), path.contains("/.claude/projects/") {
-                reindexClaudeSessionsIndex(at: path)
-                continue
-            }
-
-            if path.hasSuffix("/session_index.jsonl"), path.contains("/.codex/") {
-                codexTitleMap = loadCodexTitleMap()
-                reindexAllCodexSessionFiles()
-                continue
-            }
-
-            if !path.hasSuffix(".jsonl") {
-                continue
-            }
-
-            if path.contains("/.claude/projects/") {
-                reindexClaudeSessionFile(at: path)
-            } else if path.contains("/.codex/sessions/") {
-                processedFiles.remove(path)
-                indexCodexSessionFile(path: path, titleMap: codexTitleMap)
-            }
-        }
-    }
-
-    private func reindexClaudeSessionsIndex(at path: String) {
-        let indexURL = URL(fileURLWithPath: path)
-        let projectDirectoryURL = indexURL.deletingLastPathComponent()
-        let encodedProjectPath = projectDirectoryURL.lastPathComponent
-        let decodedProjectPath = ClaudeParser.decodeProjectPath(encodedProjectPath)
-        let projectName = (decodedProjectPath as NSString).lastPathComponent
-        let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
-
-        for meta in metadataBySessionId.values {
-            guard claudeRawSessionFileExists(sessionId: meta.sessionId, in: projectDirectoryURL) else {
-                continue
-            }
-
-            let rawSessionPath = projectDirectoryURL
-                .appendingPathComponent(meta.sessionId)
-                .appendingPathExtension("jsonl")
-                .path
-            processedFiles.remove(rawSessionPath)
-            indexClaudeSessionFile(
-                path: rawSessionPath,
-                sessionId: meta.sessionId,
-                projectPath: decodedProjectPath,
-                projectName: projectName,
-                preferredTitle: meta.title
-            )
-        }
-    }
-
-    private func reindexAllCodexSessionFiles() {
-        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
-        let fileManager = FileManager.default
-
-        guard
-            let enumerator = fileManager.enumerator(
-                at: URL(fileURLWithPath: sessionsPath),
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return
-        }
-
-        for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            processedFiles.remove(fileURL.path)
-            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
-        }
-    }
-
-    private func reindexClaudeSessionFile(at path: String) {
-        let fileURL = URL(fileURLWithPath: path)
-        let sessionId = fileURL.deletingPathExtension().lastPathComponent
-        guard isUUID(sessionId) else {
-            return
-        }
-
-        processedFiles.remove(path)
-
-        let projectDirectoryURL = fileURL.deletingLastPathComponent()
-        let encodedProjectPath = projectDirectoryURL.lastPathComponent
-        let decodedProjectPath = ClaudeParser.decodeProjectPath(encodedProjectPath)
-        let projectName = (decodedProjectPath as NSString).lastPathComponent
-        let metadataBySessionId = claudeSessionMetadataBySessionId(in: projectDirectoryURL)
-        indexClaudeSessionFile(
-            path: path,
-            sessionId: sessionId,
-            projectPath: decodedProjectPath,
-            projectName: projectName,
-            preferredTitle: metadataBySessionId[sessionId]?.title
-        )
-    }
-
-    // MARK: - Helpers
-
     private func fileMtime(at path: String) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
     }
@@ -463,6 +303,16 @@ final class Indexer {
         guard let currentMtime = fileMtime(at: path) else { return false }
         guard let storedMtime = try? sessionIndex.lastIndexedMtime(sessionId: sessionId) else { return false }
         return currentMtime == storedMtime
+    }
+
+    private func fileMtimeDidChange(at path: String, expected: Date?) -> Bool {
+        guard let expected else {
+            return false
+        }
+        guard let currentMtime = fileMtime(at: path) else {
+            return true
+        }
+        return currentMtime != expected
     }
 
     private func claudeSessionMetadataBySessionId(in projectDirectoryURL: URL) -> [String: ParsedSessionMeta] {
