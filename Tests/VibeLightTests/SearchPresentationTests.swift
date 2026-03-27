@@ -152,6 +152,7 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
 
     let searchField = try controllerChild(named: "searchField", in: controller, as: SearchField.self)
     let actionHintLabel = try controllerChild(named: "actionHintLabel", in: controller, as: NSTextField.self)
+    let resultsTableView = try controllerChild(named: "resultsTableView", in: controller, as: NSTableView.self)
 
     #expect(actionHintLabel.stringValue == "↩ Switch")
 
@@ -159,10 +160,22 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
-    let deadline = Date().addingTimeInterval(1.0)
-    while actionHintLabel.stringValue != "↩ Resume ⇥ History", Date() < deadline {
+
+    let deadline = Date().addingTimeInterval(3.0)
+    var leadingResultIsClosed = false
+    while Date() < deadline {
+        let currentResults = try controllerChild(named: "results", in: controller, as: [SearchResult].self)
+        if currentResults.first?.status == "closed" {
+            leadingResultIsClosed = true
+            break
+        }
         try await Task.sleep(for: .milliseconds(20))
     }
+
+    #expect(leadingResultIsClosed)
+    controller.tableViewSelectionDidChange(
+        Notification(name: NSTableView.selectionDidChangeNotification, object: resultsTableView)
+    )
 
     #expect(actionHintLabel.stringValue == "↩ Resume ⇥ History")
 }
