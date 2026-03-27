@@ -331,6 +331,26 @@ final class Indexer {
 
     // MARK: - Live sessions
 
+    /// Given a list of (sessionId, pid, startedAt) tuples, returns session IDs
+    /// that should be marked "closed" because a newer session shares their PID.
+    nonisolated static func sessionIDsToCloseByPID(
+        sessions: [(sessionId: String, pid: Int, startedAt: Date)]
+    ) -> [String] {
+        var byPID: [Int: [(sessionId: String, startedAt: Date)]] = [:]
+        for s in sessions {
+            byPID[s.pid, default: []].append((s.sessionId, s.startedAt))
+        }
+
+        var staleIDs: [String] = []
+        for (_, group) in byPID where group.count > 1 {
+            let sorted = group.sorted { $0.startedAt > $1.startedAt }
+            for stale in sorted.dropFirst() {
+                staleIDs.append(stale.sessionId)
+            }
+        }
+        return staleIDs
+    }
+
     private func refreshLiveSessions() {
         let liveSessions = LiveSessionRegistry.scan()
         let aliveSessionsByID = Dictionary(
@@ -355,6 +375,28 @@ final class Indexer {
 
         let indexedLiveSessionIDs = (try? sessionIndex.liveSessionIDs()) ?? []
         for sessionId in indexedLiveSessionIDs.subtracting(aliveSessionIDs) {
+            try? sessionIndex.updateRuntimeState(sessionId: sessionId, status: "closed", pid: nil)
+        }
+
+        // Dedup: when multiple live sessions share a PID, close all but the newest
+        deduplicateSharedPIDSessions(aliveSessionsByID: aliveSessionsByID)
+    }
+
+    private func deduplicateSharedPIDSessions(aliveSessionsByID: [String: LiveSession]) {
+        // Build (sessionId, pid, startedAt) tuples for alive sessions
+        var tuples: [(sessionId: String, pid: Int, startedAt: Date)] = []
+        for (sessionId, liveSession) in aliveSessionsByID {
+            let startedAt: Date
+            if let rows = try? sessionIndex.search(query: "", liveOnly: true) {
+                startedAt = rows.first(where: { $0.sessionId == sessionId })?.startedAt ?? .distantPast
+            } else {
+                startedAt = .distantPast
+            }
+            tuples.append((sessionId, liveSession.pid, startedAt))
+        }
+
+        let staleIDs = Self.sessionIDsToCloseByPID(sessions: tuples)
+        for sessionId in staleIDs {
             try? sessionIndex.updateRuntimeState(sessionId: sessionId, status: "closed", pid: nil)
         }
     }
