@@ -40,6 +40,9 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
     let length = searchField.stringValue.utf16.count
     editorBeforeRefresh.selectedRange = NSRange(location: length, length: 0)
 
+    // Force focus away so restoreSearchFieldFocus() must run the refocus branch.
+    panel.makeFirstResponder(panel.contentView)
+
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
