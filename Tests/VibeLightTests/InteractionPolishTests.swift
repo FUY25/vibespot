@@ -45,20 +45,10 @@ func windowJumperRunProcessTimesOut() throws {
 
 @MainActor
 @Test
-func hotkeyManagerCallsPermissionHandlerWhenTapCreationFails() {
-    var didRequestPermissionHelp = false
-
-    let manager = HotkeyManager(
-        onToggle: {},
-        onPermissionRequired: {
-            didRequestPermissionHelp = true
-        },
-        eventTapFactory: { _, _ in nil }
-    )
-
+func hotkeyManagerRegisterAndUnregisterAreSafe() {
+    let manager = HotkeyManager(onToggle: {})
     manager.register()
-
-    #expect(didRequestPermissionHelp)
+    manager.unregister()
 }
 
 private actor InvocationCounter {

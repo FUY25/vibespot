@@ -1,163 +1,127 @@
-import Cocoa
 import Carbon
+import Cocoa
 
 @MainActor
 final class HotkeyManager {
-    typealias PermissionHandler = @MainActor @Sendable () -> Void
-    typealias EventTapFactory = @MainActor @Sendable (
-        _ callback: @escaping CGEventTapCallBack,
-        _ userInfo: UnsafeMutableRawPointer?
-    ) -> CFMachPort?
-
-    private final class CallbackContext {
-        weak var manager: HotkeyManager?
-
-        init(manager: HotkeyManager) {
-            self.manager = manager
-        }
-    }
-
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private var callbackContext: Unmanaged<CallbackContext>?
+    private var hotkeyRef: EventHotKeyRef?
+    private var handlerRef: EventHandlerRef?
+    private var contextRef: Unmanaged<HotkeyContext>?
     private let onToggle: @MainActor @Sendable () -> Void
-    private let onPermissionRequired: PermissionHandler
-    private let eventTapFactory: EventTapFactory
-    private var didPresentPermissionHelp = false
 
-    init(
-        onToggle: @escaping @MainActor @Sendable () -> Void,
-        onPermissionRequired: @escaping PermissionHandler = HotkeyManager.presentAccessibilityPermissionAlert,
-        eventTapFactory: @escaping EventTapFactory = HotkeyManager.makeEventTap
-    ) {
+    private static let hotkeyID = EventHotKeyID(
+        signature: OSType(0x564C_4854),
+        id: 1
+    )
+
+    init(onToggle: @escaping @MainActor @Sendable () -> Void) {
         self.onToggle = onToggle
-        self.onPermissionRequired = onPermissionRequired
-        self.eventTapFactory = eventTapFactory
     }
 
     func register() {
-        guard eventTap == nil else { return }
+        guard hotkeyRef == nil, handlerRef == nil else {
+            return
+        }
 
-        let context = Unmanaged.passRetained(CallbackContext(manager: self))
-        callbackContext = context
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
 
-        guard let tap = eventTapFactory(Self.eventTapCallback, UnsafeMutableRawPointer(context.toOpaque())) else {
-            context.release()
-            callbackContext = nil
+        let context = Unmanaged.passRetained(HotkeyContext(manager: self))
+        contextRef = context
 
-            if !didPresentPermissionHelp {
-                didPresentPermissionHelp = true
-                onPermissionRequired()
+        var installedHandler: EventHandlerRef?
+        let installStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, event, refcon -> OSStatus in
+                guard let refcon else {
+                    return OSStatus(eventNotHandledErr)
+                }
+
+                var pressedID = EventHotKeyID()
+                let parameterStatus = GetEventParameter(
+                    event,
+                    UInt32(kEventParamDirectObject),
+                    UInt32(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &pressedID
+                )
+
+                guard parameterStatus == noErr,
+                      pressedID.signature == HotkeyManager.hotkeyID.signature,
+                      pressedID.id == HotkeyManager.hotkeyID.id
+                else {
+                    return OSStatus(eventNotHandledErr)
+                }
+
+                let context = Unmanaged<HotkeyContext>.fromOpaque(refcon).takeUnretainedValue()
+                Task { @MainActor in
+                    context.manager?.onToggle()
+                }
+
+                return noErr
+            },
+            1,
+            &eventType,
+            UnsafeMutableRawPointer(context.toOpaque()),
+            &installedHandler
+        )
+
+        guard installStatus == noErr else {
+            contextRef?.release()
+            contextRef = nil
+            return
+        }
+
+        handlerRef = installedHandler
+
+        var registeredHotkey: EventHotKeyRef?
+        let registerStatus = RegisterEventHotKey(
+            UInt32(kVK_Space),
+            UInt32(cmdKey | shiftKey),
+            Self.hotkeyID,
+            GetApplicationEventTarget(),
+            0,
+            &registeredHotkey
+        )
+
+        guard registerStatus == noErr else {
+            if let installedHandler {
+                RemoveEventHandler(installedHandler)
+                handlerRef = nil
             }
-
-            print("HotkeyManager: Accessibility permission is required for the hotkey.")
+            contextRef?.release()
+            contextRef = nil
             return
         }
 
-        eventTap = tap
-
-        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            unregister()
-            return
-        }
-
-        runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        hotkeyRef = registeredHotkey
     }
 
     func unregister() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-            runLoopSource = nil
+        if let hotkeyRef {
+            UnregisterEventHotKey(hotkeyRef)
+            self.hotkeyRef = nil
         }
 
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            CFMachPortInvalidate(tap)
-            eventTap = nil
+        if let handlerRef {
+            RemoveEventHandler(handlerRef)
+            self.handlerRef = nil
         }
 
-        if let context = callbackContext {
-            context.release()
-            callbackContext = nil
+        if let contextRef {
+            contextRef.release()
+            self.contextRef = nil
         }
     }
+}
 
-    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, refcon in
-        guard let refcon = refcon else {
-            return Unmanaged.passUnretained(event)
-        }
+private final class HotkeyContext {
+    weak var manager: HotkeyManager?
 
-        let context = Unmanaged<CallbackContext>.fromOpaque(refcon).takeUnretainedValue()
-        guard let manager = context.manager else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if let tap = manager.eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
-            return Unmanaged.passUnretained(event)
-        }
-
-        guard type == .keyDown else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-        let flags = event.flags
-        let spaceKey = CGKeyCode(kVK_Space)
-        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        let requiredModifiers: CGEventFlags = [.maskCommand, .maskShift]
-        let relevantModifiers: CGEventFlags = [
-            .maskAlphaShift,
-            .maskShift,
-            .maskControl,
-            .maskAlternate,
-            .maskCommand,
-            .maskHelp,
-            .maskSecondaryFn,
-            .maskNumericPad,
-        ]
-        let pressedModifiers = flags.intersection(relevantModifiers)
-
-        let isMatch = keyCode == spaceKey && !isAutoRepeat && pressedModifiers == requiredModifiers
-        guard isMatch else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        Task { @MainActor in
-            manager.onToggle()
-        }
-
-        return nil
-    }
-
-    private static func makeEventTap(
-        callback: @escaping CGEventTapCallBack,
-        userInfo: UnsafeMutableRawPointer?
-    ) -> CFMachPort? {
-        let eventMask = CGEventMask(1) << CGEventMask(CGEventType.keyDown.rawValue)
-        return CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: callback,
-            userInfo: userInfo
-        )
-    }
-
-    private static func presentAccessibilityPermissionAlert() {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = """
-        VibeLight needs Accessibility access to listen for the global hotkey.
-        Enable it in System Settings > Privacy & Security > Accessibility.
-        """
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+    init(manager: HotkeyManager) {
+        self.manager = manager
     }
 }
