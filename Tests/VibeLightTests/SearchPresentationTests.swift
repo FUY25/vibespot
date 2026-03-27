@@ -181,6 +181,58 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
 }
 
 @MainActor
+@Test
+func searchPanelInjectsNewSessionActionsAndShowsLaunchHint() async throws {
+    let dbPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("search_new_actions_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    try index.upsertSession(
+        id: "existing-new-match",
+        tool: "claude",
+        title: "new feature notes",
+        project: "/Users/me/project",
+        projectName: "project",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(timeIntervalSince1970: 50_800),
+        pid: nil
+    )
+
+    let controller = SearchPanelController()
+    controller.sessionIndex = index
+    controller.show()
+    defer { controller.hide() }
+
+    let searchField = try controllerChild(named: "searchField", in: controller, as: SearchField.self)
+    let actionHintLabel = try controllerChild(named: "actionHintLabel", in: controller, as: NSTextField.self)
+
+    searchField.stringValue = "new"
+    controller.controlTextDidChange(
+        Notification(name: NSControl.textDidChangeNotification, object: searchField)
+    )
+
+    let deadline = Date().addingTimeInterval(3.0)
+    var injectedActions = false
+    while Date() < deadline {
+        let currentResults = try controllerChild(named: "results", in: controller, as: [SearchResult].self)
+        if currentResults.count >= 2,
+           currentResults[0].sessionId == "new-claude",
+           currentResults[0].status == "action",
+           currentResults[1].sessionId == "new-codex",
+           currentResults[1].status == "action" {
+            injectedActions = true
+            break
+        }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+
+    #expect(injectedActions)
+    #expect(actionHintLabel.stringValue == "↩ Launch")
+}
+
+@MainActor
 private func statusTextField(in view: NSView) -> NSTextField? {
     allTextFields(in: view).first { $0.alignment == .right }
 }
