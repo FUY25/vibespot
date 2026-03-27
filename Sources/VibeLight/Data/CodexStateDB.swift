@@ -1,8 +1,12 @@
 import Foundation
 import SQLite3
 
-struct CodexStateDB {
+final class CodexStateDB {
     let path: String
+    private var lastFailureTime: Date?
+    private var lastLogTime: Date?
+    private static let cooldownInterval: TimeInterval = 30
+    private static let logThrottleInterval: TimeInterval = 60
 
     init(path: String) {
         self.path = path
@@ -17,7 +21,9 @@ struct CodexStateDB {
     }
 
     func sessionIdByCwd(_ cwd: String) -> String? {
-        withReadOnlyDatabase { db in
+        guard shouldAttemptOpen() else { return nil }
+
+        return withReadOnlyDatabase { db in
             let sql = """
             SELECT id
             FROM threads
@@ -28,20 +34,20 @@ struct CodexStateDB {
 
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-                Self.logSQLiteError(db, context: "prepare sessionIdByCwd")
+                logSQLiteError(db, context: "prepare sessionIdByCwd")
                 return nil
             }
             defer { sqlite3_finalize(statement) }
 
             guard sqlite3_bind_text(statement, 1, (cwd as NSString).utf8String, -1, Self.transientDestructor) == SQLITE_OK else {
-                Self.logSQLiteError(db, context: "bind sessionIdByCwd")
+                logSQLiteError(db, context: "bind sessionIdByCwd")
                 return nil
             }
 
             let rc = sqlite3_step(statement)
             guard rc == SQLITE_ROW else {
                 if rc != SQLITE_DONE {
-                    Self.logSQLiteError(db, context: "step sessionIdByCwd", code: rc)
+                    logSQLiteError(db, context: "step sessionIdByCwd", code: rc)
                 }
                 return nil
             }
@@ -54,7 +60,9 @@ struct CodexStateDB {
     }
 
     func gitBranchMap() -> [String: String] {
-        withReadOnlyDatabase { db in
+        guard shouldAttemptOpen() else { return [:] }
+
+        return withReadOnlyDatabase { db in
             let sql = """
             SELECT id, git_branch
             FROM threads
@@ -64,7 +72,7 @@ struct CodexStateDB {
 
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-                Self.logSQLiteError(db, context: "prepare gitBranchMap")
+                logSQLiteError(db, context: "prepare gitBranchMap")
                 return [:]
             }
             defer { sqlite3_finalize(statement) }
@@ -77,7 +85,7 @@ struct CodexStateDB {
                     break
                 }
                 if rc != SQLITE_ROW {
-                    Self.logSQLiteError(db, context: "step gitBranchMap", code: rc)
+                    logSQLiteError(db, context: "step gitBranchMap", code: rc)
                     break
                 }
 
@@ -94,8 +102,19 @@ struct CodexStateDB {
         } ?? [:]
     }
 
+    private func shouldAttemptOpen() -> Bool {
+        if let lastFailure = lastFailureTime {
+            let elapsed = Date().timeIntervalSince(lastFailure)
+            if elapsed < Self.cooldownInterval {
+                return false
+            }
+        }
+        return true
+    }
+
     private func withReadOnlyDatabase<T>(_ operation: (OpaquePointer) -> T?) -> T? {
         guard FileManager.default.fileExists(atPath: path) else {
+            lastFailureTime = Date()
             return nil
         }
 
@@ -104,27 +123,37 @@ struct CodexStateDB {
         let rc = sqlite3_open_v2(path, &handle, flags, nil)
 
         guard rc == SQLITE_OK, let db = handle else {
+            lastFailureTime = Date()
             if let handle {
-                Self.logSQLiteError(handle, context: "open read-only database", code: rc)
+                logSQLiteError(handle, context: "open read-only database", code: rc)
                 sqlite3_close_v2(handle)
             }
             return nil
         }
 
+        // Reset failure tracking on successful open
+        lastFailureTime = nil
+
         if sqlite3_busy_timeout(db, 300) != SQLITE_OK {
-            Self.logSQLiteError(db, context: "configure busy timeout")
+            logSQLiteError(db, context: "configure busy timeout")
         }
 
         defer {
             let closeRC = sqlite3_close_v2(db)
             if closeRC != SQLITE_OK {
-                Self.logSQLiteError(db, context: "close read-only database", code: closeRC)
+                logSQLiteError(db, context: "close read-only database", code: closeRC)
             }
         }
         return operation(db)
     }
 
-    private static func logSQLiteError(_ db: OpaquePointer?, context: String, code: Int32? = nil) {
+    private func logSQLiteError(_ db: OpaquePointer?, context: String, code: Int32? = nil) {
+        let now = Date()
+        if let lastLog = lastLogTime, now.timeIntervalSince(lastLog) < Self.logThrottleInterval {
+            return
+        }
+        lastLogTime = now
+
         let rc = code ?? sqlite3_errcode(db)
         let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
         print("CodexStateDB: \(context) failed (\(rc)): \(message)")
