@@ -334,9 +334,10 @@ final class Indexer {
     private func refreshLiveSessions() {
         let liveSessions = LiveSessionRegistry.scan()
         let aliveSessionsByID = Dictionary(
-            uniqueKeysWithValues: liveSessions
+            liveSessions
                 .filter(\.isAlive)
-                .map { ($0.sessionId, $0) }
+                .map { ($0.sessionId, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         let aliveSessionIDs = Set(
             liveSessions
