@@ -378,6 +378,12 @@ final class Indexer {
                 continue
             }
 
+            if path.hasSuffix("/state_5.sqlite"), path.contains("/.codex/") {
+                codexTitleMap = loadCodexTitleMap()
+                reindexAllCodexSessionFiles()
+                continue
+            }
+
             if !path.hasSuffix(".jsonl") {
                 continue
             }
