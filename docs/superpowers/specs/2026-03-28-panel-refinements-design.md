@@ -118,7 +118,9 @@ Preserve trailing `?` for questions.
 
 ### 3. Activity Line Visibility
 
-Make the activity preview line more readable without making it visually dominant.
+The activity preview line moves from inline (in every row) to the dwell preview card. Rows stay compact at 56px: icon + title + metadata only.
+
+However, the activity line rendering code stays in the codebase (CSS + JS) for cases where preview is unavailable, and the styling is improved:
 
 #### CSS Changes
 
@@ -138,11 +140,12 @@ Make the activity preview line more readable without making it visually dominant
 Add terminal-style `> ` prefix to tool call activity previews in JS:
 
 ```js
-// In createRow() and updateRowContent()
 if (kind === 'tool' || kind === 'fileEdit') {
     activity.textContent = '> ' + stripMarkdown(result.activityPreview);
 }
 ```
+
+These styles apply both to the (hidden) row activity line and to exchanges shown in the preview card.
 
 ### 4. Running Time for Live Sessions
 
@@ -185,21 +188,93 @@ function formatMetadata(result) {
 
 `startedAt` must be included in the JSON pushed to the web view. Currently `SearchResult` has `startedAt: Date` — add it to `WebBridge.resultsToJSONString()` as an ISO 8601 string.
 
-## Files Affected
+
+
+### 5. Dwell Preview Card
+
+Show a lightweight floating preview when the user pauses on a selected row, giving enough context to decide whether to jump in.
+
+#### Trigger & Lifecycle
+
+- **Dwell:** 300ms pause on a selected row triggers preview load
+- **Cancel:** Moving to another row before 300ms cancels the pending preview
+- **Dismiss:** Moving to another row, pressing Escape, or activating a session dismisses the preview (and starts a new 300ms dwell on the new row)
+- **Live update:** For working sessions, preview content re-fetches every 3s, piggybacks on the existing `refreshLiveSessions()` timer. If the previewed session's data changed, JS re-renders the card.
+
+#### Content (two sections)
+
+**Recent Exchanges** (last 2-3 turns)
+- User lines: `> ` prefix, `label-secondary` color
+- Assistant lines: `label` color, truncated to ~2 lines each
+- Tool calls shown inline as `[tool: filename]`
+- Markdown stripped, ANSI stripped
+- Errors/blockers surface naturally as the latest exchange, rendered in `error-red`
+- Current state (working/waiting/error) is just the top of the conversation — no separate section
+
+**Files Touched** (max 5, most recent first)
+- Basename in `label`, directory path in `label-tertiary`
+- Example: `panel.js  Resources/Web/`
+- Extracted from tool_use entries with `file_path` or `path` input fields
+
+#### Visual
+
+Not a card, not a popup — a preview. Lightweight, no heavy borders or shadows.
+
+```css
+.preview {
+  position: absolute;
+  right: -328px;              /* anchored to panel right edge, 8px gap */
+  width: 320px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--ghost);
+  border-radius: 0 var(--panel-radius) var(--panel-radius) 0;
+  padding: 12px 14px;
+  font-family: var(--font-activity);  /* JetBrains Mono throughout */
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 10;
+}
+```
+
+- Content-height (no fixed max, grows with content)
+- `12px` JetBrains Mono, `6px` gap between exchanges
+- Files section separated by a `ghost` border-top, `8px` margin
+
+#### Data Flow
+
+1. JS detects 300ms dwell on a row
+2. JS sends `bridge.postMessage({ type: 'preview', sessionId: '...' })`
+3. Swift reads tail of session JSONL (~last 30 lines)
+4. Extracts: last 2-3 user/assistant exchanges + unique file paths from tool_use inputs
+5. Swift pushes to JS: `updatePreview(json)` with `{ exchanges: [...], files: [...] }`
+6. JS renders/updates the floating preview anchored to the selected row
+
+#### Row Simplification
+
+Since the preview card shows recent conversation on dwell, the activity preview line in rows is no longer needed for context at a glance. Remove the activity line from rows to keep them compact at 56px. The row becomes: **icon | title + metadata only**.
+
+The activity line CSS (`.row__activity`) and JS rendering remain in the codebase but are not rendered — available if the preview feature is disabled or for future use.
+
+#### New Files Affected
+
+See consolidated table below.
+
+## Files Affected (all changes)
 
 | File | Change |
 |------|--------|
 | `SessionIndex.swift` | Add `healthStatus`/`healthDetail` columns, `updateHealthStatus()`, include `startedAt` in search results |
 | `Indexer.swift` | Error detection during `refreshLiveSessions()` and transcript parse |
-| `ClaudeParser.swift` | ANSI stripping on title during parse |
+| `ClaudeParser.swift` | ANSI stripping on title, `parseTailExchanges()` for preview |
 | `SearchResult` (in SessionIndex.swift) | Add `healthStatus`, `healthDetail` fields |
-| `WebBridge.swift` | Include `healthStatus`, `startedAt` in JSON serialization |
-| `panel.css` | Error/stale tint tokens, activity line size/opacity tweaks |
-| `panel.js` | Row tint classes, `formatRunningTime()`, `> ` prefix on tool calls, updated `formatMetadata()` |
+| `SearchPanelController.swift` | Handle `preview` bridge message, read JSONL tail |
+| `WebBridge.swift` | Include `healthStatus`, `startedAt` in JSON, add preview message type |
+| `panel.css` | Error/stale tint tokens, activity line tweaks, preview card styles |
+| `panel.js` | Row tint classes, `formatRunningTime()`, dwell timer, preview card rendering |
 
 ## Out of Scope
 
-- Error detail view (clicking into a session to see the full error) — future work
 - Notifications/alerts for errors — this is visual-only in the panel
 - Title generation from transcript heuristics — rely on existing summary/thread_name fields
-- Changes to row height or layout density
+- Preview card for action rows (new session) — no transcript to show
+- Inline editing or responding from the preview — read-only
