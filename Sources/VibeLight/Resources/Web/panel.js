@@ -165,8 +165,9 @@
     var suggestion = null;
     for (var i = 0; i < currentResults.length; i++) {
       var r = currentResults[i];
-      if (r.title && r.title.toLowerCase().startsWith(lowerQuery)) {
-        suggestion = r.title;
+      var cleanTitle = stripANSI(r.title || '');
+      if (cleanTitle && cleanTitle.toLowerCase().startsWith(lowerQuery)) {
+        suggestion = cleanTitle;
         break;
       }
       var pName = r.projectName || lastPathComponent(r.project);
@@ -308,8 +309,9 @@
 
     // Update title
     var titleEl = row.querySelector('.row__title');
-    if (titleEl && titleEl.textContent !== result.title) {
-      titleEl.textContent = result.title;
+    var cleanTitle = stripANSI(result.title);
+    if (titleEl && titleEl.textContent !== cleanTitle) {
+      titleEl.textContent = cleanTitle;
     }
 
     // Update metadata
@@ -367,7 +369,7 @@
 
     var title = document.createElement('span');
     title.className = 'row__title';
-    title.textContent = result.title;
+    title.textContent = stripANSI(result.title);
     header.appendChild(title);
 
     var status = createStatusElement(result);
@@ -466,9 +468,15 @@
 
   // --- Markdown Stripping ---
 
+  function stripANSI(text) {
+    if (!text) return '';
+    // eslint-disable-next-line no-control-regex
+    return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  }
+
   function stripMarkdown(text) {
     if (!text) return '';
-    return text
+    return stripANSI(text)
       .replace(/#{1,6}\s*/g, '')         // headings
       .replace(/\*\*([^*]*)\*\*/g, '$1') // bold
       .replace(/\*([^*]*)\*/g, '$1')     // italic

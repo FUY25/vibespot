@@ -13,6 +13,10 @@ enum LiveSessionRegistry {
     }()
     private static let commandTimeout: DispatchTimeInterval = .seconds(2)
 
+    /// Cache: PID → CWD. A running process's CWD doesn't change, so we only
+    /// need to call lsof once per PID lifetime.
+    nonisolated(unsafe) private static var cwdCache: [Int: String] = [:]
+
     static func scan() -> [LiveSession] {
         scanClaudeSessions() + scanCodexSessions()
     }
@@ -40,22 +44,35 @@ enum LiveSessionRegistry {
             return []
         }
 
-        let pids = parseCodexPIDs(from: psOutput)
+        let alivePids = parseCodexPIDs(from: psOutput).filter { isProcessAlive(pid: $0) }
+
+        // Evict dead PIDs from cache
+        let aliveSet = Set(alivePids)
+        cwdCache = cwdCache.filter { aliveSet.contains($0.key) }
+
+        // Find PIDs that need lsof (not yet cached)
+        let uncachedPids = alivePids.filter { cwdCache[$0] == nil }
+
+        // Single batched lsof call for all uncached PIDs
+        if !uncachedPids.isEmpty {
+            let pidArgs = uncachedPids.map(String.init).joined(separator: ",")
+            if let lsofOutput = runCommand(
+                executablePath: "/usr/sbin/lsof",
+                arguments: ["-d", "cwd", "-Fn", "-p", pidArgs]
+            ) {
+                for pid in uncachedPids {
+                    if let cwd = parseCwd(from: lsofOutput, pid: pid) {
+                        cwdCache[pid] = cwd
+                    }
+                }
+            }
+        }
+
         let stateDB = CodexStateDB()
 
-        return pids.compactMap { pid in
-            guard isProcessAlive(pid: pid) else { return nil }
-
-            guard let lsofOutput = runCommand(
-                executablePath: "/usr/sbin/lsof",
-                arguments: ["-d", "cwd", "-Fn", "-p", "\(pid)"]
-            ) else {
-                return nil
-            }
-
-            guard let cwd = parseCwd(from: lsofOutput, pid: pid) else { return nil }
+        return alivePids.compactMap { pid in
+            guard let cwd = cwdCache[pid] else { return nil }
             guard let sessionId = stateDB.sessionIdByCwd(cwd) else { return nil }
-
             return LiveSession(pid: pid, sessionId: sessionId, cwd: cwd, isAlive: true)
         }
     }

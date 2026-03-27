@@ -280,7 +280,7 @@ body {
 /* Row */
 .row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--logo-gap);
   padding: var(--row-v-pad) var(--row-h-pad);
   border-radius: var(--row-radius);
@@ -292,7 +292,6 @@ body {
 .row--selected {
   background: var(--selection);
   border-color: var(--selection-edge);
-  border-left: 2px solid var(--selection-bar);
 }
 
 /* Row icon */
@@ -302,7 +301,6 @@ body {
   border-radius: var(--icon-radius);
   flex-shrink: 0;
   object-fit: cover;
-  margin-top: 2px;
 }
 
 .row__icon-fallback {
@@ -310,7 +308,6 @@ body {
   height: var(--icon-size);
   border-radius: 3px;
   flex-shrink: 0;
-  margin-top: 2px;
   background: #555;
   display: flex;
   align-items: center;
