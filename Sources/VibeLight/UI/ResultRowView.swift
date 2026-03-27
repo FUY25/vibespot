@@ -4,7 +4,7 @@ final class ResultRowView: NSTableCellView {
     static let rowHeightWithoutSnippet: CGFloat = 52
     static let rowHeightWithSnippet: CGFloat = 74
 
-    private let toolBadge = BadgeView()
+    private let toolIcon = NSImageView(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
     private let metadataLabel = NSTextField(labelWithString: "")
     private let statusDot = NSView(frame: .zero)
@@ -28,7 +28,7 @@ final class ResultRowView: NSTableCellView {
     }
 
     func configure(with result: SearchResult) {
-        toolBadge.text = result.tool.uppercased()
+        toolIcon.image = ToolIcon.image(for: result.tool, size: 20)
         titleLabel.stringValue = result.title
         metadataLabel.stringValue = makeMetadataText(for: result)
         statusLabel.stringValue = Self.makeStatusText(status: result.status, startedAt: result.startedAt)
@@ -63,6 +63,9 @@ final class ResultRowView: NSTableCellView {
         identifier = NSUserInterfaceItemIdentifier("ResultRowView")
         translatesAutoresizingMaskIntoConstraints = false
 
+        toolIcon.translatesAutoresizingMaskIntoConstraints = false
+        toolIcon.imageScaling = .scaleProportionallyUpOrDown
+
         titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -81,7 +84,7 @@ final class ResultRowView: NSTableCellView {
         snippetLabel.lineBreakMode = .byTruncatingTail
         snippetLabel.maximumNumberOfLines = 1
 
-        let titleRow = NSStackView(views: [toolBadge, titleLabel])
+        let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = 8
@@ -105,6 +108,8 @@ final class ResultRowView: NSTableCellView {
         addSubview(bodyStack)
 
         NSLayoutConstraint.activate([
+            toolIcon.widthAnchor.constraint(equalToConstant: 20),
+            toolIcon.heightAnchor.constraint(equalToConstant: 20),
             statusDot.widthAnchor.constraint(equalToConstant: 8),
             statusDot.heightAnchor.constraint(equalToConstant: 8),
             headerRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
@@ -150,7 +155,7 @@ final class ResultRowView: NSTableCellView {
         metadataLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .secondaryLabelColor
         statusLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
         snippetLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.9) : .secondaryLabelColor
-        toolBadge.isEmphasized = emphasized
+        toolIcon.alphaValue = emphasized ? 1.0 : 0.96
     }
 
     private static func normalizedSnippet(from snippet: String?) -> String? {
@@ -171,62 +176,5 @@ final class ResultRowView: NSTableCellView {
 
     private func normalizedSnippet(from snippet: String?) -> String? {
         Self.normalizedSnippet(from: snippet)
-    }
-}
-
-private final class BadgeView: NSView {
-    var text: String = "" {
-        didSet {
-            label.stringValue = text
-        }
-    }
-
-    var isEmphasized = false {
-        didSet {
-            updateColors()
-        }
-    }
-
-    private let label = NSTextField(labelWithString: "")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        configure()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configure()
-    }
-
-    private func configure() {
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = 8
-
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        label.alignment = .center
-
-        addSubview(label)
-
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 3),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
-        ])
-
-        updateColors()
-    }
-
-    private func updateColors() {
-        if isEmphasized {
-            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
-            label.textColor = .white
-        } else {
-            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
-            label.textColor = .controlAccentColor
-        }
     }
 }

@@ -13,6 +13,7 @@ let package = Package(
             name: "VibeLight",
             dependencies: ["CLibProc"],
             path: "Sources/VibeLight",
+            resources: [.process("Resources")],
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
             ]
