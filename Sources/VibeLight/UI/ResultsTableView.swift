@@ -43,11 +43,16 @@ final class ResultsTableRowView: NSTableRowView {
             return
         }
 
-        let selectionRect = bounds.insetBy(dx: 8, dy: 1)
-        let path = NSBezierPath(roundedRect: selectionRect, xRadius: 10, yRadius: 10)
-        let color = NSColor.controlAccentColor.withAlphaComponent(isEmphasized ? 0.18 : 0.12)
-        color.setFill()
+        let radius = DesignTokens.Radius.row
+        let selectionRect = bounds.insetBy(dx: 6, dy: 1)
+        let path = NSBezierPath(roundedRect: selectionRect, xRadius: radius, yRadius: radius)
+
+        DesignTokens.Color.selection.setFill()
         path.fill()
+
+        DesignTokens.Color.selectionEdge.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     override func drawBackground(in dirtyRect: NSRect) {}
