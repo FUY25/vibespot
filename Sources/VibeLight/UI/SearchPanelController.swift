@@ -329,7 +329,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         if result.status == "live" {
             actionHintLabel.stringValue = "↩ Switch"
         } else {
-            actionHintLabel.stringValue = "↩ Resume  ⇥ Search history"
+            actionHintLabel.stringValue = "↩ Resume ⇥ History"
         }
     }
 

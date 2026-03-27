@@ -51,3 +51,51 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
     let editorAfterRefresh = try #require(searchField.currentEditor())
     #expect(editorAfterRefresh.selectedRange == NSRange(location: length, length: 0))
 }
+
+@MainActor
+@Test
+func tabAcceptsGhostSuggestionBeforeClosedHistoryDrillIn() async throws {
+    let dbPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("search_tab_precedence_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    try index.upsertSession(
+        id: "closed-1",
+        tool: "claude",
+        title: "Build notes",
+        project: "/Users/me/archiver",
+        projectName: "archiver",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil
+    )
+
+    let controller = SearchPanelController()
+    controller.sessionIndex = index
+    controller.show()
+    defer { controller.hide() }
+
+    let searchField = try #require(
+        Mirror(reflecting: controller).children.first(where: { $0.label == "searchField" })?.value as? SearchField
+    )
+
+    searchField.stringValue = "ar"
+    controller.controlTextDidChange(
+        Notification(name: NSControl.textDidChangeNotification, object: searchField)
+    )
+    try await Task.sleep(for: .milliseconds(250))
+
+    #expect(searchField.ghostSuggestion == "archiver")
+
+    let editor = try #require(searchField.currentEditor() as? NSTextView)
+    let handled = controller.control(
+        searchField,
+        textView: editor,
+        doCommandBy: #selector(NSResponder.insertTab(_:))
+    )
+
+    #expect(handled)
+    #expect(searchField.stringValue == "archiver")
+}

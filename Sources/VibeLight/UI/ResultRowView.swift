@@ -149,7 +149,7 @@ final class ResultRowView: NSTableCellView {
         case .waiting:
             return "Awaiting input"
         case .closed:
-            return RelativeTimeFormatter.string(from: result.lastActivityAt)
+            return ""
         }
     }
 
@@ -205,7 +205,7 @@ final class ResultRowView: NSTableCellView {
             typingDotsView.isHidden = true
             applyWaitingBreathing()
         case .closed:
-            statusTextLabel.isHidden = false
+            statusTextLabel.isHidden = true
             typingDotsView.isHidden = true
         }
     }
