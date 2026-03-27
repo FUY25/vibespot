@@ -45,7 +45,21 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let resultsTopSpacing: CGFloat = 10
     private let separatorTopSpacing: CGFloat = 14
     private let separatorHeight: CGFloat = 1
-    private static let isRunningTests = NSClassFromString("XCTestCase") != nil
+    private static let isRunningTests: Bool = {
+        if NSClassFromString("XCTestCase") != nil {
+            return true
+        }
+
+        let processName = ProcessInfo.processInfo.processName.lowercased()
+        if processName.contains("xctest") {
+            return true
+        }
+
+        return ProcessInfo.processInfo.environment.keys.contains { key in
+            key.localizedCaseInsensitiveContains("xctest")
+                || key.localizedCaseInsensitiveContains("swift_testing")
+        }
+    }()
 
     override init() {
         self.panel = SearchPanel(
@@ -484,7 +498,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         let targetHeight = max(
             minPanelHeight,
             topInset + searchFieldHeight + separatorTopSpacing + separatorHeight +
-                (results.isEmpty ? 0 : resultsTopSpacing + scrollHeight) + bottomInset
+                resultsTopSpacing + scrollHeight + bottomInset
         )
 
         var frame = panel.frame

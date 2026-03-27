@@ -159,7 +159,10 @@ func searchPanelActionHintMatchesSelectedSessionStatus() async throws {
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
-    try await Task.sleep(for: .milliseconds(500))
+    let deadline = Date().addingTimeInterval(1.0)
+    while actionHintLabel.stringValue != "↩ Resume ⇥ History", Date() < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
 
     #expect(actionHintLabel.stringValue == "↩ Resume ⇥ History")
 }
