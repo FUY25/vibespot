@@ -1,12 +1,5 @@
 import Foundation
 
-struct CodexSessionMeta: Sendable {
-    let id: String
-    let cwd: String
-    let cliVersion: String
-    let source: String
-}
-
 enum CodexParser {
     static func parseSessionIndex(url: URL) throws -> [ParsedSessionMeta] {
         let text = try String(contentsOf: url, encoding: .utf8)
@@ -61,12 +54,15 @@ enum CodexParser {
                 guard let payload = record["payload"] as? [String: Any] else {
                     continue
                 }
+                let source = payload["source"] as? [String: Any]
+                let isSubagent = source?["subagent"] != nil
 
                 meta = CodexSessionMeta(
                     id: nonEmptyString(payload["id"]) ?? "",
-                    cwd: nonEmptyString(payload["cwd"]) ?? "",
+                    cwd: nonEmptyString(payload["cwd"]),
                     cliVersion: nonEmptyString(payload["cli_version"]) ?? "",
-                    source: nonEmptyString(payload["source"]) ?? nonEmptyString(payload["originator"]) ?? "cli"
+                    source: nonEmptyString(payload["source"]) ?? nonEmptyString(payload["originator"]) ?? "cli",
+                    isSubagent: isSubagent
                 )
 
             case "response_item":

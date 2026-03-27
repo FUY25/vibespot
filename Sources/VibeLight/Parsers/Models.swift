@@ -34,6 +34,14 @@ struct ParsedPidEntry: Sendable {
     let startedAt: Date
 }
 
+struct CodexSessionMeta: Sendable {
+    let id: String
+    let cwd: String?
+    let cliVersion: String
+    let source: String
+    let isSubagent: Bool
+}
+
 enum SessionTitleNormalizer {
     private static let xmlTagPattern = try? NSRegularExpression(pattern: "<[^>]+>")
     private static let structuredContextPrefixes = [

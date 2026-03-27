@@ -37,6 +37,7 @@ func testParseCodexSessionFile() throws {
     #expect(parsedMeta.cwd == "/Users/me/project")
     #expect(parsedMeta.cliVersion == "0.78.0")
     #expect(parsedMeta.source == "codex_cli")
+    #expect(parsedMeta.isSubagent == false)
 
     #expect(messages.count == 7)
     #expect(messages[0].role == "user")

@@ -242,6 +242,9 @@ final class Indexer {
         guard let (meta, messages) = try? CodexParser.parseSessionFile(url: url) else {
             return
         }
+        if meta?.isSubagent == true {
+            return
+        }
 
         let metaID = meta?.id.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let sessionId = metaID.isEmpty ? messages.compactMap(\.sessionId).first : metaID
