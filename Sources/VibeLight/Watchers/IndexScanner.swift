@@ -94,6 +94,7 @@ struct IndexScanner {
             return
         }
         codexTitleMap = loadCodexTitleMap()
+        let codexGitBranchMap = CodexStateDB().gitBranchMap()
 
         let sessionsPath = homeDirectoryPath + "/.codex/sessions"
         let fileManager = FileManager.default
@@ -116,7 +117,11 @@ struct IndexScanner {
                 continue
             }
 
-            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+            indexCodexSessionFile(
+                path: fileURL.path,
+                titleMap: codexTitleMap,
+                gitBranchMap: codexGitBranchMap
+            )
         }
     }
 
@@ -223,7 +228,11 @@ struct IndexScanner {
         return titleMap
     }
 
-    private mutating func indexCodexSessionFile(path: String, titleMap: [String: String]) {
+    private mutating func indexCodexSessionFile(
+        path: String,
+        titleMap: [String: String],
+        gitBranchMap: [String: String]
+    ) {
         guard !Task.isCancelled else {
             return
         }
@@ -273,7 +282,7 @@ struct IndexScanner {
             title: String(title.prefix(200)),
             project: cwd,
             projectName: cwd.isEmpty ? "" : (cwd as NSString).lastPathComponent,
-            gitBranch: "",
+            gitBranch: gitBranchMap[sessionId] ?? "",
             status: "closed",
             startedAt: messages.first?.timestamp ?? .distantPast,
             pid: nil,
