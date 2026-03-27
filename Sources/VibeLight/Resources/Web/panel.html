@@ -18,7 +18,9 @@
       <div class="search-input-wrapper">
         <input class="search-input" id="searchInput" type="text" placeholder="Search sessions" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
         <span class="ghost-suggestion" id="ghostSuggestion"></span>
+        <span class="block-cursor" id="blockCursor"></span>
       </div>
+      <span class="session-count" id="sessionCount"></span>
       <span class="action-hint" id="actionHint"></span>
       <img class="search-bar__tool-icon" id="searchBarIcon">
     </div>
@@ -26,6 +28,13 @@
     <div class="separator"></div>
 
     <div class="results" id="results"></div>
+
+    <div class="keyboard-hints" id="keyboardHints">
+      <span class="keyboard-hints__item"><kbd>↑↓</kbd> navigate</span>
+      <span class="keyboard-hints__item"><kbd>↩</kbd> open</span>
+      <span class="keyboard-hints__item"><kbd>⇥</kbd> history</span>
+      <span class="keyboard-hints__item"><kbd>esc</kbd> close</span>
+    </div>
   </div>
 
   <script src="panel.js"></script>

@@ -27,14 +27,19 @@ enum SessionActivityStatus: String, Sendable {
         }
 
         let secondsSinceModification = now.timeIntervalSince(lastFileModification)
+
+        // File modified very recently — model is actively writing
         if secondsSinceModification < 5 {
             return .working
         }
 
-        if lastJSONLEntryType == "tool_use" || lastJSONLEntryType == "user" {
+        // File not modified recently — check what the last entry was
+        // tool_use means the model is mid-execution (waiting for tool result)
+        if lastJSONLEntryType == "tool_use" {
             return .working
         }
 
+        // "user" or "assistant" or anything else with no recent file activity = waiting
         return .waiting
     }
 }

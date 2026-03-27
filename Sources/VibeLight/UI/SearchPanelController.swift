@@ -16,6 +16,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var results: [SearchResult] = []
     private var deactivationObserver: NSObjectProtocol?
     private var panelResignKeyObserver: NSObjectProtocol?
+    private var appearanceObservation: NSKeyValueObservation?
     private var lastPushedResultsJSON: String = ""
     private var isWebViewReady = false
     private var pendingResetAndFocus = false
@@ -152,46 +153,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         pendingResultsJSON = nil
         let escaped = escapeForSingleQuotedJavaScriptString(json)
         webView.evaluateJavaScript("updateResults('\(escaped)')", completionHandler: nil)
-        updateGhostSuggestion()
-    }
-
-    private func updateGhostSuggestion() {
-        guard isWebViewReady else { return }
-
-        // Get the current search query from JS and compute ghost
-        webView.evaluateJavaScript("document.getElementById('searchInput').value") { [weak self] value, _ in
-            guard let self, let query = value as? String, !query.isEmpty else {
-                self?.webView.evaluateJavaScript("setGhostSuggestion(null)", completionHandler: nil)
-                return
-            }
-
-            let suggestion = self.computeGhostSuggestion(query: query)
-            if let suggestion {
-                let escaped = self.escapeForSingleQuotedJavaScriptString(suggestion)
-                self.webView.evaluateJavaScript("setGhostSuggestion('\(escaped)')", completionHandler: nil)
-            } else {
-                self.webView.evaluateJavaScript("setGhostSuggestion(null)", completionHandler: nil)
-            }
-        }
-    }
-
-    private func computeGhostSuggestion(query: String) -> String? {
-        let titleMatch = results.first(where: {
-            $0.title.lowercased().hasPrefix(query.lowercased())
-        })?.title
-
-        let projectMatch = titleMatch ?? results.first(where: {
-            let name = $0.projectName.isEmpty
-                ? URL(fileURLWithPath: $0.project).lastPathComponent
-                : $0.projectName
-            return name.lowercased().hasPrefix(query.lowercased())
-        }).map {
-            $0.projectName.isEmpty
-                ? URL(fileURLWithPath: $0.project).lastPathComponent
-                : $0.projectName
-        }
-
-        return titleMatch ?? projectMatch
+        // Ghost suggestion is now computed locally in JS — no round-trip needed
     }
 
     private func makeNewSessionActionRows() -> [SearchResult] {
@@ -275,6 +237,31 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.animationBehavior = .utilityWindow
+
+        // Intercept nav keys at NSPanel level → call JS directly
+        // This bypasses WKWebView's IPC event pipeline for snappier navigation
+        panel.keyHandler = { [weak self] keyCode, modifiers in
+            guard let self, self.isWebViewReady else { return false }
+            switch keyCode {
+            case 125: // Arrow Down
+                self.webView.evaluateJavaScript("moveSelection(1)", completionHandler: nil)
+                return true
+            case 126: // Arrow Up
+                self.webView.evaluateJavaScript("moveSelection(-1)", completionHandler: nil)
+                return true
+            case 53: // Escape
+                self.hide()
+                return true
+            case 36: // Enter
+                self.webView.evaluateJavaScript("activateSelected()", completionHandler: nil)
+                return true
+            case 48: // Tab
+                self.webView.evaluateJavaScript("handleTab()", completionHandler: nil)
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     private func configureWebView() {
@@ -297,7 +284,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         isWebViewReady = false
 
         // Load panel.html from bundle
-        if let htmlURL = Bundle.module.url(forResource: "panel", withExtension: "html", subdirectory: "Web") {
+        if let htmlURL = Bundle.module.url(forResource: "panel", withExtension: "html", subdirectory: "Web")
+            ?? Bundle.module.url(forResource: "panel", withExtension: "html") {
             iconBaseURL = Bundle.module.url(forResource: "claude-icon", withExtension: "png")?
                 .deletingLastPathComponent()
                 .absoluteString
@@ -339,11 +327,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             }
         }
 
-        // Watch for appearance changes to push theme
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil, queue: nil
-        ) { [weak self] _ in
+        // Watch for appearance changes to push theme live
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.pushTheme() }
         }
     }
@@ -381,4 +366,16 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 private final class SearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    /// Intercept arrow/escape/enter/tab at the native level and forward
+    /// directly to JS via evaluateJavaScript, bypassing WKWebView's IPC
+    /// event pipeline for lower-latency navigation.
+    var keyHandler: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if let handler = keyHandler, handler(event.keyCode, event.modifierFlags) {
+            return // consumed
+        }
+        super.keyDown(with: event)
+    }
 }

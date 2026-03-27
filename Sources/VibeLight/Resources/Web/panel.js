@@ -12,11 +12,14 @@
   const searchBarIcon = document.getElementById('searchBarIcon');
   const resultsContainer = document.getElementById('results');
   const panel = document.getElementById('panel');
+  const blockCursor = document.getElementById('blockCursor');
+  const sessionCountEl = document.getElementById('sessionCount');
 
   let currentResults = [];
   let selectedIndex = 0;
   let debounceTimer = null;
   let iconBaseURL = '';
+  let currentHintTool = null;
 
   // --- Swift → JS API ---
 
@@ -43,6 +46,8 @@
     }
     updateSelection();
     updateActionHint();
+    updateSessionCount();
+    computeAndShowGhost();
     notifyResize();
   };
 
@@ -51,16 +56,18 @@
   };
 
   window.setGhostSuggestion = function(text) {
-    updateGhostDisplay(text);
+    // Ghost is now computed locally in JS — this is a no-op for backwards compat
   };
 
   window.resetAndFocus = function() {
     searchInput.value = '';
-    ghostSuggestion.textContent = '';
+    ghostSuggestion.innerHTML = '';
     selectedIndex = 0;
     currentResults = [];
+    previousResultKeys = [];
     resultsContainer.innerHTML = '';
     searchInput.focus();
+    updateSessionCount();
     notifyResize();
   };
 
@@ -72,12 +79,14 @@
 
   searchInput.addEventListener('input', function() {
     clearTimeout(debounceTimer);
-    updateGhostFromInput();
+    // Clear ghost immediately on new input — feels snappy
+    ghostSuggestion.innerHTML = '';
+    updateBlockCursor();
     debounceTimer = setTimeout(function() {
       if (bridge) {
         bridge.postMessage({ type: 'search', query: searchInput.value });
       }
-    }, 80);
+    }, 150);
   });
 
   // --- Keyboard Navigation ---
@@ -142,37 +151,56 @@
     }
   }
 
-  // --- Ghost Suggestions ---
+  // --- Ghost Suggestions (computed locally from results) ---
 
-  function updateGhostFromInput() {
-    if (!searchInput.value) {
-      ghostSuggestion.textContent = '';
+  function computeAndShowGhost() {
+    var query = searchInput.value;
+    if (!query) {
+      ghostSuggestion.innerHTML = '';
       return;
     }
-    // Ghost is updated from Swift via setGhostSuggestion
-  }
+    var lowerQuery = query.toLowerCase();
 
-  function updateGhostDisplay(suggestion) {
-    if (!suggestion || !searchInput.value || !suggestion.toLowerCase().startsWith(searchInput.value.toLowerCase())) {
-      ghostSuggestion.textContent = '';
+    // Find first title or project name that starts with the query
+    var suggestion = null;
+    for (var i = 0; i < currentResults.length; i++) {
+      var r = currentResults[i];
+      if (r.title && r.title.toLowerCase().startsWith(lowerQuery)) {
+        suggestion = r.title;
+        break;
+      }
+      var pName = r.projectName || lastPathComponent(r.project);
+      if (pName && pName.toLowerCase().startsWith(lowerQuery)) {
+        suggestion = pName;
+        break;
+      }
+    }
+
+    if (!suggestion || suggestion.toLowerCase() === lowerQuery) {
+      ghostSuggestion.innerHTML = '';
       return;
     }
-    // Show full suggestion but make typed portion invisible
-    const typed = searchInput.value;
-    const spacer = typed.replace(/./g, '\u00A0'); // invisible spacer matching typed width
-    ghostSuggestion.textContent = spacer + suggestion.slice(typed.length);
+
+    var spacer = document.createElement('span');
+    spacer.className = 'ghost-suggestion__spacer';
+    spacer.textContent = query;
+    var completion = document.createElement('span');
+    completion.className = 'ghost-suggestion__completion';
+    completion.textContent = suggestion.slice(query.length);
+    ghostSuggestion.innerHTML = '';
+    ghostSuggestion.appendChild(spacer);
+    ghostSuggestion.appendChild(completion);
   }
 
   function acceptGhostSuggestion() {
-    var fullText = '';
-    // Reconstruct full suggestion from ghost display
-    if (ghostSuggestion.textContent && ghostSuggestion.textContent.trim()) {
-      var suffix = ghostSuggestion.textContent.replace(/^\u00A0+/, '');
-      fullText = searchInput.value + suffix;
-    }
-    if (!fullText || fullText === searchInput.value) return false;
+    var completionEl = ghostSuggestion.querySelector('.ghost-suggestion__completion');
+    if (!completionEl || !completionEl.textContent) return false;
+    var fullText = searchInput.value + completionEl.textContent;
+    if (fullText === searchInput.value) return false;
     searchInput.value = fullText;
-    ghostSuggestion.textContent = '';
+    ghostSuggestion.innerHTML = '';
+    updateBlockCursor();
+    // Fire search immediately on accept — no debounce needed
     if (bridge) {
       bridge.postMessage({ type: 'search', query: searchInput.value });
     }
@@ -184,7 +212,7 @@
     var result = currentResults[selectedIndex];
     if (!result || result.status === 'live' || result.status === 'action' || !result.title) return;
     searchInput.value = result.title;
-    ghostSuggestion.textContent = '';
+    ghostSuggestion.innerHTML = '';
     if (bridge) {
       bridge.postMessage({ type: 'search', query: searchInput.value });
     }
@@ -195,33 +223,103 @@
   function updateActionHint() {
     if (currentResults.length === 0) {
       actionHint.textContent = '';
-      searchBarIcon.removeAttribute('src');
+      if (currentHintTool !== null) {
+        searchBarIcon.removeAttribute('src');
+        currentHintTool = null;
+      }
       return;
     }
     var result = currentResults[selectedIndex] || currentResults[0];
-    var iconSrc = toolIconURL(result.tool);
-    if (iconSrc) {
-      searchBarIcon.src = iconSrc;
-    } else {
-      searchBarIcon.removeAttribute('src');
+
+    // Only update icon if the tool changed — avoids image reload on every arrow key
+    var tool = result.tool || null;
+    if (tool !== currentHintTool) {
+      currentHintTool = tool;
+      var iconSrc = toolIconURL(tool);
+      if (iconSrc) {
+        searchBarIcon.src = iconSrc;
+      } else {
+        searchBarIcon.removeAttribute('src');
+      }
     }
 
+    var newHint;
     if (result.status === 'action') {
-      actionHint.textContent = '\u21A9 Launch';
+      newHint = '\u21A9 Launch';
     } else if (result.status === 'live') {
-      actionHint.textContent = '\u21A9 Switch';
+      newHint = '\u21A9 Switch';
     } else {
-      actionHint.textContent = '\u21A9 Resume \u21E5 History';
+      newHint = '\u21A9 Resume \u21E5 History';
+    }
+    if (actionHint.textContent !== newHint) {
+      actionHint.textContent = newHint;
     }
   }
 
-  // --- Result Rendering ---
+  // --- Result Rendering (diff-based) ---
+
+  var previousResultKeys = []; // Track session IDs for diffing
 
   function renderResults() {
+    var newKeys = currentResults.map(function(r) { return r.sessionId; });
+
+    // Fast path: if the keys are identical, just update content in-place
+    if (arraysEqual(newKeys, previousResultKeys)) {
+      var rows = resultsContainer.children;
+      for (var i = 0; i < currentResults.length; i++) {
+        updateRowContent(rows[i], currentResults[i], i);
+      }
+      previousResultKeys = newKeys;
+      return;
+    }
+
+    // Keys changed: rebuild (add/remove/reorder)
     resultsContainer.innerHTML = '';
     currentResults.forEach(function(result, index) {
       resultsContainer.appendChild(createRow(result, index));
     });
+    previousResultKeys = newKeys;
+  }
+
+  function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  function updateRowContent(row, result, index) {
+    // Update state classes
+    row.className = 'row';
+    if (result.status === 'action') {
+      row.classList.add('row--action');
+    } else if (result.activityStatus === 'working') {
+      row.classList.add('row--working');
+    } else if (result.activityStatus === 'waiting') {
+      row.classList.add('row--waiting');
+    } else if (result.activityStatus === 'closed' || result.status !== 'live') {
+      row.classList.add('row--closed');
+    }
+    if (index === selectedIndex) {
+      row.classList.add('row--selected');
+    }
+    row.dataset.index = index;
+
+    // Update title
+    var titleEl = row.querySelector('.row__title');
+    if (titleEl && titleEl.textContent !== result.title) {
+      titleEl.textContent = result.title;
+    }
+
+    // Update metadata
+    var metaEl = row.querySelector('.row__meta');
+    if (metaEl) {
+      var newMeta = formatMetadata(result);
+      if (metaEl.textContent !== newMeta) {
+        metaEl.textContent = newMeta;
+      }
+    }
   }
 
   function createRow(result, index) {
@@ -293,7 +391,7 @@
       } else {
         activity.classList.add('row__activity--tool');
       }
-      activity.textContent = result.activityPreview;
+      activity.textContent = stripMarkdown(result.activityPreview);
       body.appendChild(activity);
     }
 
@@ -316,13 +414,6 @@
 
   function createStatusElement(result) {
     if (result.activityStatus === 'working') {
-      var status = document.createElement('div');
-      status.className = 'row__status';
-
-      var dot = document.createElement('span');
-      dot.className = 'status-dot status-dot--green';
-      status.appendChild(dot);
-
       var dots = document.createElement('div');
       dots.className = 'typing-dots';
       for (var i = 0; i < 3; i++) {
@@ -330,23 +421,7 @@
         d.className = 'typing-dot';
         dots.appendChild(d);
       }
-      status.appendChild(dots);
-      return status;
-    }
-
-    if (result.activityStatus === 'waiting') {
-      var status = document.createElement('div');
-      status.className = 'row__status';
-
-      var dot = document.createElement('span');
-      dot.className = 'status-dot status-dot--amber';
-      status.appendChild(dot);
-
-      var text = document.createElement('span');
-      text.className = 'row__status-text';
-      text.textContent = 'AWAITING';
-      status.appendChild(text);
-      return status;
+      return dots;
     }
 
     return null;
@@ -389,6 +464,24 @@
     return asset + '.png';
   }
 
+  // --- Markdown Stripping ---
+
+  function stripMarkdown(text) {
+    if (!text) return '';
+    return text
+      .replace(/#{1,6}\s*/g, '')         // headings
+      .replace(/\*\*([^*]*)\*\*/g, '$1') // bold
+      .replace(/\*([^*]*)\*/g, '$1')     // italic
+      .replace(/__([^_]*)__/g, '$1')     // bold alt
+      .replace(/_([^_]*)_/g, '$1')       // italic alt
+      .replace(/`([^`]*)`/g, '$1')       // inline code
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links
+      .replace(/^[-*+]\s+/gm, '')        // list markers
+      .replace(/^\d+\.\s+/gm, '')        // numbered lists
+      .replace(/\s+/g, ' ')              // collapse whitespace
+      .trim();
+  }
+
   // --- Resize Notification ---
 
   function notifyResize() {
@@ -400,6 +493,53 @@
     });
   }
 
+  // --- Block Cursor ---
+
+  var cursorMeasure = document.createElement('span');
+  cursorMeasure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-family:' + getComputedStyle(searchInput).fontFamily + ';font-size:24px;font-weight:500;letter-spacing:-0.02em;';
+  document.body.appendChild(cursorMeasure);
+
+  function updateBlockCursor() {
+    var text = searchInput.value;
+    var pos = searchInput.selectionStart || 0;
+    cursorMeasure.textContent = text.slice(0, pos);
+    blockCursor.style.left = cursorMeasure.offsetWidth + 'px';
+  }
+
+  searchInput.addEventListener('input', updateBlockCursor);
+  searchInput.addEventListener('click', updateBlockCursor);
+  searchInput.addEventListener('keyup', updateBlockCursor);
+  searchInput.addEventListener('focus', function() {
+    blockCursor.style.display = '';
+    updateBlockCursor();
+  });
+  searchInput.addEventListener('blur', function() {
+    blockCursor.style.display = 'none';
+  });
+
+  // --- Session Count ---
+
+  function updateSessionCount() {
+    if (!sessionCountEl) return;
+    var query = searchInput.value.trim();
+    if (!query) {
+      var total = currentResults.filter(function(r) { return r.status !== 'action'; }).length;
+      sessionCountEl.textContent = total > 0 ? total + ' sessions' : '';
+    } else {
+      sessionCountEl.textContent = currentResults.length + ' matches';
+    }
+  }
+
+  // --- Expose to Swift for direct native key interception ---
+  window.moveSelection = moveSelection;
+  window.activateSelected = activateSelected;
+  window.handleTab = function() {
+    if (!acceptGhostSuggestion()) {
+      drillIntoSelectedHistory();
+    }
+  };
+
   // --- Init ---
   searchInput.focus();
+  updateBlockCursor();
 })();
