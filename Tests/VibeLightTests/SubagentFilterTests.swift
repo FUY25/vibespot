@@ -3,7 +3,7 @@ import Testing
 @testable import VibeLight
 
 @Test
-func testCodexSessionMetaDetectsSubagentSource() throws {
+func testCodexSubagentSessionsAreSkipped() throws {
     let tempURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("codex-subagent-\(UUID().uuidString)")
         .appendingPathExtension("jsonl")
