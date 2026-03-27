@@ -272,6 +272,30 @@ See consolidated table below.
 | `panel.css` | Error/stale tint tokens, activity line tweaks, preview card styles |
 | `panel.js` | Row tint classes, `formatRunningTime()`, dwell timer, preview card rendering |
 
+## Performance Contract
+
+Rule: **no new timers, no full file reads, no work when nothing changed.**
+
+### Error Detection
+- Only check a session's JSONL when its file mtime changed (stat, compare, skip if same)
+- Tail-read only: `FileHandle` seek to last ~2KB, parse that slice. Errors are always near the end.
+- Write `healthStatus` to SQLite once per detection. Don't re-scan unless mtime changes.
+
+### Preview Card
+- Tail-read: seek to last ~4KB of JSONL, parse backward for last 2-3 exchanges + file paths
+- 300ms dwell is the throttle. Fast arrow-keying triggers zero reads.
+- Cache preview per sessionId. Only re-read when `lastActivityAt` changed (already tracked in search results).
+
+### Live Preview Updates
+- No extra timers. Piggyback on existing 3s refresh: JS compares previewed session's `lastActivityAt` — if unchanged, skip. If changed, re-request preview.
+- Zero bridge calls when nothing changed.
+
+### Title Processing
+- ANSI strip + smart truncate at index time only. Not on the search/render hot path.
+
+### Running Time
+- Pure JS math from `startedAt`. No bridge call.
+
 ## Out of Scope
 
 - Notifications/alerts for errors — this is visual-only in the panel
