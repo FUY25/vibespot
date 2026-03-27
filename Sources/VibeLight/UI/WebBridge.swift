@@ -22,17 +22,19 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             guard let type = body["type"] as? String else { return nil }
             switch type {
             case "search":
-                let query = body["query"] as? String ?? ""
+                guard let query = body["query"] as? String else { return nil }
                 return .search(query: query)
             case "select":
-                let sessionId = body["sessionId"] as? String ?? ""
-                let status = body["status"] as? String ?? ""
-                let tool = body["tool"] as? String ?? ""
+                guard let sessionId = body["sessionId"] as? String, !sessionId.isEmpty else { return nil }
+                guard let status = body["status"] as? String else { return nil }
+                guard let tool = body["tool"] as? String else { return nil }
                 return .select(sessionId: sessionId, status: status, tool: tool)
             case "escape":
                 return .escape
             case "resize":
-                let height = body["height"] as? Double ?? 0
+                guard let heightNumber = body["height"] as? NSNumber else { return nil }
+                let height = heightNumber.doubleValue
+                guard height >= 0 else { return nil }
                 return .resize(height: CGFloat(height))
             default:
                 return nil
