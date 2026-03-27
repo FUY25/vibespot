@@ -330,16 +330,21 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     }
 
     private func restoreSearchFieldFocus() {
-        guard panel.isVisible else {
-            return
-        }
+        guard panel.isVisible else { return }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else {
-                return
+        // Only restore focus if the search field lost it.
+        // Do NOT call makeFirstResponder unconditionally; that selects all text.
+        if panel.firstResponder != searchField.currentEditor(),
+           panel.firstResponder != searchField {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.panel.makeFirstResponder(self.searchField)
+                // Restore cursor to end instead of selecting all text.
+                if let editor = self.searchField.currentEditor() {
+                    let length = self.searchField.stringValue.utf16.count
+                    editor.selectedRange = NSRange(location: length, length: 0)
+                }
             }
-
-            self.panel.makeFirstResponder(self.searchField)
         }
     }
 
