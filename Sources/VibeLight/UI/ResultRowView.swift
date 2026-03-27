@@ -1,8 +1,8 @@
 import AppKit
 
 final class ResultRowView: NSTableCellView {
-    static let rowHeightWithoutSnippet: CGFloat = 52
-    static let rowHeightWithSnippet: CGFloat = 74
+    static let rowHeightWithoutSnippet: CGFloat = 56
+    static let rowHeightWithSnippet: CGFloat = 78
 
     private let toolIcon = NSImageView(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
@@ -116,8 +116,8 @@ final class ResultRowView: NSTableCellView {
 
             bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
         ])
 
         updateTextColors()
