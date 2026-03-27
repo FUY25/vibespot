@@ -43,7 +43,7 @@ final class SearchField: NSTextField {
         }
 
         let suffix = String(ghostSuggestion.dropFirst(typedText.count))
-        let textFont = font ?? .systemFont(ofSize: 28, weight: .medium)
+        let textFont = font ?? DesignTokens.Font.searchInput
         let typedAttributes: [NSAttributedString.Key: Any] = [.font: textFont]
         let typedWidth = (typedText as NSString).size(withAttributes: typedAttributes).width
         let ghostAttributes: [NSAttributedString.Key: Any] = [
@@ -65,7 +65,7 @@ final class SearchField: NSTextField {
         isBezeled = false
         drawsBackground = false
         focusRingType = .none
-        font = .systemFont(ofSize: 28, weight: .medium)
+        font = DesignTokens.Font.searchInput
         textColor = .labelColor
         placeholderString = "Search sessions"
         lineBreakMode = .byTruncatingTail
@@ -78,7 +78,7 @@ final class SearchField: NSTextField {
             textCell.placeholderAttributedString = NSAttributedString(
                 string: "Search sessions",
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 28, weight: .medium),
+                    .font: DesignTokens.Font.searchInput,
                     .foregroundColor: NSColor.tertiaryLabelColor,
                 ]
             )
