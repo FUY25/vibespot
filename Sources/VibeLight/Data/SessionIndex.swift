@@ -54,6 +54,7 @@ final class SessionIndex: @unchecked Sendable {
         try ensureSessionColumnExists(name: "last_entry_type", definition: "TEXT")
         try ensureSessionColumnExists(name: "activity_preview", definition: "TEXT")
         try ensureSessionColumnExists(name: "activity_preview_kind", definition: "TEXT")
+        try ensureSessionColumnExists(name: "last_indexed_mtime", definition: "REAL")
 
         try db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
@@ -83,15 +84,16 @@ final class SessionIndex: @unchecked Sendable {
         lastActivityAt: Date? = nil,
         lastFileModification: Date? = nil,
         lastEntryType: String? = nil,
-        activityPreview: ActivityPreview? = nil
+        activityPreview: ActivityPreview? = nil,
+        lastIndexedMtime: Date? = nil
     ) throws {
         let sql = """
             INSERT INTO sessions (
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, updated_at
+                activity_preview_kind, updated_at, last_indexed_mtime
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
             )
             ON CONFLICT(id) DO UPDATE SET
                 tool = excluded.tool,
@@ -108,7 +110,8 @@ final class SessionIndex: @unchecked Sendable {
                 last_entry_type = excluded.last_entry_type,
                 activity_preview = excluded.activity_preview,
                 activity_preview_kind = excluded.activity_preview_kind,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                last_indexed_mtime = COALESCE(excluded.last_indexed_mtime, sessions.last_indexed_mtime)
         """
 
         try runStatement(sql) { statement in
@@ -149,6 +152,11 @@ final class SessionIndex: @unchecked Sendable {
                 try statement.bindNull(index: 15)
             }
             try statement.bind(index: 16, double: Date().timeIntervalSince1970)
+            if let lastIndexedMtime {
+                try statement.bind(index: 17, double: lastIndexedMtime.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 17)
+            }
         }
     }
 
@@ -392,6 +400,20 @@ final class SessionIndex: @unchecked Sendable {
             textColumn(statement, index: 0)
         }
         return Set(ids)
+    }
+
+    func lastIndexedMtime(sessionId: String) throws -> Date? {
+        let results = try db.query(
+            "SELECT last_indexed_mtime FROM sessions WHERE id = ?1",
+            bind: { statement in
+                try statement.bind(index: 1, text: sessionId)
+            },
+            map: { statement -> Date? in
+                guard sqlite3_column_type(statement, 0) != SQLITE_NULL else { return nil }
+                return Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
+            }
+        )
+        return results.first ?? nil
     }
 
     func updateStatus(sessionId: String, status: String) throws {

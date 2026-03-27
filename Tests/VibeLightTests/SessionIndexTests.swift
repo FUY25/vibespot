@@ -824,6 +824,71 @@ func testSearchMetadataTreatsLikeWildcardsLiterally() throws {
     #expect(Set(backslashResults.map(\.sessionId)) == ["backslash"])
 }
 
+@Test
+func testUpsertSessionStoresLastIndexedMtime() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let mtime = Date(timeIntervalSince1970: 1_700_000_000)
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "mtime test",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil,
+        lastIndexedMtime: mtime
+    )
+
+    let storedMtime = try index.lastIndexedMtime(sessionId: "s1")
+    #expect(storedMtime == mtime)
+}
+
+@Test
+func testLastIndexedMtimeReturnsNilForUnknownSession() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    #expect(try index.lastIndexedMtime(sessionId: "nonexistent") == nil)
+}
+
+@Test
+func testUpsertSessionPreservesLastIndexedMtimeWhenArgumentOmitted() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let originalMtime = Date(timeIntervalSince1970: 1_700_000_100)
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "initial mtime",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil,
+        lastIndexedMtime: originalMtime
+    )
+
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "updated title without mtime",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil
+    )
+
+    #expect(try index.lastIndexedMtime(sessionId: "s1") == originalMtime)
+}
+
 private func makeTestIndex() throws -> (SessionIndex, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
