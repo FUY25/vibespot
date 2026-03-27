@@ -270,7 +270,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             resultsScrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 14),
             resultsScrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -14),
             resultsScrollView.topAnchor.constraint(equalTo: separatorBox.bottomAnchor, constant: resultsTopSpacing),
-            resultsScrollView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor, constant: -bottomInset),
+            resultsScrollView.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -bottomInset),
             resultsHeightConstraint,
         ])
     }
