@@ -24,14 +24,12 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let visualEffectView = NSVisualEffectView(frame: .zero)
     private let searchIconView = NSImageView(frame: .zero)
     private let searchField = SearchField(frame: .zero)
-    private let modeLabel = NSTextField(labelWithString: "")
     private let separatorBox = NSBox(frame: .zero)
     private let resultsScrollView = NSScrollView(frame: .zero)
     private let resultsTableView = ResultsTableView(frame: .zero)
     private let resultsHeightConstraint: NSLayoutConstraint
     private let searchDebouncer = Debouncer(delay: 0.08)
 
-    private var includeHistory = false
     private var results: [SearchResult] = []
 
     private let panelWidth: CGFloat = 720
@@ -58,7 +56,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         configurePanel()
         configureViews()
         configureInteractions()
-        refreshModeLabel()
         applyResults([])
     }
 
@@ -68,8 +65,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     func show() {
         searchDebouncer.cancel()
-        includeHistory = false
-        refreshModeLabel()
         searchField.stringValue = ""
         refreshResults()
 
@@ -141,9 +136,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveToEndOfParagraph(_:)):
             moveSelection(delta: 1)
             return true
-        case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
-            toggleMode()
-            return true
         default:
             return false
         }
@@ -188,12 +180,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         searchIconView.contentTintColor = .secondaryLabelColor
         searchIconView.imageScaling = .scaleProportionallyUpOrDown
 
-        modeLabel.translatesAutoresizingMaskIntoConstraints = false
-        modeLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        modeLabel.textColor = .tertiaryLabelColor
-        modeLabel.alignment = .right
-        modeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
         separatorBox.translatesAutoresizingMaskIntoConstraints = false
         separatorBox.boxType = .separator
 
@@ -213,7 +199,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         panel.contentView = visualEffectView
         visualEffectView.addSubview(searchIconView)
         visualEffectView.addSubview(searchField)
-        visualEffectView.addSubview(modeLabel)
         visualEffectView.addSubview(separatorBox)
         visualEffectView.addSubview(resultsScrollView)
 
@@ -225,11 +210,8 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
             searchField.leadingAnchor.constraint(equalTo: searchIconView.trailingAnchor, constant: 12),
             searchField.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: topInset),
-            searchField.trailingAnchor.constraint(equalTo: modeLabel.leadingAnchor, constant: -12),
+            searchField.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
             searchField.heightAnchor.constraint(equalToConstant: searchFieldHeight),
-
-            modeLabel.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
-            modeLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
 
             separatorBox.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 20),
             separatorBox.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -20),
@@ -255,10 +237,8 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         }
 
         do {
-            let matches = try sessionIndex.search(
-                query: searchField.stringValue,
-                includeHistory: includeHistory
-            )
+            let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matches = try sessionIndex.search(query: query, liveOnly: query.isEmpty)
             applyResults(matches)
         } catch {
             applyResults([])
@@ -278,16 +258,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         }
 
         updatePanelSize()
-    }
-
-    private func refreshModeLabel() {
-        modeLabel.stringValue = includeHistory ? "○ History" : "● Live"
-    }
-
-    private func toggleMode() {
-        includeHistory.toggle()
-        refreshModeLabel()
-        refreshResults()
     }
 
     private func moveSelection(delta: Int) {

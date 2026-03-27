@@ -128,13 +128,13 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
-    func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
+    func search(query: String, liveOnly: Bool = false) throws -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return try listSessions(includeHistory: includeHistory)
+            return try listSessions(liveOnly: liveOnly)
         }
 
-        let statusClause = includeHistory ? "" : "AND status = 'live'"
+        let statusClause = liveOnly ? "AND status = 'live'" : ""
         let metadataSQL = """
             SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
             FROM sessions
@@ -162,7 +162,7 @@ final class SessionIndex: @unchecked Sendable {
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
                 WHERE transcripts MATCH ?1
-                \(includeHistory ? "" : "AND s.status = 'live'")
+                \(liveOnly ? "AND s.status = 'live'" : "")
             ),
             session_matches AS (
                 SELECT
@@ -238,7 +238,7 @@ final class SessionIndex: @unchecked Sendable {
                 FROM transcripts
                 JOIN sessions s ON s.id = transcripts.session_id
                 WHERE transcripts.content LIKE ?1 ESCAPE '\\'
-                \(includeHistory ? "" : "AND s.status = 'live'")
+                \(liveOnly ? "AND s.status = 'live'" : "")
             )
             SELECT
                 session_id,
@@ -300,6 +300,10 @@ final class SessionIndex: @unchecked Sendable {
         return Array(results.prefix(50))
     }
 
+    func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
+        try search(query: query, liveOnly: !includeHistory)
+    }
+
     func liveSessionCount() throws -> Int {
         let counts = try db.query("SELECT COUNT(*) FROM sessions WHERE status = 'live'") { statement in
             Int(sqlite3_column_int64(statement, 0))
@@ -331,11 +335,11 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
-    private func listSessions(includeHistory: Bool) throws -> [SearchResult] {
+    private func listSessions(liveOnly: Bool) throws -> [SearchResult] {
         let sql = """
             SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
             FROM sessions
-            \(includeHistory ? "" : "WHERE status = 'live'")
+            \(liveOnly ? "WHERE status = 'live'" : "")
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
             LIMIT 50
         """
