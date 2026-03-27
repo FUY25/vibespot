@@ -848,6 +848,67 @@ func testUpsertSessionStoresLastIndexedMtime() throws {
 }
 
 @Test
+func testIndexerSkipsFileWhenMtimeUnchanged() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let mtime = Date(timeIntervalSince1970: 1_700_000_000)
+
+    // Simulate a session that was already indexed with this mtime
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "original title",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil,
+        lastIndexedMtime: mtime
+    )
+
+    // Verify the stored mtime matches
+    let stored = try index.lastIndexedMtime(sessionId: "s1")
+    #expect(stored == mtime)
+
+    // A second upsert with the same mtime should preserve the stored value
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "same mtime title",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil,
+        lastIndexedMtime: mtime
+    )
+
+    let unchangedMtime = try index.lastIndexedMtime(sessionId: "s1")
+    #expect(unchangedMtime == mtime)
+
+    // A third upsert with a newer mtime should update
+    let newerMtime = Date(timeIntervalSince1970: 1_700_001_000)
+    try index.upsertSession(
+        id: "s1",
+        tool: "claude",
+        title: "updated title",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil,
+        lastIndexedMtime: newerMtime
+    )
+
+    let updatedMtime = try index.lastIndexedMtime(sessionId: "s1")
+    #expect(updatedMtime == newerMtime)
+}
+
+@Test
 func testLastIndexedMtimeReturnsNilForUnknownSession() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

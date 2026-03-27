@@ -149,6 +149,10 @@ final class Indexer {
             return
         }
         processedFiles.insert(path)
+        if shouldSkipFile(path: path, sessionId: sessionId) {
+            return
+        }
+        let mtime = fileMtime(at: path)
 
         let url = URL(fileURLWithPath: path)
         guard let messages = try? ClaudeParser.parseSessionFile(url: url) else {
@@ -179,7 +183,8 @@ final class Indexer {
             lastActivityAt: metrics.lastActivityAt,
             lastFileModification: metrics.lastFileModification,
             lastEntryType: metrics.lastEntryType,
-            activityPreview: metrics.activityPreview
+            activityPreview: metrics.activityPreview,
+            lastIndexedMtime: mtime
         )
 
         let transcriptEntries = messages.map { message in
@@ -235,6 +240,13 @@ final class Indexer {
         }
         processedFiles.insert(path)
 
+        // Codex filenames include the session UUID (for example, rollout-...-<uuid>.jsonl).
+        // If we can infer it from the path, we can skip unchanged files before full JSONL parsing.
+        if let sessionIdFromPath = codexSessionIDFromPath(path),
+           shouldSkipFile(path: path, sessionId: sessionIdFromPath) {
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         guard let (meta, messages) = try? CodexParser.parseSessionFile(url: url) else {
             return
@@ -248,6 +260,10 @@ final class Indexer {
         guard let sessionId, !sessionId.isEmpty else {
             return
         }
+        if shouldSkipFile(path: path, sessionId: sessionId) {
+            return
+        }
+        let mtime = fileMtime(at: path)
 
         let title = titleMap[sessionId]
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
@@ -269,7 +285,8 @@ final class Indexer {
             lastActivityAt: metrics.lastActivityAt,
             lastFileModification: metrics.lastFileModification,
             lastEntryType: metrics.lastEntryType,
-            activityPreview: metrics.activityPreview
+            activityPreview: metrics.activityPreview,
+            lastIndexedMtime: mtime
         )
 
         let transcriptEntries = messages.map { message in
@@ -417,6 +434,16 @@ final class Indexer {
 
     // MARK: - Helpers
 
+    private func fileMtime(at path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+    }
+
+    private func shouldSkipFile(path: String, sessionId: String) -> Bool {
+        guard let currentMtime = fileMtime(at: path) else { return false }
+        guard let storedMtime = try? sessionIndex.lastIndexedMtime(sessionId: sessionId) else { return false }
+        return currentMtime == storedMtime
+    }
+
     private func claudeSessionMetadataBySessionId(in projectDirectoryURL: URL) -> [String: ParsedSessionMeta] {
         let sessionsIndexURL = projectDirectoryURL.appendingPathComponent("sessions-index.json")
         guard let metas = try? ClaudeParser.parseSessionsIndex(url: sessionsIndexURL) else {
@@ -559,5 +586,22 @@ final class Indexer {
     private func isUUID(_ value: String) -> Bool {
         let range = NSRange(value.startIndex..., in: value)
         return Self.uuidRegex?.firstMatch(in: value, range: range) != nil
+    }
+
+    private static let uuidSearchRegex = try? NSRegularExpression(
+        pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        options: [.caseInsensitive]
+    )
+
+    private func codexSessionIDFromPath(_ path: String) -> String? {
+        let fileName = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let range = NSRange(fileName.startIndex..., in: fileName)
+        guard
+            let match = Self.uuidSearchRegex?.firstMatch(in: fileName, range: range),
+            let matchRange = Range(match.range, in: fileName)
+        else {
+            return nil
+        }
+        return String(fileName[matchRange])
     }
 }
