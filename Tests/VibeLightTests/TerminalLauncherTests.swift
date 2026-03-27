@@ -8,7 +8,7 @@ func testBuildScriptEscapesDoubleQuotes() {
         directory: "/Users/me/my project"
     )
 
-    #expect(script.contains("cd \"/Users/me/my project\""))
+    #expect(script.contains("quoted form of \"/Users/me/my project\""))
     #expect(script.contains("claude --resume \\\"abc-123\\\""))
     #expect(script.contains("tell application \"Terminal\""))
     #expect(script.contains("do script"))
@@ -22,7 +22,7 @@ func testBuildScriptEscapesBackslashesInPath() {
         directory: "/Users/me/path\\with\\backslash"
     )
 
-    #expect(script.contains("cd \"/Users/me/path\\\\with\\\\backslash\""))
+    #expect(script.contains("quoted form of \"/Users/me/path\\\\with\\\\backslash\""))
 }
 
 @Test
@@ -32,5 +32,5 @@ func testBuildScriptHandlesSimpleCommand() {
         directory: "/Users/me/project"
     )
 
-    #expect(script.contains("cd \"/Users/me/project\" && claude"))
+    #expect(script.contains("\"cd \" & quoted form of \"/Users/me/project\" & \" && claude\""))
 }

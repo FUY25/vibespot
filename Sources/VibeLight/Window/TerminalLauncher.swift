@@ -21,7 +21,7 @@ enum TerminalLauncher {
 
         return """
         tell application "Terminal"
-            do script "cd \"\(escapedDir)\" && \(escapedCmd)"
+            do script "cd " & quoted form of "\(escapedDir)" & " && \(escapedCmd)"
             activate
         end tell
         """
@@ -31,5 +31,7 @@ enum TerminalLauncher {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
     }
 }
