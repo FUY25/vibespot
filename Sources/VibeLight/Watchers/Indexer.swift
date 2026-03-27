@@ -220,6 +220,7 @@ final class Indexer {
 
     private func scanCodexSessions() {
         codexTitleMap = loadCodexTitleMap()
+        let codexGitBranchMap = CodexStateDB().gitBranchMap()
 
         let sessionsPath = homeDirectoryPath + "/.codex/sessions"
         let fileManager = FileManager.default
@@ -239,7 +240,11 @@ final class Indexer {
                 continue
             }
 
-            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+            indexCodexSessionFile(
+                path: fileURL.path,
+                titleMap: codexTitleMap,
+                gitBranchMap: codexGitBranchMap
+            )
         }
     }
 
@@ -255,7 +260,11 @@ final class Indexer {
         return titleMap
     }
 
-    private func indexCodexSessionFile(path: String, titleMap: [String: String]) {
+    private func indexCodexSessionFile(
+        path: String,
+        titleMap: [String: String],
+        gitBranchMap: [String: String]
+    ) {
         guard !processedFiles.contains(path) else {
             return
         }
@@ -298,7 +307,7 @@ final class Indexer {
             title: String(title.prefix(200)),
             project: cwd,
             projectName: cwd.isEmpty ? "" : (cwd as NSString).lastPathComponent,
-            gitBranch: "",
+            gitBranch: gitBranchMap[sessionId] ?? "",
             status: "closed",
             startedAt: messages.first?.timestamp ?? .distantPast,
             pid: nil,
@@ -377,7 +386,12 @@ final class Indexer {
                 reindexClaudeSessionFile(at: path)
             } else if path.contains("/.codex/sessions/") {
                 processedFiles.remove(path)
-                indexCodexSessionFile(path: path, titleMap: codexTitleMap)
+                let codexGitBranchMap = CodexStateDB().gitBranchMap()
+                indexCodexSessionFile(
+                    path: path,
+                    titleMap: codexTitleMap,
+                    gitBranchMap: codexGitBranchMap
+                )
             }
         }
     }
@@ -413,6 +427,7 @@ final class Indexer {
     private func reindexAllCodexSessionFiles() {
         let sessionsPath = homeDirectoryPath + "/.codex/sessions"
         let fileManager = FileManager.default
+        let codexGitBranchMap = CodexStateDB().gitBranchMap()
 
         guard
             let enumerator = fileManager.enumerator(
@@ -426,7 +441,11 @@ final class Indexer {
 
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
             processedFiles.remove(fileURL.path)
-            indexCodexSessionFile(path: fileURL.path, titleMap: codexTitleMap)
+            indexCodexSessionFile(
+                path: fileURL.path,
+                titleMap: codexTitleMap,
+                gitBranchMap: codexGitBranchMap
+            )
         }
     }
 
