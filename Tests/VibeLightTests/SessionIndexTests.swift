@@ -326,6 +326,50 @@ func testLiveSessionCount() throws {
 }
 
 @Test
+func testMostRecentProjectReturnsLatestSessionProjectAndProjectName() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try index.upsertSession(
+        id: "older",
+        tool: "claude",
+        title: "older project",
+        project: "/Users/me/older",
+        projectName: "older",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-120),
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-120)
+    )
+    try index.upsertSession(
+        id: "latest",
+        tool: "codex",
+        title: "latest project",
+        project: "/Users/me/latest",
+        projectName: "latest",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 1,
+        lastActivityAt: now
+    )
+
+    let mostRecent = try index.mostRecentProject()
+    #expect(mostRecent?.project == "/Users/me/latest")
+    #expect(mostRecent?.projectName == "latest")
+}
+
+@Test
+func testMostRecentProjectReturnsNilWhenEmpty() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    #expect(try index.mostRecentProject() == nil)
+}
+
+@Test
 func testEmptyQueryListsSessionsRespectingHistoryMode() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path

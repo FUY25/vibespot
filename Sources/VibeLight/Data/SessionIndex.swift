@@ -402,6 +402,21 @@ final class SessionIndex: @unchecked Sendable {
         return Set(ids)
     }
 
+    func mostRecentProject() throws -> (project: String, projectName: String)? {
+        let rows = try db.query(
+            """
+            SELECT project, project_name
+            FROM sessions
+            WHERE TRIM(project) <> ''
+            ORDER BY last_activity_at DESC
+            LIMIT 1
+            """
+        ) { statement in
+            (project: textColumn(statement, index: 0), projectName: textColumn(statement, index: 1))
+        }
+        return rows.first
+    }
+
     func lastIndexedMtime(sessionId: String) throws -> Date? {
         let results = try db.query(
             "SELECT last_indexed_mtime FROM sessions WHERE id = ?1",

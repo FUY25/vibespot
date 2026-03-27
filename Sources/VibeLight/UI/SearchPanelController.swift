@@ -324,11 +324,60 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         do {
             let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let matches = try sessionIndex.search(query: query, liveOnly: query.isEmpty)
-            applyResults(matches)
+            if query.lowercased().hasPrefix("new") {
+                applyResults(makeNewSessionActionRows() + matches)
+            } else {
+                applyResults(matches)
+            }
         } catch {
             applyResults([])
             print("SearchPanelController search failed: \(error)")
         }
+    }
+
+    private func makeNewSessionActionRows() -> [SearchResult] {
+        let homePath = FileManager.default.homeDirectoryForCurrentUser.path
+        let recentProject = (try? sessionIndex?.mostRecentProject()) ?? nil
+        let project = recentProject?.project.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let projectName = recentProject?.projectName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedProject = project.isEmpty ? homePath : project
+        let resolvedProjectName = projectName.isEmpty ? "~" : projectName
+        let now = Date()
+
+        return [
+            SearchResult(
+                sessionId: "new-claude",
+                tool: "claude",
+                title: "New Claude session",
+                project: resolvedProject,
+                projectName: resolvedProjectName,
+                gitBranch: "",
+                status: "action",
+                startedAt: now,
+                pid: nil,
+                tokenCount: 0,
+                lastActivityAt: now,
+                activityPreview: nil,
+                activityStatus: .closed,
+                snippet: nil
+            ),
+            SearchResult(
+                sessionId: "new-codex",
+                tool: "codex",
+                title: "New Codex session",
+                project: resolvedProject,
+                projectName: resolvedProjectName,
+                gitBranch: "",
+                status: "action",
+                startedAt: now,
+                pid: nil,
+                tokenCount: 0,
+                lastActivityAt: now,
+                activityPreview: nil,
+                activityStatus: .closed,
+                snippet: nil
+            ),
+        ]
     }
 
     private func applyResults(_ newResults: [SearchResult]) {
@@ -379,7 +428,9 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         let result = results[row]
         searchBarProductIcon.image = ToolIcon.image(for: result.tool, size: 22)
 
-        if result.status == "live" {
+        if result.status == "action" {
+            actionHintLabel.stringValue = "↩ Launch"
+        } else if result.status == "live" {
             actionHintLabel.stringValue = "↩ Switch"
         } else {
             actionHintLabel.stringValue = "↩ Resume ⇥ History"
@@ -397,7 +448,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         }
 
         let result = results[row]
-        guard result.status != "live", !result.title.isEmpty else {
+        guard result.status != "live", result.status != "action", !result.title.isEmpty else {
             return false
         }
 
