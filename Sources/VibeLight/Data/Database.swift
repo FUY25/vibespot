@@ -182,6 +182,16 @@ final class Database: @unchecked Sendable {
             }
         }
 
+        func bindNull(index: Int32) throws {
+            let rc = owner.withLock {
+                sqlite3_bind_null(stmt, index)
+            }
+
+            guard rc == SQLITE_OK else {
+                throw DatabaseError.bindFailed(connectionErrorMessage())
+            }
+        }
+
         func step() -> Int32 {
             owner.withLock {
                 sqlite3_step(stmt)

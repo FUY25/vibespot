@@ -11,6 +11,10 @@ struct SearchResult: Sendable {
     let status: String
     let startedAt: Date
     let pid: Int?
+    let tokenCount: Int
+    let lastActivityAt: Date
+    let activityPreview: ActivityPreview?
+    let activityStatus: SessionActivityStatus
     let snippet: String?
 }
 
@@ -34,9 +38,22 @@ final class SessionIndex: @unchecked Sendable {
                 status TEXT NOT NULL DEFAULT 'closed',
                 started_at REAL NOT NULL,
                 pid INTEGER,
+                token_count INTEGER NOT NULL DEFAULT 0,
+                last_activity_at REAL,
+                last_file_mod REAL,
+                last_entry_type TEXT,
+                activity_preview TEXT,
+                activity_preview_kind TEXT,
                 updated_at REAL NOT NULL DEFAULT 0
             )
         """)
+
+        try ensureSessionColumnExists(name: "token_count", definition: "INTEGER NOT NULL DEFAULT 0")
+        try ensureSessionColumnExists(name: "last_activity_at", definition: "REAL")
+        try ensureSessionColumnExists(name: "last_file_mod", definition: "REAL")
+        try ensureSessionColumnExists(name: "last_entry_type", definition: "TEXT")
+        try ensureSessionColumnExists(name: "activity_preview", definition: "TEXT")
+        try ensureSessionColumnExists(name: "activity_preview_kind", definition: "TEXT")
 
         try db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
@@ -61,13 +78,20 @@ final class SessionIndex: @unchecked Sendable {
         gitBranch: String,
         status: String,
         startedAt: Date,
-        pid: Int?
+        pid: Int?,
+        tokenCount: Int = 0,
+        lastActivityAt: Date? = nil,
+        lastFileModification: Date? = nil,
+        lastEntryType: String? = nil,
+        activityPreview: ActivityPreview? = nil
     ) throws {
         let sql = """
             INSERT INTO sessions (
-                id, tool, title, project, project_name, git_branch, status, started_at, pid, updated_at
+                id, tool, title, project, project_name, git_branch, status, started_at, pid,
+                token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
+                activity_preview_kind, updated_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
             )
             ON CONFLICT(id) DO UPDATE SET
                 tool = excluded.tool,
@@ -78,6 +102,12 @@ final class SessionIndex: @unchecked Sendable {
                 status = excluded.status,
                 started_at = excluded.started_at,
                 pid = excluded.pid,
+                token_count = excluded.token_count,
+                last_activity_at = excluded.last_activity_at,
+                last_file_mod = excluded.last_file_mod,
+                last_entry_type = excluded.last_entry_type,
+                activity_preview = excluded.activity_preview,
+                activity_preview_kind = excluded.activity_preview_kind,
                 updated_at = excluded.updated_at
         """
 
@@ -92,8 +122,33 @@ final class SessionIndex: @unchecked Sendable {
             try statement.bind(index: 8, double: startedAt.timeIntervalSince1970)
             if let pid {
                 try statement.bind(index: 9, int: Int64(pid))
+            } else {
+                try statement.bindNull(index: 9)
             }
-            try statement.bind(index: 10, double: Date().timeIntervalSince1970)
+            try statement.bind(index: 10, int: Int64(tokenCount))
+            if let lastActivityAt {
+                try statement.bind(index: 11, double: lastActivityAt.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 11)
+            }
+            if let lastFileModification {
+                try statement.bind(index: 12, double: lastFileModification.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 12)
+            }
+            if let lastEntryType {
+                try statement.bind(index: 13, text: lastEntryType)
+            } else {
+                try statement.bindNull(index: 13)
+            }
+            if let activityPreview {
+                try statement.bind(index: 14, text: activityPreview.text)
+                try statement.bind(index: 15, text: activityPreview.kind.rawValue)
+            } else {
+                try statement.bindNull(index: 14)
+                try statement.bindNull(index: 15)
+            }
+            try statement.bind(index: 16, double: Date().timeIntervalSince1970)
         }
     }
 
@@ -136,7 +191,10 @@ final class SessionIndex: @unchecked Sendable {
 
         let statusClause = liveOnly ? "AND status = 'live'" : ""
         let metadataSQL = """
-            SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
+            SELECT
+                id, tool, title, project, project_name, git_branch, status, started_at, pid,
+                token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
+                activity_preview_kind, NULL AS snippet
             FROM sessions
             WHERE (
                 title LIKE ?1 ESCAPE '\\' OR
@@ -206,6 +264,12 @@ final class SessionIndex: @unchecked Sendable {
                 s.status,
                 s.started_at,
                 s.pid,
+                s.token_count,
+                s.last_activity_at,
+                s.last_file_mod,
+                s.last_entry_type,
+                s.activity_preview,
+                s.activity_preview_kind,
                 snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet
             FROM deduplicated_matches
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
@@ -231,6 +295,12 @@ final class SessionIndex: @unchecked Sendable {
                     s.status,
                     s.started_at,
                     s.pid,
+                    s.token_count,
+                    s.last_activity_at,
+                    s.last_file_mod,
+                    s.last_entry_type,
+                    s.activity_preview,
+                    s.activity_preview_kind,
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id
                         ORDER BY transcripts.timestamp_str DESC, transcripts.rowid DESC
@@ -250,6 +320,12 @@ final class SessionIndex: @unchecked Sendable {
                 status,
                 started_at,
                 pid,
+                token_count,
+                last_activity_at,
+                last_file_mod,
+                last_entry_type,
+                activity_preview,
+                activity_preview_kind,
                 NULL AS snippet
             FROM session_matches
             WHERE match_row_number = 1
@@ -337,7 +413,10 @@ final class SessionIndex: @unchecked Sendable {
 
     private func listSessions(liveOnly: Bool) throws -> [SearchResult] {
         let sql = """
-            SELECT id, tool, title, project, project_name, git_branch, status, started_at, pid, NULL AS snippet
+            SELECT
+                id, tool, title, project, project_name, git_branch, status, started_at, pid,
+                token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
+                activity_preview_kind, NULL AS snippet
             FROM sessions
             \(liveOnly ? "WHERE status = 'live'" : "")
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -429,18 +508,47 @@ final class SessionIndex: @unchecked Sendable {
     }
 
     private func mapRow(_ statement: OpaquePointer) -> SearchResult {
-        SearchResult(
+        let startedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
+        let lastActivityAt = sqlite3_column_type(statement, 10) == SQLITE_NULL
+            ? startedAt
+            : Date(timeIntervalSince1970: sqlite3_column_double(statement, 10))
+        let lastFileModification = sqlite3_column_type(statement, 11) == SQLITE_NULL
+            ? lastActivityAt
+            : Date(timeIntervalSince1970: sqlite3_column_double(statement, 11))
+        let activityPreview = previewColumn(statement, textIndex: 13, kindIndex: 14)
+        let status = textColumn(statement, index: 6)
+        return SearchResult(
             sessionId: textColumn(statement, index: 0),
             tool: textColumn(statement, index: 1),
             title: textColumn(statement, index: 2),
             project: textColumn(statement, index: 3),
             projectName: textColumn(statement, index: 4),
             gitBranch: textColumn(statement, index: 5),
-            status: textColumn(statement, index: 6),
-            startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
+            status: status,
+            startedAt: startedAt,
             pid: sqlite3_column_type(statement, 8) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 8)),
-            snippet: optionalTextColumn(statement, index: 9)
+            tokenCount: Int(sqlite3_column_int64(statement, 9)),
+            lastActivityAt: lastActivityAt,
+            activityPreview: activityPreview,
+            activityStatus: SessionActivityStatus.determine(
+                sessionStatus: status,
+                lastFileModification: lastFileModification,
+                lastJSONLEntryType: optionalTextColumn(statement, index: 12)
+            ),
+            snippet: optionalTextColumn(statement, index: 15)
         )
+    }
+
+    private func ensureSessionColumnExists(name: String, definition: String) throws {
+        let existingColumns = try db.query("PRAGMA table_info(sessions)") { statement in
+            textColumn(statement, index: 1)
+        }
+
+        guard !existingColumns.contains(name) else {
+            return
+        }
+
+        try db.execute("ALTER TABLE sessions ADD COLUMN \(name) \(definition)")
     }
 
     private func textColumn(_ statement: OpaquePointer, index: Int32) -> String {
@@ -455,5 +563,17 @@ final class SessionIndex: @unchecked Sendable {
             return nil
         }
         return textColumn(statement, index: index)
+    }
+
+    private func previewColumn(_ statement: OpaquePointer, textIndex: Int32, kindIndex: Int32) -> ActivityPreview? {
+        guard
+            let text = optionalTextColumn(statement, index: textIndex),
+            let rawKind = optionalTextColumn(statement, index: kindIndex),
+            let kind = ActivityPreview.Kind(rawValue: rawKind)
+        else {
+            return nil
+        }
+
+        return ActivityPreview(text: text, kind: kind)
     }
 }

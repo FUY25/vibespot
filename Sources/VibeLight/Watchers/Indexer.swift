@@ -133,7 +133,8 @@ final class Indexer {
             gitBranch: meta.gitBranch,
             status: "closed",
             startedAt: meta.startedAt,
-            pid: nil
+            pid: nil,
+            lastActivityAt: meta.startedAt
         )
     }
 
@@ -162,6 +163,7 @@ final class Indexer {
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let startedAt = messages.first?.timestamp ?? .distantPast
+        let metrics = sessionMetrics(from: messages, filePath: path)
 
         try? sessionIndex.upsertSession(
             id: sessionId,
@@ -172,7 +174,12 @@ final class Indexer {
             gitBranch: gitBranch,
             status: "closed",
             startedAt: startedAt,
-            pid: nil
+            pid: nil,
+            tokenCount: metrics.tokenCount,
+            lastActivityAt: metrics.lastActivityAt,
+            lastFileModification: metrics.lastFileModification,
+            lastEntryType: metrics.lastEntryType,
+            activityPreview: metrics.activityPreview
         )
 
         let transcriptEntries = messages.map { message in
@@ -246,6 +253,7 @@ final class Indexer {
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let metrics = sessionMetrics(from: messages, filePath: path)
 
         try? sessionIndex.upsertSession(
             id: sessionId,
@@ -256,7 +264,12 @@ final class Indexer {
             gitBranch: "",
             status: "closed",
             startedAt: messages.first?.timestamp ?? .distantPast,
-            pid: nil
+            pid: nil,
+            tokenCount: metrics.tokenCount,
+            lastActivityAt: metrics.lastActivityAt,
+            lastFileModification: metrics.lastFileModification,
+            lastEntryType: metrics.lastEntryType,
+            activityPreview: metrics.activityPreview
         )
 
         let transcriptEntries = messages.map { message in
@@ -360,8 +373,7 @@ final class Indexer {
     }
 
     private func reindexAllCodexSessionFiles() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let sessionsPath = home + "/.codex/sessions"
+        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
         let fileManager = FileManager.default
 
         guard
@@ -433,6 +445,97 @@ final class Indexer {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+
+    private func sessionMetrics(
+        from messages: [ParsedMessage],
+        filePath: String
+    ) -> (
+        tokenCount: Int,
+        lastActivityAt: Date,
+        lastFileModification: Date?,
+        lastEntryType: String?,
+        activityPreview: ActivityPreview?
+    ) {
+        let lastActivityAt = messages.last?.timestamp ?? .distantPast
+        let lastFileModification = (try? FileManager.default.attributesOfItem(atPath: filePath)[.modificationDate]) as? Date
+
+        let tokenCount = max(
+            0,
+            messages.reduce(into: 0) { partial, message in
+                partial += approximateTokenCount(for: message.content)
+                for toolCall in message.toolCalls {
+                    partial += approximateTokenCount(for: toolCall)
+                }
+            }
+        )
+
+        guard let lastMessage = messages.last else {
+            return (tokenCount, lastActivityAt, lastFileModification, nil, nil)
+        }
+
+        if let toolCall = lastMessage.toolCalls.last {
+            return (
+                tokenCount,
+                lastActivityAt,
+                lastFileModification,
+                "tool_use",
+                previewForToolCall(toolCall)
+            )
+        }
+
+        if lastMessage.role == "user" {
+            return (tokenCount, lastActivityAt, lastFileModification, "user", nil)
+        }
+
+        let trimmedContent = lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else {
+            return (tokenCount, lastActivityAt, lastFileModification, lastMessage.role, nil)
+        }
+
+        return (
+            tokenCount,
+            lastActivityAt,
+            lastFileModification,
+            lastMessage.role,
+            ActivityPreview(
+                text: condensedPreviewText(from: trimmedContent),
+                kind: .assistant
+            )
+        )
+    }
+
+    private func approximateTokenCount(for text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return 0
+        }
+
+        return max(1, Int(ceil(Double(trimmed.count) / 4.0)))
+    }
+
+    private func previewForToolCall(_ toolCall: String) -> ActivityPreview {
+        let normalized = condensedPreviewText(from: toolCall)
+        let lowercased = normalized.lowercased()
+
+        if lowercased.contains("edit") || lowercased.contains("write") || lowercased.contains("apply_patch") {
+            return ActivityPreview(text: "✎ Editing \(normalized)", kind: .fileEdit)
+        }
+
+        return ActivityPreview(text: "▶ Running \(normalized)", kind: .tool)
+    }
+
+    private func condensedPreviewText(from text: String, limit: Int = 80) -> String {
+        let normalized = text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        if normalized.count <= limit {
+            return normalized
+        }
+
+        return String(normalized.prefix(limit - 1)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 
     private func normalizedDisplayTitle(from rawTitle: String) -> String? {

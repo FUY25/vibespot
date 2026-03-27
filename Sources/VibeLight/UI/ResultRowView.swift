@@ -1,15 +1,14 @@
 import AppKit
 
 final class ResultRowView: NSTableCellView {
-    static let rowHeightWithoutSnippet: CGFloat = 60
-    static let rowHeightWithSnippet: CGFloat = 84
+    static let rowHeightWithoutActivity: CGFloat = 54
+    static let rowHeightWithActivity: CGFloat = 72
 
     private let toolIcon = NSImageView(frame: .zero)
     private let titleLabel = NSTextField(labelWithString: "")
     private let metadataLabel = NSTextField(labelWithString: "")
-    private let statusDot = NSView(frame: .zero)
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let snippetLabel = NSTextField(wrappingLabelWithString: "")
+    private let statusTextLabel = NSTextField(labelWithString: "")
+    private let activityLabel = NSTextField(labelWithString: "")
 
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet {
@@ -28,35 +27,25 @@ final class ResultRowView: NSTableCellView {
     }
 
     func configure(with result: SearchResult) {
-        toolIcon.image = ToolIcon.image(for: result.tool, size: 20)
+        toolIcon.image = ToolIcon.image(for: result.tool, size: 18)
         titleLabel.stringValue = result.title
         metadataLabel.stringValue = makeMetadataText(for: result)
-        statusLabel.stringValue = Self.makeStatusText(status: result.status, startedAt: result.startedAt)
-        statusDot.layer?.backgroundColor = statusColor(for: result.status).cgColor
+        statusTextLabel.stringValue = makeStatusText(for: result)
 
-        if let snippet = normalizedSnippet(from: result.snippet) {
-            snippetLabel.stringValue = snippet
-            snippetLabel.isHidden = false
+        if let activityPreview = result.activityPreview, result.activityStatus != .closed {
+            activityLabel.stringValue = activityPreview.text
+            activityLabel.isHidden = false
+            applyActivityStyle(for: activityPreview)
         } else {
-            snippetLabel.stringValue = ""
-            snippetLabel.isHidden = true
+            activityLabel.stringValue = ""
+            activityLabel.isHidden = true
         }
 
         updateTextColors()
     }
 
     static func height(for result: SearchResult) -> CGFloat {
-        normalizedSnippet(from: result.snippet) == nil ? rowHeightWithoutSnippet : rowHeightWithSnippet
-    }
-
-    static func makeStatusText(
-        status: String,
-        startedAt: Date,
-        formatter: DateFormatter? = nil
-    ) -> String {
-        let statusText = status == "live" ? "Live" : "Closed"
-        let timestamp = (formatter ?? makeDefaultTimeFormatter()).string(from: startedAt)
-        return "\(statusText) \(timestamp)"
+        result.activityStatus == .closed ? rowHeightWithoutActivity : rowHeightWithActivity
     }
 
     private func configure() {
@@ -73,36 +62,28 @@ final class ResultRowView: NSTableCellView {
         metadataLabel.font = .systemFont(ofSize: 11, weight: .regular)
         metadataLabel.lineBreakMode = .byTruncatingTail
 
-        statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        statusLabel.alignment = .right
+        statusTextLabel.font = .systemFont(ofSize: 10.5, weight: .medium)
+        statusTextLabel.alignment = .right
+        statusTextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
-
-        snippetLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        snippetLabel.lineBreakMode = .byTruncatingTail
-        snippetLabel.maximumNumberOfLines = 1
+        activityLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        activityLabel.lineBreakMode = .byTruncatingTail
+        activityLabel.maximumNumberOfLines = 1
 
         let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = 9
 
-        let statusStack = NSStackView(views: [statusDot, statusLabel])
-        statusStack.orientation = .horizontal
-        statusStack.alignment = .centerY
-        statusStack.spacing = 6
-
-        let headerRow = NSStackView(views: [titleRow, statusStack])
+        let headerRow = NSStackView(views: [titleRow, statusTextLabel])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.distribution = .fill
 
-        let bodyStack = NSStackView(views: [headerRow, metadataLabel, snippetLabel])
+        let bodyStack = NSStackView(views: [headerRow, metadataLabel, activityLabel])
         bodyStack.orientation = .vertical
         bodyStack.alignment = .leading
-        bodyStack.spacing = 3
+        bodyStack.spacing = 2
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(bodyStack)
@@ -110,13 +91,11 @@ final class ResultRowView: NSTableCellView {
         NSLayoutConstraint.activate([
             toolIcon.widthAnchor.constraint(equalToConstant: 18),
             toolIcon.heightAnchor.constraint(equalToConstant: 18),
-            statusDot.widthAnchor.constraint(equalToConstant: 7),
-            statusDot.heightAnchor.constraint(equalToConstant: 7),
             headerRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
 
             bodyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             bodyStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            bodyStack.topAnchor.constraint(equalTo: topAnchor, constant: 9),
             bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9),
         ])
 
@@ -124,57 +103,67 @@ final class ResultRowView: NSTableCellView {
     }
 
     private func makeMetadataText(for result: SearchResult) -> String {
+        let time = RelativeTimeFormatter.string(from: result.lastActivityAt)
         let projectName = result.projectName.isEmpty
             ? URL(fileURLWithPath: result.project).lastPathComponent
             : result.projectName
         let branch = result.gitBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tokenCount = formatTokenCount(result.tokenCount)
 
-        if branch.isEmpty {
-            return projectName
+        var parts = [time]
+
+        if !projectName.isEmpty {
+            let projectPart = branch.isEmpty ? projectName : "\(projectName) / \(branch)"
+            parts.append(projectPart)
         }
 
-        return "\(projectName) / \(branch)"
+        if result.tokenCount > 0 {
+            parts.append(tokenCount)
+        }
+
+        return parts.joined(separator: " · ")
     }
 
-    private func statusColor(for status: String) -> NSColor {
-        status == "live" ? NSColor.systemGreen : NSColor.systemGray
+    private func makeStatusText(for result: SearchResult) -> String {
+        switch result.activityStatus {
+        case .working:
+            return "Working"
+        case .waiting:
+            return "Awaiting input"
+        case .closed:
+            return RelativeTimeFormatter.string(from: result.lastActivityAt)
+        }
     }
 
-    private static func makeDefaultTimeFormatter() -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = .autoupdatingCurrent
-        formatter.timeZone = .autoupdatingCurrent
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk tokens", Double(count) / 1000.0)
+        }
+
+        return "\(count) tokens"
     }
 
     private func updateTextColors() {
         let emphasized = backgroundStyle == .emphasized
         titleLabel.textColor = emphasized ? .white : .labelColor
         metadataLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .secondaryLabelColor
-        statusLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
-        snippetLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.9) : .secondaryLabelColor
+        statusTextLabel.textColor = emphasized ? NSColor.white.withAlphaComponent(0.82) : .tertiaryLabelColor
         toolIcon.alphaValue = emphasized ? 1.0 : 0.96
     }
 
-    private static func normalizedSnippet(from snippet: String?) -> String? {
-        guard let snippet else {
-            return nil
+    private func applyActivityStyle(for activityPreview: ActivityPreview) {
+        switch activityPreview.kind {
+        case .tool, .fileEdit:
+            activityLabel.textColor = NSColor(red: 0.54, green: 0.70, blue: 0.97, alpha: 1.0)
+            activityLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        case .assistant:
+            activityLabel.textColor = NSColor.secondaryLabelColor.withAlphaComponent(0.72)
+            let italicDescriptor = NSFont.systemFont(ofSize: 10.5).fontDescriptor.withSymbolicTraits(.italic)
+            if let italicFont = NSFont(descriptor: italicDescriptor, size: 10.5) {
+                activityLabel.font = italicFont
+            } else {
+                activityLabel.font = .systemFont(ofSize: 10.5)
+            }
         }
-
-        let cleaned = snippet
-            .replacingOccurrences(of: ">>>", with: "")
-            .replacingOccurrences(of: "<<<", with: "")
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return cleaned.isEmpty ? nil : cleaned
-    }
-
-    private func normalizedSnippet(from snippet: String?) -> String? {
-        Self.normalizedSnippet(from: snippet)
     }
 }
