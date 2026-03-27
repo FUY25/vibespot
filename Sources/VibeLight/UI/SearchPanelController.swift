@@ -33,6 +33,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let searchDebouncer = Debouncer(delay: 0.08)
 
     private var results: [SearchResult] = []
+    private var deactivationObserver: NSObjectProtocol?
 
     private let panelWidth: CGFloat = 720
     private let minPanelHeight: CGFloat = 104
@@ -165,7 +166,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.hidesOnDeactivate = true
+        panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
@@ -260,6 +261,20 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     private func configureInteractions() {
         searchField.delegate = self
+        deactivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hide()
+        }
+    }
+
+    @MainActor
+    deinit {
+        if let observer = deactivationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func refreshResults() {

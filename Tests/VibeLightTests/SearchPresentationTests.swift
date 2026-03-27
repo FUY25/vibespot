@@ -7,7 +7,7 @@ import Testing
 @Test
 func searchPanelHidesOnDeactivate() {
     let controller = SearchPanelController()
-    #expect(controller.hidesOnDeactivate == true)
+    #expect(controller.hidesOnDeactivate == false)
 }
 
 @MainActor
