@@ -12,7 +12,7 @@ final class CodexStateDB {
         self.path = path
     }
 
-    init() {
+    convenience init() {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex")
             .appendingPathComponent("state_5.sqlite")
