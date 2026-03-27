@@ -277,6 +277,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     private func configureInteractions() {
         searchField.delegate = self
+        guard !Self.isRunningTests else { return }
         deactivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
@@ -286,7 +287,6 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
                 self?.hide()
             }
         }
-        guard !Self.isRunningTests else { return }
         panelResignKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
             object: panel,
