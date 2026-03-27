@@ -14,6 +14,7 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     private let resultsScrollView = NSScrollView(frame: .zero)
     private let resultsTableView = ResultsTableView(frame: .zero)
     private let resultsHeightConstraint: NSLayoutConstraint
+    private let searchDebouncer = Debouncer(delay: 0.08)
 
     private var includeHistory = false
     private var results: [SearchResult] = []
@@ -49,6 +50,7 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     }
 
     func show() {
+        searchDebouncer.cancel()
         includeHistory = false
         refreshModeLabel()
         searchField.stringValue = ""
@@ -64,6 +66,7 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     }
 
     func hide() {
+        searchDebouncer.cancel()
         panel.orderOut(nil)
     }
 
@@ -96,7 +99,11 @@ final class SearchPanelController: NSObject, NSSearchFieldDelegate, NSTableViewD
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        refreshResults()
+        searchDebouncer.schedule { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refreshResults()
+            }
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

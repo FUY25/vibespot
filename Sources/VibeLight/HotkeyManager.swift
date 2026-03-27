@@ -3,6 +3,12 @@ import Carbon
 
 @MainActor
 final class HotkeyManager {
+    typealias PermissionHandler = @MainActor @Sendable () -> Void
+    typealias EventTapFactory = @MainActor @Sendable (
+        _ callback: @escaping CGEventTapCallBack,
+        _ userInfo: UnsafeMutableRawPointer?
+    ) -> CFMachPort?
+
     private final class CallbackContext {
         weak var manager: HotkeyManager?
 
@@ -15,28 +21,35 @@ final class HotkeyManager {
     private var runLoopSource: CFRunLoopSource?
     private var callbackContext: Unmanaged<CallbackContext>?
     private let onToggle: @MainActor @Sendable () -> Void
+    private let onPermissionRequired: PermissionHandler
+    private let eventTapFactory: EventTapFactory
+    private var didPresentPermissionHelp = false
 
-    init(onToggle: @escaping @MainActor @Sendable () -> Void) {
+    init(
+        onToggle: @escaping @MainActor @Sendable () -> Void,
+        onPermissionRequired: @escaping PermissionHandler = HotkeyManager.presentAccessibilityPermissionAlert,
+        eventTapFactory: @escaping EventTapFactory = HotkeyManager.makeEventTap
+    ) {
         self.onToggle = onToggle
+        self.onPermissionRequired = onPermissionRequired
+        self.eventTapFactory = eventTapFactory
     }
 
     func register() {
         guard eventTap == nil else { return }
 
-        let eventMask = CGEventMask(1) << CGEventMask(CGEventType.keyDown.rawValue)
         let context = Unmanaged.passRetained(CallbackContext(manager: self))
         callbackContext = context
 
-        guard let tap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: Self.eventTapCallback,
-            userInfo: UnsafeMutableRawPointer(context.toOpaque())
-        ) else {
+        guard let tap = eventTapFactory(Self.eventTapCallback, UnsafeMutableRawPointer(context.toOpaque())) else {
             context.release()
             callbackContext = nil
+
+            if !didPresentPermissionHelp {
+                didPresentPermissionHelp = true
+                onPermissionRequired()
+            }
+
             print("HotkeyManager: Accessibility permission is required for the hotkey.")
             return
         }
@@ -119,5 +132,32 @@ final class HotkeyManager {
         }
 
         return nil
+    }
+
+    private static func makeEventTap(
+        callback: @escaping CGEventTapCallBack,
+        userInfo: UnsafeMutableRawPointer?
+    ) -> CFMachPort? {
+        let eventMask = CGEventMask(1) << CGEventMask(CGEventType.keyDown.rawValue)
+        return CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: callback,
+            userInfo: userInfo
+        )
+    }
+
+    private static func presentAccessibilityPermissionAlert() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Accessibility Permission Required"
+        alert.informativeText = """
+        VibeLight needs Accessibility access to listen for the global hotkey.
+        Enable it in System Settings > Privacy & Security > Accessibility.
+        """
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }

@@ -2,6 +2,10 @@ import AppKit
 import Foundation
 
 enum WindowJumper {
+    enum ProcessExecutionError: Error, Equatable {
+        case timedOut
+    }
+
     private static let jumpQueue = DispatchQueue(label: "VibeLight.WindowJumper", qos: .userInitiated)
 
     @MainActor
@@ -183,18 +187,33 @@ enum WindowJumper {
         return application.activate(options: [.activateAllWindows])
     }
 
-    private static func runProcess(executableURL: URL, arguments: [String]) throws -> ProcessOutput {
+    static func runProcess(
+        executableURL: URL,
+        arguments: [String],
+        timeout: TimeInterval = 1.5
+    ) throws -> ProcessOutput {
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let finished = DispatchSemaphore(value: 0)
 
         process.executableURL = executableURL
         process.arguments = arguments
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        process.terminationHandler = { _ in
+            finished.signal()
+        }
 
         try process.run()
-        process.waitUntilExit()
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            if process.isRunning {
+                process.terminate()
+                _ = finished.wait(timeout: .now() + 0.2)
+            }
+            throw ProcessExecutionError.timedOut
+        }
 
         let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
@@ -205,7 +224,7 @@ enum WindowJumper {
             stderr: String(data: stderr, encoding: .utf8) ?? ""
         )
     }
-    
+
     private static func appleScriptStringLiteral(_ value: String) -> String {
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -214,7 +233,7 @@ enum WindowJumper {
     }
 }
 
-private struct ProcessOutput {
+struct ProcessOutput {
     let terminationStatus: Int32
     let stdout: String
     let stderr: String
