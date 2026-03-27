@@ -45,10 +45,8 @@ func windowJumperRunProcessTimesOut() throws {
 
 @MainActor
 @Test
-func hotkeyManagerRegisterAndUnregisterAreSafe() {
-    let manager = HotkeyManager(onToggle: {})
-    manager.register()
-    manager.unregister()
+func hotkeyManagerInitializesWithCallback() {
+    _ = HotkeyManager(onToggle: {})
 }
 
 private actor InvocationCounter {

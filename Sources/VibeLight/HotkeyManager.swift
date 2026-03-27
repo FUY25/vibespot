@@ -1,5 +1,4 @@
 import Carbon
-import Cocoa
 
 @MainActor
 final class HotkeyManager {
@@ -15,6 +14,12 @@ final class HotkeyManager {
 
     init(onToggle: @escaping @MainActor @Sendable () -> Void) {
         self.onToggle = onToggle
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            unregister()
+        }
     }
 
     func register() {
@@ -75,6 +80,12 @@ final class HotkeyManager {
             return
         }
 
+        guard let installedHandler else {
+            contextRef?.release()
+            contextRef = nil
+            return
+        }
+
         handlerRef = installedHandler
 
         var registeredHotkey: EventHotKeyRef?
@@ -88,10 +99,8 @@ final class HotkeyManager {
         )
 
         guard registerStatus == noErr else {
-            if let installedHandler {
-                RemoveEventHandler(installedHandler)
-                handlerRef = nil
-            }
+            RemoveEventHandler(installedHandler)
+            handlerRef = nil
             contextRef?.release()
             contextRef = nil
             return
