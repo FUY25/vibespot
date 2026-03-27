@@ -139,9 +139,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WindowJumper.jumpToSession(result)
         }
     ) {
+        let launchDirectory = normalizedLaunchDirectory(from: result.project)
+
         if result.status == "action" {
-            let command = result.sessionId == "new-codex" ? "codex" : "claude"
-            launch(command, result.project)
+            let isCodexAction = result.tool == "codex" || result.sessionId == "new-codex"
+            let command = isCodexAction ? "codex" : "claude"
+            launch(command, launchDirectory)
             return
         }
 
@@ -156,7 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             command = "claude --resume \(result.sessionId)"
         }
-        launch(command, result.project)
+        launch(command, launchDirectory)
+    }
+
+    private static func normalizedLaunchDirectory(from project: String) -> String {
+        let trimmed = project.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        return trimmed
     }
 
     private func makeSessionIndex() throws -> SessionIndex {

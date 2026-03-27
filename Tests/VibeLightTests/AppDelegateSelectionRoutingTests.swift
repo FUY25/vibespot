@@ -8,7 +8,7 @@ func routesSelectionByStatusAndTool() {
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let actionCodex = SearchResult(
         sessionId: "new-codex",
-        tool: "",
+        tool: "codex",
         title: "New Codex Session",
         project: "/tmp/proj-a",
         projectName: "proj-a",
@@ -25,7 +25,7 @@ func routesSelectionByStatusAndTool() {
 
     let actionClaude = SearchResult(
         sessionId: "new-claude",
-        tool: "",
+        tool: "claude",
         title: "New Claude Session",
         project: "/tmp/proj-b",
         projectName: "proj-b",
@@ -90,9 +90,26 @@ func routesSelectionByStatusAndTool() {
         activityStatus: .closed,
         snippet: nil
     )
+    let closedClaudeNoProject = SearchResult(
+        sessionId: "claude-empty-project",
+        tool: "claude",
+        title: "Closed Claude Empty Project",
+        project: "   ",
+        projectName: "",
+        gitBranch: "",
+        status: "closed",
+        startedAt: now,
+        pid: nil,
+        tokenCount: 0,
+        lastActivityAt: now,
+        activityPreview: nil,
+        activityStatus: .closed,
+        snippet: nil
+    )
 
     var launched: [(command: String, directory: String)] = []
     var jumped: [SearchResult] = []
+    let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
 
     AppDelegate.routeSelection(actionCodex, launch: { command, directory in
         launched.append((command, directory))
@@ -123,8 +140,13 @@ func routesSelectionByStatusAndTool() {
     }, jump: { result in
         jumped.append(result)
     })
+    AppDelegate.routeSelection(closedClaudeNoProject, launch: { command, directory in
+        launched.append((command, directory))
+    }, jump: { result in
+        jumped.append(result)
+    })
 
-    #expect(launched.count == 4)
+    #expect(launched.count == 5)
     #expect(launched[0].command == "codex")
     #expect(launched[0].directory == "/tmp/proj-a")
     #expect(launched[1].command == "claude")
@@ -133,6 +155,8 @@ func routesSelectionByStatusAndTool() {
     #expect(launched[2].directory == "/tmp/proj-c")
     #expect(launched[3].command == "claude --resume claude-999")
     #expect(launched[3].directory == "/tmp/proj-d")
+    #expect(launched[4].command == "claude --resume claude-empty-project")
+    #expect(launched[4].directory == homeDirectory)
 
     #expect(jumped.map(\.sessionId) == ["live-session"])
 }
