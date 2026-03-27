@@ -46,7 +46,10 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
-    try await Task.sleep(for: .milliseconds(250))
+    let editorDeadline = Date().addingTimeInterval(1.0)
+    while searchField.currentEditor() == nil, Date() < editorDeadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
 
     let editorAfterRefresh = try #require(searchField.currentEditor())
     #expect(editorAfterRefresh.selectedRange == NSRange(location: length, length: 0))
@@ -85,7 +88,10 @@ func tabAcceptsGhostSuggestionBeforeClosedHistoryDrillIn() async throws {
     controller.controlTextDidChange(
         Notification(name: NSControl.textDidChangeNotification, object: searchField)
     )
-    try await Task.sleep(for: .milliseconds(250))
+    let suggestionDeadline = Date().addingTimeInterval(1.0)
+    while searchField.ghostSuggestion != "archiver", Date() < suggestionDeadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
 
     #expect(searchField.ghostSuggestion == "archiver")
 
