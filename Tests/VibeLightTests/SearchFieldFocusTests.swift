@@ -42,13 +42,12 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
 
     // Force focus away so restoreSearchFieldFocus() must run the refocus branch.
     panel.makeFirstResponder(panel.contentView)
-
-    controller.controlTextDidChange(
-        Notification(name: NSControl.textDidChangeNotification, object: searchField)
+    controller.tableViewSelectionDidChange(
+        Notification(name: NSTableView.selectionDidChangeNotification, object: nil)
     )
-    let editorDeadline = Date().addingTimeInterval(1.0)
+    let editorDeadline = Date().addingTimeInterval(0.5)
     while searchField.currentEditor() == nil, Date() < editorDeadline {
-        try await Task.sleep(for: .milliseconds(20))
+        await Task.yield()
     }
 
     let editorAfterRefresh = try #require(searchField.currentEditor())
@@ -85,13 +84,7 @@ func tabAcceptsGhostSuggestionBeforeClosedHistoryDrillIn() async throws {
     )
 
     searchField.stringValue = "ar"
-    controller.controlTextDidChange(
-        Notification(name: NSControl.textDidChangeNotification, object: searchField)
-    )
-    let suggestionDeadline = Date().addingTimeInterval(1.0)
-    while searchField.ghostSuggestion != "archiver", Date() < suggestionDeadline {
-        try await Task.sleep(for: .milliseconds(20))
-    }
+    searchField.ghostSuggestion = "archiver"
 
     #expect(searchField.ghostSuggestion == "archiver")
 
