@@ -48,4 +48,27 @@ struct PIDDeduplicationTests {
 
         #expect(Set(staleIDs) == Set(["oldest", "middle"]))
     }
+
+    @Test("deduplicateLiveSessions excludes sessions with missing startedAt from closure decisions")
+    func missingStartedAtIsExcludedFromDedupDecision() throws {
+        let now = Date()
+        let aliveSessionsByID: [String: LiveSession] = [
+            "known": LiveSession(pid: 1234, sessionId: "known", cwd: "/tmp/a", isAlive: true),
+            "unknown": LiveSession(pid: 1234, sessionId: "unknown", cwd: "/tmp/b", isAlive: true),
+        ]
+        let startedAtBySessionID: [String: Date] = [
+            "known": now,
+            // "unknown" intentionally missing
+        ]
+
+        let tuples = Indexer.dedupTuplesFromAliveSessions(
+            aliveSessionsByID: aliveSessionsByID,
+            startedAtBySessionID: startedAtBySessionID
+        )
+        let staleIDs = Indexer.sessionIDsToCloseByPID(sessions: tuples)
+
+        #expect(tuples.count == 1)
+        #expect(tuples.first?.sessionId == "known")
+        #expect(staleIDs.isEmpty)
+    }
 }

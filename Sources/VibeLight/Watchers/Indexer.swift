@@ -351,6 +351,23 @@ final class Indexer {
         return staleIDs
     }
 
+    nonisolated static func dedupTuplesFromAliveSessions(
+        aliveSessionsByID: [String: LiveSession],
+        startedAtBySessionID: [String: Date]
+    ) -> [(sessionId: String, pid: Int, startedAt: Date)] {
+        var tuples: [(sessionId: String, pid: Int, startedAt: Date)] = []
+        tuples.reserveCapacity(aliveSessionsByID.count)
+
+        for (sessionId, liveSession) in aliveSessionsByID {
+            guard let startedAt = startedAtBySessionID[sessionId] else {
+                continue
+            }
+            tuples.append((sessionId, liveSession.pid, startedAt))
+        }
+
+        return tuples
+    }
+
     private func refreshLiveSessions() {
         let liveSessions = LiveSessionRegistry.scan()
         let aliveSessionsByID = Dictionary(
@@ -385,13 +402,10 @@ final class Indexer {
     private func deduplicateSharedPIDSessions(aliveSessionsByID: [String: LiveSession]) {
         let aliveSessionIDs = Set(aliveSessionsByID.keys)
         let startedAtBySessionID = (try? sessionIndex.startedAtBySessionID(aliveSessionIDs)) ?? [:]
-
-        // Build (sessionId, pid, startedAt) tuples for alive sessions
-        var tuples: [(sessionId: String, pid: Int, startedAt: Date)] = []
-        for (sessionId, liveSession) in aliveSessionsByID {
-            let startedAt = startedAtBySessionID[sessionId] ?? .distantPast
-            tuples.append((sessionId, liveSession.pid, startedAt))
-        }
+        let tuples = Self.dedupTuplesFromAliveSessions(
+            aliveSessionsByID: aliveSessionsByID,
+            startedAtBySessionID: startedAtBySessionID
+        )
 
         let staleIDs = Self.sessionIDsToCloseByPID(sessions: tuples)
         for sessionId in staleIDs {
