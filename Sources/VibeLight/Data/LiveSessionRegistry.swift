@@ -53,7 +53,7 @@ enum LiveSessionRegistry {
                 return nil
             }
 
-            guard let cwd = parseCwd(from: lsofOutput) else { return nil }
+            guard let cwd = parseCwd(from: lsofOutput, pid: pid) else { return nil }
             guard let sessionId = stateDB.sessionIdByCwd(cwd) else { return nil }
 
             return LiveSession(pid: pid, sessionId: sessionId, cwd: cwd, isAlive: true)
@@ -77,12 +77,22 @@ enum LiveSessionRegistry {
             }
     }
 
-    static func parseCwd(from output: String) -> String? {
+    static func parseCwd(from output: String, pid: Int) -> String? {
+        var foundTargetProcess = false
         var sawCwdField = false
 
         for rawLine in output.split(whereSeparator: \.isNewline) {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty else { continue }
+
+            // Process ID lines start with 'p' followed by a number.
+            if line.hasPrefix("p"), let linePid = Int(line.dropFirst()) {
+                foundTargetProcess = linePid == pid
+                sawCwdField = false
+                continue
+            }
+
+            guard foundTargetProcess else { continue }
 
             if line == "fcwd" {
                 sawCwdField = true
