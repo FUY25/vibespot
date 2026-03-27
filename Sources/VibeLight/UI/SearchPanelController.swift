@@ -21,7 +21,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
 
     private let panel: SearchPanel
-    private let visualEffectView = NSVisualEffectView(frame: .zero)
+    private let visualEffectView = ThemedVisualEffectView(frame: .zero)
     private let searchIconView = NSImageView(frame: .zero)
     private let searchField = SearchField(frame: .zero)
     private let actionHintLabel = NSTextField(labelWithString: "")
@@ -42,7 +42,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let searchFieldHeight: CGFloat = DesignTokens.Spacing.searchFieldHeight
     private let topInset: CGFloat = DesignTokens.Spacing.searchBarTopPadding
     private let bottomInset: CGFloat = DesignTokens.Spacing.resultsBottomPadding
-    private let resultsTopSpacing: CGFloat = 10
+    private let resultsTopSpacing: CGFloat = 8
     private let separatorTopSpacing: CGFloat = 14
     private let separatorHeight: CGFloat = 1
     private static let isRunningTests: Bool = {
@@ -624,5 +624,12 @@ private final class SearchPanel: NSPanel {
 
     override var canBecomeMain: Bool {
         false
+    }
+}
+
+private final class ThemedVisualEffectView: NSVisualEffectView {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.borderColor = DesignTokens.Color.ghostBorder.cgColor
     }
 }

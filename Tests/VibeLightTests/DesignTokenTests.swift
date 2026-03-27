@@ -42,36 +42,42 @@ func designTokenPanelWidthIs720() {
     #expect(DesignTokens.Spacing.panelWidth == 720)
 }
 
+@MainActor
 @Test
 func sessionTitleFontIsMonospaced14pt() {
     let font = DesignTokens.Font.sessionTitle
     #expect(font.pointSize == 14)
 }
 
+@MainActor
 @Test
 func searchInputFontIs24pt() {
     let font = DesignTokens.Font.searchInput
     #expect(font.pointSize == 24)
 }
 
+@MainActor
 @Test
 func metadataFontIs12pt() {
     let font = DesignTokens.Font.metadata
     #expect(font.pointSize == 12)
 }
 
+@MainActor
 @Test
 func activityFontIsMonospaced11_5pt() {
     let font = DesignTokens.Font.activity
     #expect(font.pointSize == 11.5)
 }
 
+@MainActor
 @Test
 func statusLabelFontIsMonospaced10pt() {
     let font = DesignTokens.Font.statusLabel
     #expect(font.pointSize == 10)
 }
 
+@MainActor
 @Test
 func actionHintFontIsMonospaced11pt() {
     let font = DesignTokens.Font.actionHint
@@ -106,4 +112,17 @@ func activityCyanMatchesDesignSpec() {
     #expect(abs(components.redComponent - 0.490) < 0.01)
     #expect(abs(components.greenComponent - 0.847) < 0.01)
     #expect(abs(components.blueComponent - 0.753) < 0.01)
+}
+
+@MainActor
+@Test
+func searchFieldUsesDesignTokenFont() {
+    let field = SearchField(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+    #expect(field.font?.pointSize == 24)
+}
+
+@MainActor
+@Test
+func resultsTableRowViewUsesDesignTokenSelectionRadius() {
+    #expect(DesignTokens.Radius.row == 6)
 }
