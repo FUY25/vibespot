@@ -68,6 +68,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     func show() {
         searchDebouncer.cancel()
         searchField.stringValue = ""
+        searchField.ghostSuggestion = nil
         refreshResults()
 
         if !panel.isVisible {
@@ -81,6 +82,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     func hide() {
         searchDebouncer.cancel()
+        searchField.ghostSuggestion = nil
         panel.orderOut(nil)
     }
 
@@ -90,7 +92,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         guard results.indices.contains(row) else {
-            return ResultRowView.rowHeightWithoutSnippet
+            return ResultRowView.rowHeightWithoutActivity
         }
 
         return ResultRowView.height(for: results[row])
@@ -113,6 +115,9 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     }
 
     func controlTextDidChange(_ notification: Notification) {
+        if searchField.stringValue.isEmpty {
+            searchField.ghostSuggestion = nil
+        }
         searchDebouncer.schedule { [weak self] in
             Task { @MainActor [weak self] in
                 self?.refreshResults()
@@ -140,7 +145,9 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             moveSelection(delta: 1)
             return true
         case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
-            return drillIntoSelectedHistory()
+            return acceptGhostSuggestionIfNeeded() || drillIntoSelectedHistory()
+        case #selector(NSResponder.moveRight(_:)):
+            return acceptGhostSuggestionIfNeeded()
         default:
             return false
         }
@@ -282,6 +289,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             resultsTableView.scrollRowToVisible(0)
         }
 
+        updateGhostSuggestion()
         updateActionHint()
         updatePanelSize()
     }
@@ -347,6 +355,56 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             editor.selectedRange = NSRange(location: result.title.utf16.count, length: 0)
         }
 
+        return true
+    }
+
+    private func updateGhostSuggestion() {
+        guard !results.isEmpty else {
+            searchField.ghostSuggestion = nil
+            return
+        }
+
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            searchField.ghostSuggestion = nil
+            return
+        }
+
+        let titleSuggestion = results.first(where: {
+            $0.title.lowercased().hasPrefix(query.lowercased())
+        })?.title
+
+        let projectSuggestion = titleSuggestion ?? results.first(where: {
+            let name = $0.projectName.isEmpty
+                ? URL(fileURLWithPath: $0.project).lastPathComponent
+                : $0.projectName
+            return name.lowercased().hasPrefix(query.lowercased())
+        }).map {
+            $0.projectName.isEmpty
+                ? URL(fileURLWithPath: $0.project).lastPathComponent
+                : $0.projectName
+        }
+
+        searchField.ghostSuggestion = titleSuggestion ?? projectSuggestion
+    }
+
+    private func acceptGhostSuggestionIfNeeded() -> Bool {
+        guard
+            let ghostSuggestion = searchField.ghostSuggestion,
+            !ghostSuggestion.isEmpty,
+            ghostSuggestion != searchField.stringValue
+        else {
+            return false
+        }
+
+        searchField.stringValue = ghostSuggestion
+        searchField.ghostSuggestion = nil
+
+        if let editor = searchField.currentEditor() {
+            editor.selectedRange = NSRange(location: ghostSuggestion.utf16.count, length: 0)
+        }
+
+        refreshResults()
         return true
     }
 
