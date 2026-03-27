@@ -4,13 +4,18 @@ import Foundation
 final class Indexer {
     let sessionIndex: SessionIndex
 
+    private let homeDirectoryPath: String
     private var fileWatcher: FileWatcher?
     private var refreshTimer: Timer?
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
 
-    init(sessionIndex: SessionIndex) {
+    init(
+        sessionIndex: SessionIndex,
+        homeDirectoryPath: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) {
         self.sessionIndex = sessionIndex
+        self.homeDirectoryPath = homeDirectoryPath
     }
 
     func start() {
@@ -20,10 +25,9 @@ final class Indexer {
             self?.performFullScan()
         }
 
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let watchPaths = [
-            home + "/.claude",
-            home + "/.codex",
+            homeDirectoryPath + "/.claude",
+            homeDirectoryPath + "/.codex",
         ].filter { FileManager.default.fileExists(atPath: $0) }
 
         if !watchPaths.isEmpty {
@@ -51,15 +55,14 @@ final class Indexer {
 
     // MARK: - Full scan
 
-    private func performFullScan() {
+    func performFullScan() {
         scanClaudeSessions()
         scanCodexSessions()
         refreshLiveSessions()
     }
 
     private func scanClaudeSessions() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let projectsPath = home + "/.claude/projects"
+        let projectsPath = homeDirectoryPath + "/.claude/projects"
         let fileManager = FileManager.default
 
         guard let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) else {
@@ -185,8 +188,7 @@ final class Indexer {
     private func scanCodexSessions() {
         codexTitleMap = loadCodexTitleMap()
 
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let sessionsPath = home + "/.codex/sessions"
+        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
         let fileManager = FileManager.default
 
         guard
@@ -209,25 +211,13 @@ final class Indexer {
     }
 
     private func loadCodexTitleMap() -> [String: String] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let indexURL = URL(fileURLWithPath: home + "/.codex/session_index.jsonl")
+        let indexURL = URL(fileURLWithPath: homeDirectoryPath + "/.codex/session_index.jsonl")
         let metas = (try? CodexParser.parseSessionIndex(url: indexURL)) ?? []
 
         var titleMap: [String: String] = [:]
         for meta in metas {
             let title = normalizedDisplayTitle(from: meta.title) ?? "Untitled"
             titleMap[meta.sessionId] = title
-            try? sessionIndex.upsertSession(
-                id: meta.sessionId,
-                tool: "codex",
-                title: title,
-                project: "",
-                projectName: "",
-                gitBranch: "",
-                status: "closed",
-                startedAt: meta.startedAt,
-                pid: nil
-            )
         }
         return titleMap
     }
