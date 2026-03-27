@@ -3,8 +3,38 @@ import SQLite3
 
 final class CodexStateDB {
     let path: String
-    private var lastFailureTime: Date?
-    private var lastLogTime: Date?
+
+    private struct ThrottleState {
+        var lastFailureTime: Date?
+        var lastLogTime: Date?
+    }
+
+    private final class SharedThrottleStore: @unchecked Sendable {
+        private var throttleStateByPath: [String: ThrottleState] = [:]
+        private let stateLock = NSLock()
+
+        func read(path: String) -> ThrottleState {
+            withLockedState { stateMap in
+                stateMap[path] ?? ThrottleState()
+            }
+        }
+
+        func update(path: String, _ update: (inout ThrottleState) -> Void) {
+            withLockedState { stateMap in
+                var state = stateMap[path] ?? ThrottleState()
+                update(&state)
+                stateMap[path] = state
+            }
+        }
+
+        private func withLockedState<T>(_ operation: (inout [String: ThrottleState]) -> T) -> T {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return operation(&throttleStateByPath)
+        }
+    }
+
+    private static let sharedThrottleStore = SharedThrottleStore()
     private static let cooldownInterval: TimeInterval = 30
     private static let logThrottleInterval: TimeInterval = 60
 
@@ -103,7 +133,8 @@ final class CodexStateDB {
     }
 
     private func shouldAttemptOpen() -> Bool {
-        if let lastFailure = lastFailureTime {
+        let state = Self.sharedThrottleStore.read(path: path)
+        if let lastFailure = state.lastFailureTime {
             let elapsed = Date().timeIntervalSince(lastFailure)
             if elapsed < Self.cooldownInterval {
                 return false
@@ -114,7 +145,7 @@ final class CodexStateDB {
 
     private func withReadOnlyDatabase<T>(_ operation: (OpaquePointer) -> T?) -> T? {
         guard FileManager.default.fileExists(atPath: path) else {
-            lastFailureTime = Date()
+            recordFailure()
             return nil
         }
 
@@ -123,7 +154,7 @@ final class CodexStateDB {
         let rc = sqlite3_open_v2(path, &handle, flags, nil)
 
         guard rc == SQLITE_OK, let db = handle else {
-            lastFailureTime = Date()
+            recordFailure()
             if let handle {
                 logSQLiteError(handle, context: "open read-only database", code: rc)
                 sqlite3_close_v2(handle)
@@ -132,7 +163,7 @@ final class CodexStateDB {
         }
 
         // Reset failure tracking on successful open
-        lastFailureTime = nil
+        clearFailure()
 
         if sqlite3_busy_timeout(db, 300) != SQLITE_OK {
             logSQLiteError(db, context: "configure busy timeout")
@@ -148,15 +179,40 @@ final class CodexStateDB {
     }
 
     private func logSQLiteError(_ db: OpaquePointer?, context: String, code: Int32? = nil) {
-        let now = Date()
-        if let lastLog = lastLogTime, now.timeIntervalSince(lastLog) < Self.logThrottleInterval {
+        guard shouldLog() else {
             return
         }
-        lastLogTime = now
 
         let rc = code ?? sqlite3_errcode(db)
         let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
         print("CodexStateDB: \(context) failed (\(rc)): \(message)")
+    }
+
+    private func recordFailure() {
+        let now = Date()
+        Self.sharedThrottleStore.update(path: path) { state in
+            state.lastFailureTime = now
+        }
+    }
+
+    private func clearFailure() {
+        Self.sharedThrottleStore.update(path: path) { state in
+            state.lastFailureTime = nil
+        }
+    }
+
+    private func shouldLog() -> Bool {
+        let now = Date()
+        var shouldLog = false
+        Self.sharedThrottleStore.update(path: path) { state in
+            if let lastLog = state.lastLogTime, now.timeIntervalSince(lastLog) < Self.logThrottleInterval {
+                shouldLog = false
+                return
+            }
+            state.lastLogTime = now
+            shouldLog = true
+        }
+        return shouldLog
     }
 
     // Equivalent to SQLITE_TRANSIENT for sqlite3_bind_text.
