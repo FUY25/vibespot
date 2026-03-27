@@ -408,6 +408,7 @@ final class SessionIndex: @unchecked Sendable {
             SELECT project, project_name
             FROM sessions
             WHERE TRIM(project) <> ''
+              AND TRIM(project_name) <> ''
             ORDER BY last_activity_at DESC
             LIMIT 1
             """

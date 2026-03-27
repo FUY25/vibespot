@@ -370,6 +370,42 @@ func testMostRecentProjectReturnsNilWhenEmpty() throws {
 }
 
 @Test
+func testMostRecentProjectSkipsRowsWithEmptyProjectName() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try index.upsertSession(
+        id: "named-project",
+        tool: "claude",
+        title: "named",
+        project: "/Users/me/named",
+        projectName: "named",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-120),
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-120)
+    )
+    try index.upsertSession(
+        id: "empty-name",
+        tool: "codex",
+        title: "empty project name",
+        project: "/Users/me/empty",
+        projectName: "",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now,
+        pid: nil,
+        lastActivityAt: now
+    )
+
+    let mostRecent = try index.mostRecentProject()
+    #expect(mostRecent?.project == "/Users/me/named")
+    #expect(mostRecent?.projectName == "named")
+}
+
+@Test
 func testEmptyQueryListsSessionsRespectingHistoryMode() throws {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
