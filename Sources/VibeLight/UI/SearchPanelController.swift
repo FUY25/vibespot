@@ -24,6 +24,8 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let visualEffectView = NSVisualEffectView(frame: .zero)
     private let searchIconView = NSImageView(frame: .zero)
     private let searchField = SearchField(frame: .zero)
+    private let actionHintLabel = NSTextField(labelWithString: "")
+    private let searchBarProductIcon = NSImageView(frame: .zero)
     private let separatorBox = NSBox(frame: .zero)
     private let resultsScrollView = NSScrollView(frame: .zero)
     private let resultsTableView = ResultsTableView(frame: .zero)
@@ -120,6 +122,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         restoreSearchFieldFocus()
+        updateActionHint()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -136,6 +139,8 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         case #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveToEndOfParagraph(_:)):
             moveSelection(delta: 1)
             return true
+        case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
+            return drillIntoSelectedHistory()
         default:
             return false
         }
@@ -180,6 +185,16 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         searchIconView.contentTintColor = .secondaryLabelColor
         searchIconView.imageScaling = .scaleProportionallyUpOrDown
 
+        actionHintLabel.translatesAutoresizingMaskIntoConstraints = false
+        actionHintLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        actionHintLabel.textColor = .tertiaryLabelColor
+        actionHintLabel.alignment = .right
+        actionHintLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        actionHintLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        searchBarProductIcon.translatesAutoresizingMaskIntoConstraints = false
+        searchBarProductIcon.imageScaling = .scaleProportionallyUpOrDown
+
         separatorBox.translatesAutoresizingMaskIntoConstraints = false
         separatorBox.boxType = .separator
 
@@ -199,6 +214,8 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
         panel.contentView = visualEffectView
         visualEffectView.addSubview(searchIconView)
         visualEffectView.addSubview(searchField)
+        visualEffectView.addSubview(actionHintLabel)
+        visualEffectView.addSubview(searchBarProductIcon)
         visualEffectView.addSubview(separatorBox)
         visualEffectView.addSubview(resultsScrollView)
 
@@ -210,8 +227,16 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
             searchField.leadingAnchor.constraint(equalTo: searchIconView.trailingAnchor, constant: 12),
             searchField.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: topInset),
-            searchField.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
+            searchField.trailingAnchor.constraint(equalTo: actionHintLabel.leadingAnchor, constant: -12),
             searchField.heightAnchor.constraint(equalToConstant: searchFieldHeight),
+
+            actionHintLabel.trailingAnchor.constraint(equalTo: searchBarProductIcon.leadingAnchor, constant: -8),
+            actionHintLabel.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+
+            searchBarProductIcon.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -24),
+            searchBarProductIcon.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            searchBarProductIcon.widthAnchor.constraint(equalToConstant: 22),
+            searchBarProductIcon.heightAnchor.constraint(equalToConstant: 22),
 
             separatorBox.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: 20),
             separatorBox.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -20),
@@ -257,6 +282,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
             resultsTableView.scrollRowToVisible(0)
         }
 
+        updateActionHint()
         updatePanelSize()
     }
 
@@ -272,6 +298,56 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
 
         resultsTableView.selectRowIndexes(IndexSet(integer: nextRow), byExtendingSelection: false)
         resultsTableView.scrollRowToVisible(nextRow)
+        updateActionHint()
+    }
+
+    private func updateActionHint() {
+        guard !results.isEmpty else {
+            actionHintLabel.stringValue = ""
+            searchBarProductIcon.image = nil
+            return
+        }
+
+        let row = resultsTableView.selectedRow >= 0 ? resultsTableView.selectedRow : 0
+        guard results.indices.contains(row) else {
+            actionHintLabel.stringValue = ""
+            searchBarProductIcon.image = nil
+            return
+        }
+
+        let result = results[row]
+        searchBarProductIcon.image = ToolIcon.image(for: result.tool, size: 22)
+
+        if result.status == "live" {
+            actionHintLabel.stringValue = "↩ Switch"
+        } else {
+            actionHintLabel.stringValue = "↩ Resume  ⇥ Search history"
+        }
+    }
+
+    private func drillIntoSelectedHistory() -> Bool {
+        guard !results.isEmpty else {
+            return false
+        }
+
+        let row = resultsTableView.selectedRow >= 0 ? resultsTableView.selectedRow : 0
+        guard results.indices.contains(row) else {
+            return false
+        }
+
+        let result = results[row]
+        guard result.status != "live", !result.title.isEmpty else {
+            return false
+        }
+
+        searchField.stringValue = result.title
+        refreshResults()
+
+        if let editor = searchField.currentEditor() {
+            editor.selectedRange = NSRange(location: result.title.utf16.count, length: 0)
+        }
+
+        return true
     }
 
     private func activateSelectedResult() {
