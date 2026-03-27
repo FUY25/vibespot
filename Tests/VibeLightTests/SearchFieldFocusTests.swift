@@ -4,7 +4,7 @@ import Testing
 @testable import VibeLight
 
 @MainActor
-@Test(.serialized)
+@Test
 func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async throws {
     let dbPath = FileManager.default.temporaryDirectory
         .appendingPathComponent("search_focus_\(UUID().uuidString).sqlite3").path
@@ -55,7 +55,7 @@ func searchFieldRetainsInsertionPointAfterResultsRefreshSelectionChange() async 
 }
 
 @MainActor
-@Test(.serialized)
+@Test
 func tabAcceptsGhostSuggestionBeforeClosedHistoryDrillIn() async throws {
     let dbPath = FileManager.default.temporaryDirectory
         .appendingPathComponent("search_tab_precedence_\(UUID().uuidString).sqlite3").path
