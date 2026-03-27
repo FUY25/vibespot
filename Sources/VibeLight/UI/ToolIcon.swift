@@ -3,11 +3,11 @@ import AppKit
 enum ToolIcon {
     private static let fallbackResourceSubdirectory = "ToolIcons"
 
-    static func image(for tool: String, size: CGFloat = 20) -> NSImage {
+    static func image(for tool: String, size: CGFloat = DesignTokens.Spacing.toolIconSize) -> NSImage {
         image(for: tool, size: size, in: .module)
     }
 
-    static func image(for tool: String, size: CGFloat = 20, in bundle: Bundle) -> NSImage {
+    static func image(for tool: String, size: CGFloat = DesignTokens.Spacing.toolIconSize, in bundle: Bundle) -> NSImage {
         guard let resourceURL = resourceURL(for: tool, in: bundle) else {
             return fallbackImage(for: tool, size: size)
         }
@@ -56,16 +56,21 @@ enum ToolIcon {
             return nil
         }
 
-        let resized = image.copy() as? NSImage ?? image
-        resized.size = NSSize(width: size, height: size)
-        resized.isTemplate = false
-        return resized
+        let canvas = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect, xRadius: DesignTokens.Radius.logo, yRadius: DesignTokens.Radius.logo)
+            path.addClip()
+            image.draw(in: rect)
+            return true
+        }
+        canvas.isTemplate = false
+        return canvas
     }
 
     private static func fallbackImage(for tool: String, size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             NSColor.systemGray.setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            let insetRect = rect.insetBy(dx: 1, dy: 1)
+            NSBezierPath(roundedRect: insetRect, xRadius: DesignTokens.Radius.icon, yRadius: DesignTokens.Radius.icon).fill()
 
             let letter = String(tool.prefix(1)).uppercased()
             let attributes: [NSAttributedString.Key: Any] = [
