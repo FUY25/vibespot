@@ -167,7 +167,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
             let suggestion = self.computeGhostSuggestion(query: query)
             if let suggestion {
-                let escaped = suggestion.replacingOccurrences(of: "'", with: "\\'")
+                let escaped = self.escapeForSingleQuotedJavaScriptString(suggestion)
                 self.webView.evaluateJavaScript("setGhostSuggestion('\(escaped)')", completionHandler: nil)
             } else {
                 self.webView.evaluateJavaScript("setGhostSuggestion(null)", completionHandler: nil)
