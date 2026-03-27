@@ -45,6 +45,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
     private let resultsTopSpacing: CGFloat = 10
     private let separatorTopSpacing: CGFloat = 14
     private let separatorHeight: CGFloat = 1
+    private static let isRunningTests = NSClassFromString("XCTestCase") != nil
 
     override init() {
         self.panel = SearchPanel(
@@ -271,6 +272,7 @@ final class SearchPanelController: NSObject, NSTextFieldDelegate, NSTableViewDat
                 self?.hide()
             }
         }
+        guard !Self.isRunningTests else { return }
         panelResignKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
             object: panel,
