@@ -10,6 +10,7 @@ final class ResultRowView: NSTableCellView {
     private let statusTextLabel = NSTextField(labelWithString: "")
     private let activityLabel = NSTextField(labelWithString: "")
     private let typingDotsView = NSStackView()
+    private let statusDotView = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 6))
 
     private var currentActivityStatus: SessionActivityStatus = .closed
     private var currentActivityPreview: ActivityPreview?
@@ -83,12 +84,21 @@ final class ResultRowView: NSTableCellView {
 
         configureTypingDots()
 
+        statusDotView.translatesAutoresizingMaskIntoConstraints = false
+        statusDotView.wantsLayer = true
+        statusDotView.layer?.cornerRadius = 3
+        NSLayoutConstraint.activate([
+            statusDotView.widthAnchor.constraint(equalToConstant: 6),
+            statusDotView.heightAnchor.constraint(equalToConstant: 6),
+        ])
+        statusDotView.isHidden = true
+
         let titleRow = NSStackView(views: [toolIcon, titleLabel])
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = DesignTokens.Spacing.logoToTextGap
 
-        let statusContainer = NSStackView(views: [statusTextLabel, typingDotsView])
+        let statusContainer = NSStackView(views: [statusDotView, statusTextLabel, typingDotsView])
         statusContainer.orientation = .horizontal
         statusContainer.alignment = .centerY
         statusContainer.spacing = 6
@@ -199,15 +209,22 @@ final class ResultRowView: NSTableCellView {
         case .working:
             statusTextLabel.isHidden = true
             typingDotsView.isHidden = false
+            statusDotView.isHidden = false
+            statusDotView.layer?.backgroundColor = DesignTokens.Color.neonDim.cgColor
             applyShimmer()
             startTypingDots()
+            applyStatusDotPulse()
         case .waiting:
             statusTextLabel.isHidden = false
             typingDotsView.isHidden = true
+            statusDotView.isHidden = false
+            statusDotView.layer?.backgroundColor = DesignTokens.Color.waitingAmber.cgColor
             applyWaitingBreathing()
+            applyStatusDotPulse()
         case .closed:
             statusTextLabel.isHidden = true
             typingDotsView.isHidden = true
+            statusDotView.isHidden = true
         }
     }
 
@@ -218,6 +235,8 @@ final class ResultRowView: NSTableCellView {
         statusTextLabel.alphaValue = 1.0
         typingDotsView.isHidden = true
         statusTextLabel.isHidden = false
+        statusDotView.isHidden = true
+        statusDotView.layer?.removeAllAnimations()
 
         for dot in typingDotsView.arrangedSubviews {
             dot.layer?.removeAllAnimations()
@@ -256,6 +275,27 @@ final class ResultRowView: NSTableCellView {
             bounce.beginTime = CACurrentMediaTime() + Double(index) * DesignTokens.Animation.typingDotStagger
             dot.layer?.add(bounce, forKey: "bounce")
         }
+    }
+
+    private func applyStatusDotPulse() {
+        guard let dotLayer = statusDotView.layer else { return }
+
+        let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
+        scaleAnim.fromValue = 1.0
+        scaleAnim.toValue = 1.2
+
+        let opacityAnim = CABasicAnimation(keyPath: "opacity")
+        opacityAnim.fromValue = 0.6
+        opacityAnim.toValue = 1.0
+
+        let group = CAAnimationGroup()
+        group.animations = [scaleAnim, opacityAnim]
+        group.duration = DesignTokens.Animation.statusDotPulseDuration
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        dotLayer.add(group, forKey: "statusPulse")
     }
 
     private func applyWaitingBreathing() {
