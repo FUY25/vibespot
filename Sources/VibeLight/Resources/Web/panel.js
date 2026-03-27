@@ -21,7 +21,19 @@
   // --- Swift → JS API ---
 
   window.updateResults = function(resultsJSON) {
-    const newResults = typeof resultsJSON === 'string' ? JSON.parse(resultsJSON) : resultsJSON;
+    var newResults = [];
+
+    try {
+      if (Array.isArray(resultsJSON)) {
+        newResults = resultsJSON;
+      } else if (typeof resultsJSON === 'string') {
+        var parsed = JSON.parse(resultsJSON);
+        newResults = Array.isArray(parsed) ? parsed : [];
+      }
+    } catch (error) {
+      newResults = [];
+    }
+
     currentResults = newResults;
     renderResults();
     if (currentResults.length > 0) {
@@ -183,12 +195,16 @@
   function updateActionHint() {
     if (currentResults.length === 0) {
       actionHint.textContent = '';
-      searchBarIcon.src = '';
+      searchBarIcon.removeAttribute('src');
       return;
     }
     var result = currentResults[selectedIndex] || currentResults[0];
     var iconSrc = toolIconURL(result.tool);
-    searchBarIcon.src = iconSrc || '';
+    if (iconSrc) {
+      searchBarIcon.src = iconSrc;
+    } else {
+      searchBarIcon.removeAttribute('src');
+    }
 
     if (result.status === 'action') {
       actionHint.textContent = '\u21A9 Launch';
