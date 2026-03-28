@@ -1,9 +1,16 @@
 import AppKit
 import WebKit
 
+struct NewSessionCommand: Equatable, Sendable {
+    let tool: String
+    let flags: [String]
+    let prompt: String
+}
+
 @MainActor
 final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDelegate {
     var onSelect: ((SearchResult) -> Void)?
+    var onLaunchAction: ((String, String) -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
     var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
@@ -103,6 +110,17 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String) {
         guard let result = results.first(where: { $0.sessionId == sessionId }) else { return }
         hide()
+        if result.status == "action" {
+            let query = lastSearchQuery ?? ""
+            let command = Self.newSessionLaunchCommand(selectedTool: result.tool, query: query)
+            let directory = Self.normalizedLaunchDirectory(from: result.project)
+            if let onLaunchAction {
+                onLaunchAction(command, directory)
+            } else {
+                TerminalLauncher.launch(command: command, directory: directory)
+            }
+            return
+        }
         onSelect?(result)
     }
 
@@ -144,12 +162,20 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func webBridgeDidToggleMode(_ bridge: WebBridge) {
         isLiveOnlyMode.toggle()
-        let currentQuery = lastSearchQuery ?? ""
-        refreshResults(query: currentQuery)
-        // Tell JS the current mode so it can update the indicator
-        if isWebViewReady {
-            let mode = isLiveOnlyMode ? "live" : "all"
-            webView.evaluateJavaScript("setMode('\(mode)')", completionHandler: nil)
+        let fallbackQuery = lastSearchQuery ?? ""
+        guard isWebViewReady else {
+            refreshResults(query: fallbackQuery)
+            return
+        }
+
+        webView.evaluateJavaScript("document.getElementById('searchInput')?.value ?? ''") { [weak self] value, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let currentQuery = (value as? String) ?? fallbackQuery
+                self.lastSearchQuery = currentQuery
+                self.refreshResults(query: currentQuery)
+                self.pushMode()
+            }
         }
     }
 
@@ -200,8 +226,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let effectiveLiveOnly = trimmed.isEmpty ? true : isLiveOnlyMode
             let matches = try sessionIndex.search(query: trimmed, liveOnly: effectiveLiveOnly)
-            if trimmed.lowercased().hasPrefix("new") {
-                let actionRows = makeNewSessionActionRows()
+            let command = Self.parseNewSessionCommand(from: trimmed)
+            if Self.looksLikeNewSessionIntent(trimmed) || command != nil {
+                let actionRows = makeNewSessionActionRows(for: trimmed, command: command)
                 pushResults(actionRows + matches)
             } else {
                 pushResults(matches)
@@ -233,7 +260,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         // Ghost suggestion is now computed locally in JS — no round-trip needed
     }
 
-    private func makeNewSessionActionRows() -> [SearchResult] {
+    private func makeNewSessionActionRows(for query: String, command: NewSessionCommand?) -> [SearchResult] {
         let homePath = FileManager.default.homeDirectoryForCurrentUser.path
         let recentProject = (try? sessionIndex?.mostRecentProject()) ?? nil
         let project = recentProject?.project.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -242,20 +269,179 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         let resolvedProjectName = projectName.isEmpty ? "~" : projectName
         let now = Date()
 
+        let claudeRow = SearchResult(
+            sessionId: "new-claude", tool: "claude", title: "New Claude session",
+            project: resolvedProject, projectName: resolvedProjectName, gitBranch: "",
+            status: "action", startedAt: now, pid: nil, tokenCount: 0,
+            lastActivityAt: now, activityPreview: nil, activityStatus: .closed, snippet: nil
+        )
+        let codexRow = SearchResult(
+            sessionId: "new-codex", tool: "codex", title: "New Codex session",
+            project: resolvedProject, projectName: resolvedProjectName, gitBranch: "",
+            status: "action", startedAt: now, pid: nil, tokenCount: 0,
+            lastActivityAt: now, activityPreview: nil, activityStatus: .closed, snippet: nil
+        )
+
+        if let command {
+            return command.tool == "codex" ? [codexRow, claudeRow] : [claudeRow, codexRow]
+        }
+        if Self.matchesCodexLaunchIntent(query) {
+            return [codexRow, claudeRow]
+        }
+        if Self.matchesClaudeLaunchIntent(query) {
+            return [claudeRow, codexRow]
+        }
+
         return [
-            SearchResult(
-                sessionId: "new-claude", tool: "claude", title: "New Claude session",
-                project: resolvedProject, projectName: resolvedProjectName, gitBranch: "",
-                status: "action", startedAt: now, pid: nil, tokenCount: 0,
-                lastActivityAt: now, activityPreview: nil, activityStatus: .closed, snippet: nil
-            ),
-            SearchResult(
-                sessionId: "new-codex", tool: "codex", title: "New Codex session",
-                project: resolvedProject, projectName: resolvedProjectName, gitBranch: "",
-                status: "action", startedAt: now, pid: nil, tokenCount: 0,
-                lastActivityAt: now, activityPreview: nil, activityStatus: .closed, snippet: nil
-            ),
+            claudeRow,
+            codexRow,
         ]
+    }
+
+    private static let codexFlags: Set<String> = ["--yolo", "--help"]
+    private static let claudeFlags: Set<String> = ["--help"]
+    private static let codexAliases: Set<String> = ["codex", "code", "cod", "co"]
+    private static let claudeAliases: Set<String> = ["claude", "clau", "cl", "cla"]
+
+    static func looksLikeNewSessionIntent(_ query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+
+        if matchesCodexLaunchIntent(normalized) || matchesClaudeLaunchIntent(normalized) {
+            return true
+        }
+        if normalized == "new" || normalized.hasPrefix("new ") {
+            return true
+        }
+
+        let tokens = normalized.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return false }
+        if tokens[0] == "new" && tokens.count == 1 {
+            return true
+        }
+        if tokens[0] == "new", tokens.count >= 2 {
+            return matchesCodexLaunchIntent(tokens[1]) || matchesClaudeLaunchIntent(tokens[1])
+        }
+        return false
+    }
+
+    static func matchesCodexLaunchIntent(_ query: String) -> Bool {
+        matchesLaunchIntentToken(in: query, aliases: codexAliases)
+    }
+
+    static func matchesClaudeLaunchIntent(_ query: String) -> Bool {
+        matchesLaunchIntentToken(in: query, aliases: claudeAliases)
+    }
+
+    static func parseNewSessionCommand(from query: String) -> NewSessionCommand? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return nil }
+
+        let lowerTokens = tokens.map { $0.lowercased() }
+        var tool: String?
+        var nextIndex = 0
+
+        if lowerTokens[0] == "new" {
+            if lowerTokens.count > 1, matchesCodexLaunchIntent(lowerTokens[1]) {
+                tool = "codex"
+                nextIndex = 2
+            } else if lowerTokens.count > 1, matchesClaudeLaunchIntent(lowerTokens[1]) {
+                tool = "claude"
+                nextIndex = 2
+            } else {
+                return nil
+            }
+        } else if matchesCodexLaunchIntent(lowerTokens[0]) {
+            tool = "codex"
+            nextIndex = 1
+        } else if matchesClaudeLaunchIntent(lowerTokens[0]) {
+            tool = "claude"
+            nextIndex = 1
+        } else {
+            return nil
+        }
+
+        let resolvedTool = tool ?? "claude"
+        let allowedFlags = resolvedTool == "codex" ? codexFlags : claudeFlags
+
+        var flags: [String] = []
+        var promptTokens: [String] = []
+        var index = nextIndex
+
+        while index < tokens.count {
+            let lowered = lowerTokens[index]
+            if promptTokens.isEmpty, lowered.hasPrefix("-"), allowedFlags.contains(lowered) {
+                flags.append(lowered)
+                index += 1
+                continue
+            }
+
+            promptTokens = Array(tokens[index...])
+            break
+        }
+
+        return NewSessionCommand(
+            tool: resolvedTool,
+            flags: flags,
+            prompt: promptTokens.joined(separator: " ")
+        )
+    }
+
+    static func newSessionLaunchCommand(selectedTool: String, query: String) -> String {
+        let defaultTool = selectedTool.lowercased() == "codex" ? "codex" : "claude"
+        if let parsed = parseNewSessionCommand(from: query), parsed.tool == defaultTool {
+            return commandString(from: parsed)
+        }
+
+        if defaultTool == "codex" {
+            return commandString(from: NewSessionCommand(tool: "codex", flags: [], prompt: query))
+        }
+        return commandString(from: NewSessionCommand(tool: "claude", flags: [], prompt: query))
+    }
+
+    private static func matchesLaunchIntentToken(in query: String, aliases: Set<String>) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return false }
+        let tokens = normalized.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return false }
+
+        let token: String
+        if tokens[0] == "new", tokens.count >= 2 {
+            token = tokens[1]
+        } else {
+            token = tokens[0]
+        }
+
+        guard token.count >= 2 else { return false }
+        if aliases.contains(token) { return true }
+        for alias in aliases where alias.hasPrefix(token) {
+            return true
+        }
+        return false
+    }
+
+    private static func commandString(from command: NewSessionCommand) -> String {
+        var parts = [command.tool]
+        parts.append(contentsOf: command.flags)
+        if !command.prompt.isEmpty {
+            parts.append(shellSingleQuote(command.prompt))
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private static func shellSingleQuote(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+    }
+
+    private static func normalizedLaunchDirectory(from project: String) -> String {
+        let trimmed = project.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return FileManager.default.homeDirectoryForCurrentUser.path
+        }
+        return trimmed
     }
 
     private func pushTheme() {
@@ -280,6 +466,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     private func requestResetAndFocus() {
+        // resetAndFocus() clears JS-side rows, so force the next push even if JSON is identical.
+        lastPushedResultsJSON = ""
         pendingResetAndFocus = true
         guard isWebViewReady else { return }
         flushPendingWebViewState()

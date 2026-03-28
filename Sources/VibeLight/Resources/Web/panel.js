@@ -28,6 +28,60 @@
   var isPreviewShowing = false;
   var currentMode = 'all'; // 'all' = live + history, 'live' = live only
 
+  var codexIntentAliases = ['codex', 'code', 'cod', 'co'];
+  var claudeIntentAliases = ['claude', 'clau', 'cla', 'cl'];
+
+  function tokenizeQuery(query) {
+    return (query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
+  function intentTokenFromQuery(query) {
+    var tokens = tokenizeQuery(query);
+    if (!tokens.length) return '';
+    if (tokens[0] === 'new' && tokens.length >= 2) return tokens[1];
+    return tokens[0];
+  }
+
+  function matchesLaunchIntentToken(token, aliases) {
+    if (!token) return false;
+    if (token.length < 2) return false;
+    if (aliases.indexOf(token) !== -1) return true;
+    for (var i = 0; i < aliases.length; i++) {
+      if (aliases[i].indexOf(token) === 0) return true;
+    }
+    return false;
+  }
+
+  function matchesCodexLaunchIntent(query) {
+    var token = intentTokenFromQuery(query);
+    return matchesLaunchIntentToken(token, codexIntentAliases);
+  }
+
+  function matchesClaudeLaunchIntent(query) {
+    var token = intentTokenFromQuery(query);
+    return matchesLaunchIntentToken(token, claudeIntentAliases);
+  }
+
+  function looksLikeNewSessionIntent(query) {
+    var normalized = (query || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (matchesCodexLaunchIntent(normalized) || matchesClaudeLaunchIntent(normalized)) return true;
+    if (normalized === 'new' || normalized.indexOf('new ') === 0) return true;
+
+    var tokens = tokenizeQuery(normalized);
+    if (!tokens.length) return false;
+    if (tokens[0] === 'new' && tokens.length === 1) return true;
+    if (tokens[0] === 'new' && tokens.length >= 2) {
+      return matchesLaunchIntentToken(tokens[1], codexIntentAliases) ||
+        matchesLaunchIntentToken(tokens[1], claudeIntentAliases);
+    }
+    return false;
+  }
+
+  window.looksLikeNewSessionIntent = looksLikeNewSessionIntent;
+  window.matchesCodexLaunchIntent = matchesCodexLaunchIntent;
+  window.matchesClaudeLaunchIntent = matchesClaudeLaunchIntent;
+
   // --- Swift → JS API ---
 
   window.updateResults = function(resultsJSON) {

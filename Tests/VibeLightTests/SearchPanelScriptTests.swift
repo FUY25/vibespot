@@ -1,8 +1,28 @@
 import Foundation
+import JavaScriptCore
 import Testing
 
 @Suite("Search panel script")
 struct SearchPanelScriptTests {
+    @Test("fuzzy new-session helper behavior matches expected intent rules")
+    func fuzzyNewSessionHelperBehavior() throws {
+        let context = try makePanelScriptContext()
+
+        #expect(try invokeBool("window.matchesCodexLaunchIntent('co')", in: context))
+        #expect(try invokeBool("window.matchesCodexLaunchIntent('new cod')", in: context))
+        #expect(!(try invokeBool("window.matchesCodexLaunchIntent('c')", in: context)))
+
+        #expect(try invokeBool("window.matchesClaudeLaunchIntent('cl')", in: context))
+        #expect(try invokeBool("window.matchesClaudeLaunchIntent('new cl')", in: context))
+        #expect(!(try invokeBool("window.matchesClaudeLaunchIntent('c')", in: context)))
+
+        #expect(try invokeBool("window.looksLikeNewSessionIntent('new cod')", in: context))
+        #expect(try invokeBool("window.looksLikeNewSessionIntent('new cl')", in: context))
+        #expect(!(try invokeBool("window.looksLikeNewSessionIntent('n')", in: context)))
+        #expect(!(try invokeBool("window.looksLikeNewSessionIntent('ne')", in: context)))
+        #expect(!(try invokeBool("window.looksLikeNewSessionIntent('c')", in: context)))
+    }
+
     @Test("Tab key delegates to handleTab instead of accepting ghost suggestions")
     func tabKeyDelegatesToHandleTab() throws {
         let script = try loadPanelScript()
@@ -44,4 +64,60 @@ private func loadPanelScript() throws -> String {
         .appendingPathComponent("panel.js")
 
     return try String(contentsOf: scriptURL, encoding: .utf8)
+}
+
+private func makePanelScriptContext() throws -> JSContext {
+    let context = try #require(JSContext())
+    context.exceptionHandler = { _, exception in
+        if let exception {
+            Issue.record("JS exception: \(exception)")
+        }
+    }
+
+    let bootstrap = #"""
+    var window = {};
+    window.webkit = { messageHandlers: { bridge: { postMessage: function() {} } } };
+    function __makeEl() {
+      return {
+        value: '',
+        innerHTML: '',
+        textContent: '',
+        className: '',
+        style: {},
+        children: [],
+        selectionStart: 0,
+        classList: { add: function(){}, remove: function(){}, toggle: function(){} },
+        addEventListener: function(){},
+        focus: function(){},
+        blur: function(){},
+        appendChild: function(child){ this.children.push(child); },
+        querySelector: function(){ return null; },
+        querySelectorAll: function(){ return []; },
+        scrollIntoView: function(){},
+        getBoundingClientRect: function(){ return { top: 0, bottom: 0, height: 0 }; }
+      };
+    }
+    var __els = {};
+    var document = {
+      getElementById: function(id) {
+        if (!__els[id]) __els[id] = __makeEl();
+        return __els[id];
+      },
+      addEventListener: function(){},
+      createElement: function(){ return __makeEl(); },
+      body: { appendChild: function(){} }
+    };
+    function getComputedStyle() { return { fontFamily: 'monospace' }; }
+    function setTimeout() { return 1; }
+    function clearTimeout() {}
+    """#
+
+    _ = context.evaluateScript(bootstrap)
+    _ = context.evaluateScript(try loadPanelScript())
+    return context
+}
+
+private func invokeBool(_ script: String, in context: JSContext) throws -> Bool {
+    let value = try #require(context.evaluateScript(script))
+    return value.toBool()
 }

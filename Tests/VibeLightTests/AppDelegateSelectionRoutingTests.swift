@@ -160,3 +160,119 @@ func routesSelectionByStatusAndTool() {
 
     #expect(jumped.map(\.sessionId) == ["live-session"])
 }
+
+@MainActor
+@Test("fuzzy launch intent helpers detect codex and claude queries")
+func fuzzyLaunchIntentHelpersDetectToolQueries() {
+    #expect(SearchPanelController.matchesCodexLaunchIntent("co"))
+    #expect(SearchPanelController.matchesCodexLaunchIntent("new cod"))
+    #expect(!SearchPanelController.matchesCodexLaunchIntent("c"))
+    #expect(!SearchPanelController.matchesCodexLaunchIntent("claude"))
+
+    #expect(SearchPanelController.matchesClaudeLaunchIntent("cla"))
+    #expect(SearchPanelController.matchesClaudeLaunchIntent("new cl"))
+    #expect(!SearchPanelController.matchesClaudeLaunchIntent("c"))
+    #expect(!SearchPanelController.matchesClaudeLaunchIntent("codex"))
+
+    #expect(SearchPanelController.looksLikeNewSessionIntent("new"))
+    #expect(SearchPanelController.looksLikeNewSessionIntent("co"))
+    #expect(SearchPanelController.looksLikeNewSessionIntent("new claude"))
+    #expect(!SearchPanelController.looksLikeNewSessionIntent("n"))
+    #expect(!SearchPanelController.looksLikeNewSessionIntent("ne"))
+    #expect(!SearchPanelController.looksLikeNewSessionIntent("c"))
+    #expect(!SearchPanelController.looksLikeNewSessionIntent("resume old session"))
+}
+
+@MainActor
+@Test("new-session command parser keeps allowlisted flags and turns the rest into prompt")
+func newSessionCommandParserKeepsFlagsAndPrompt() {
+    let codex = SearchPanelController.parseNewSessionCommand(from: "new codex --yolo fix auth bug")
+    #expect(codex == NewSessionCommand(tool: "codex", flags: ["--yolo"], prompt: "fix auth bug"))
+
+    let codexStopAtUnknownFlag = SearchPanelController.parseNewSessionCommand(
+        from: "codex --help --verbose draft release notes"
+    )
+    #expect(codexStopAtUnknownFlag == NewSessionCommand(
+        tool: "codex",
+        flags: ["--help"],
+        prompt: "--verbose draft release notes"
+    ))
+
+    let claude = SearchPanelController.parseNewSessionCommand(from: "claude --help summarize this thread")
+    #expect(claude == NewSessionCommand(tool: "claude", flags: ["--help"], prompt: "summarize this thread"))
+
+    let claudeUnsupportedFlag = SearchPanelController.parseNewSessionCommand(from: "claude --yolo quick idea")
+    #expect(claudeUnsupportedFlag == NewSessionCommand(tool: "claude", flags: [], prompt: "--yolo quick idea"))
+
+    #expect(SearchPanelController.parseNewSessionCommand(from: "new session") == nil)
+}
+
+@MainActor
+@Test("new-session launch command uses parsed flags and prompt for selected action tool")
+func newSessionLaunchCommandUsesParsedFlagsAndPrompt() {
+    let codexCommand = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "codex",
+        query: "new codex --yolo fix auth bug"
+    )
+    #expect(codexCommand == "codex --yolo 'fix auth bug'")
+
+    let claudeCommand = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "claude",
+        query: "new claude --help summarize this thread"
+    )
+    #expect(claudeCommand == "claude --help 'summarize this thread'")
+}
+
+@MainActor
+@Test("new-session launch command falls back to selected tool when parse tool does not match")
+func newSessionLaunchCommandFallsBackToSelectedTool() {
+    let command = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "claude",
+        query: "new codex --yolo fix auth bug"
+    )
+    #expect(command == "claude 'new codex --yolo fix auth bug'")
+}
+
+@MainActor
+@Test("controller action selection uses stored query and launch hook")
+func controllerActionSelectionUsesStoredQueryAndLaunchHook() throws {
+    let dbPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vibelight-controller-action-\(UUID().uuidString).sqlite3")
+        .path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+    try index.upsertSession(
+        id: "seed-session",
+        tool: "codex",
+        title: "Seed",
+        project: "/tmp/controller-launch",
+        projectName: "controller-launch",
+        gitBranch: "",
+        status: "closed",
+        startedAt: now,
+        pid: nil
+    )
+
+    let controller = SearchPanelController()
+    controller.sessionIndex = index
+
+    var launched: [(command: String, directory: String)] = []
+    var selected: [SearchResult] = []
+    controller.onLaunchAction = { command, directory in
+        launched.append((command, directory))
+    }
+    controller.onSelect = { result in
+        selected.append(result)
+    }
+
+    let bridge = WebBridge()
+    controller.webBridge(bridge, didReceiveSearch: "new codex --yolo fix auth bug")
+    controller.webBridge(bridge, didSelectSession: "new-codex", status: "action", tool: "codex")
+
+    #expect(launched.count == 1)
+    #expect(launched[0].command == "codex --yolo 'fix auth bug'")
+    #expect(launched[0].directory == "/tmp/controller-launch")
+    #expect(selected.isEmpty)
+}
