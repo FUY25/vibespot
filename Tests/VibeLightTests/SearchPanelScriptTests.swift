@@ -250,8 +250,8 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
     }
 
-    @Test("result rows show full path with model context metadata")
-    func resultRowsShowFullPathWithModelContextMetadata() throws {
+    @Test("result rows use full-width title with split model-meta and path footer")
+    func resultRowsUseFullWidthTitleWithSplitModelMetaAndPathFooter() throws {
         let context = try makePanelScriptContext()
         let payload = #"""
         [{
@@ -280,10 +280,12 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updateResults(\(payload));")
 
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__title')", in: context) == "Ship telemetry")
+        #expect(try invokeInt("__queryByClass(__els.results.children[0], 'row__meta-row', false).length", in: context) == 1)
         #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__path')", in: context) == "/Users/fuyuming/Desktop/project/vibelight/.worktrees/v1-implementation")
-        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 2m ago")
-        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__context-label')", in: context) == "~18% 84.8k")
-        #expect(try invokeString("__queryFirstStyle(__els.results.children[0], 'row__context-rail-fill', 'width')", in: context) == "18%")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 84.8k · 2m ago")
+        #expect(try invokeInt("__queryByClass(__els.results.children[0], 'row__context', false).length", in: context) == 0)
+        #expect(try invokeInt("__queryByClass(__els.results.children[0], 'row__context-rail', false).length", in: context) == 0)
     }
 
     @Test("mouseenter selects hovered row")
@@ -575,39 +577,8 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Fresh preview")
     }
 
-    @Test("context label falls back to unknown percent when percent estimate is missing")
-    func contextLabelFallsBackToUnknownPercent() throws {
-        let context = try makePanelScriptContext()
-        let payload = #"""
-        [{
-          "sessionId": "sess-1",
-          "tool": "claude",
-          "title": "Need context fallback",
-          "project": "/tmp/project",
-          "projectName": "project",
-          "gitBranch": "",
-          "status": "live",
-          "startedAt": "2026-03-28T09:30:00Z",
-          "tokenCount": 61000,
-          "lastActivityAt": "2026-03-28T09:42:00Z",
-          "activityStatus": "waiting",
-          "relativeTime": "2m ago",
-          "healthStatus": "ok",
-          "healthDetail": "",
-          "effectiveModel": "claude-sonnet-4",
-          "contextWindowTokens": 200000,
-          "contextUsedEstimate": 61000,
-          "contextConfidence": "unknown"
-        }]
-        """#
-
-        _ = context.evaluateScript("window.updateResults(\(payload));")
-        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__context-label')", in: context) == "? 61k")
-        #expect(try invokeString("__queryFirstStyle(__els.results.children[0], 'row__context-rail-fill', 'width')", in: context) == "24%")
-    }
-
-    @Test("low-confidence context samples hide numeric percent")
-    func lowConfidenceContextSamplesHideNumericPercent() throws {
+    @Test("low-confidence rows omit token count from model metadata")
+    func lowConfidenceRowsOmitTokenCountFromModelMetadata() throws {
         let context = try makePanelScriptContext()
         let payload = #"""
         [{
@@ -634,8 +605,59 @@ struct SearchPanelScriptTests {
         """#
 
         _ = context.evaluateScript("window.updateResults(\(payload));")
-        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__context-label')", in: context) == "? 61k")
-        #expect(try invokeString("__queryFirstStyle(__els.results.children[0], 'row__context-rail-fill', 'width')", in: context) == "31%")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 2m ago")
+    }
+
+    @Test("rows never render typing dots or status dots ornaments")
+    func rowsNeverRenderTypingDotsOrStatusDotsOrnaments() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-low-confidence",
+          "tool": "claude",
+          "title": "Low confidence context",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 61000,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
+          "contextUsedEstimate": 61000,
+          "contextPercentEstimate": 31,
+          "contextConfidence": "high"
+        }, {
+          "sessionId": "sess-waiting-dot",
+          "tool": "claude",
+          "title": "Waiting row",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 61000,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
+          "contextUsedEstimate": 61000,
+          "contextPercentEstimate": 31,
+          "contextConfidence": "high"
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        #expect(try invokeInt("__queryByClass(__els.results, 'typing-dots', false).length", in: context) == 0)
+        #expect(try invokeInt("__queryByClass(__els.results, 'status-dot', false).length", in: context) == 0)
     }
 
     @Test("rows without effective model show unknown model state")

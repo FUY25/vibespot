@@ -458,15 +458,6 @@
     if (modelMetaEl && modelMetaEl.textContent !== newModelMeta) {
       modelMetaEl.textContent = newModelMeta;
     }
-
-    updateContextBlock(row, result);
-
-    var statusSlot = row.querySelector('.row__status-slot');
-    if (statusSlot) {
-      statusSlot.innerHTML = '';
-      var status = createStatusElement(result);
-      if (status) statusSlot.appendChild(status);
-    }
   }
 
   function createRow(result, index) {
@@ -503,39 +494,24 @@
     var body = document.createElement('div');
     body.className = 'row__body';
 
-    var top = document.createElement('div');
-    top.className = 'row__top';
-
-    var titleGroup = document.createElement('div');
-    titleGroup.className = 'row__title-group';
     var title = document.createElement('span');
     title.className = 'row__title';
     title.textContent = stripANSI(result.title);
-    titleGroup.appendChild(title);
+    body.appendChild(title);
 
-    var statusSlot = document.createElement('span');
-    statusSlot.className = 'row__status-slot';
-    var status = createStatusElement(result);
-    if (status) statusSlot.appendChild(status);
-    titleGroup.appendChild(statusSlot);
-    top.appendChild(titleGroup);
-
-    var path = document.createElement('span');
-    path.className = 'row__path';
-    path.textContent = formatSessionPath(result);
-    top.appendChild(path);
-    body.appendChild(top);
-
-    var bottom = document.createElement('div');
-    bottom.className = 'row__bottom';
+    var metaRow = document.createElement('div');
+    metaRow.className = 'row__meta-row';
 
     var modelMeta = document.createElement('span');
     modelMeta.className = 'row__model-meta';
     modelMeta.textContent = formatModelMeta(result);
-    bottom.appendChild(modelMeta);
+    metaRow.appendChild(modelMeta);
 
-    bottom.appendChild(createContextBlock(result));
-    body.appendChild(bottom);
+    var path = document.createElement('span');
+    path.className = 'row__path';
+    path.textContent = formatSessionPath(result);
+    metaRow.appendChild(path);
+    body.appendChild(metaRow);
 
     row.appendChild(body);
 
@@ -564,127 +540,52 @@
     return row;
   }
 
-  function createStatusElement(result) {
-    if (result.activityStatus === 'working') {
-      var dots = document.createElement('div');
-      dots.className = 'typing-dots';
-      for (var i = 0; i < 3; i++) {
-        var d = document.createElement('span');
-        d.className = 'typing-dot';
-        dots.appendChild(d);
-      }
-      return dots;
-    }
-
-    if (result.activityStatus === 'waiting') {
-      var waitingDot = document.createElement('span');
-      waitingDot.className = 'status-dot status-dot--amber';
-      return waitingDot;
-    }
-
-    return null;
-  }
-
   function formatSessionPath(result) {
     return (result.project || '').trim();
   }
 
   function formatModelMeta(result) {
     var parts = [];
-    var model = ((result.effectiveModel || '') + '').trim();
-    if (model) {
-      parts.push(model);
-    } else {
-      var toolFamily = ((result.tool || '') + '').trim().toLowerCase();
-      parts.push(toolFamily ? (toolFamily + ' \u00B7 model unknown') : 'unknown model');
+    parts.push(formatModelName(result));
+
+    var compactTokens = formatTrustedTokenCount(result);
+    if (compactTokens) {
+      parts.push(compactTokens);
     }
-    if (result.relativeTime) {
-      parts.push(result.relativeTime);
+
+    var relativeTime = ((result.relativeTime || '') + '').trim();
+    if (relativeTime) {
+      parts.push(relativeTime);
     }
+
     return parts.join(' \u00B7 ');
   }
 
-  function createContextBlock(result) {
-    var context = document.createElement('div');
-    context.className = 'row__context';
-
-    var rail = document.createElement('div');
-    rail.className = 'row__context-rail';
-    var railFill = document.createElement('div');
-    railFill.className = 'row__context-rail-fill';
-    rail.appendChild(railFill);
-    context.appendChild(rail);
-
-    var label = document.createElement('span');
-    label.className = 'row__context-label';
-    context.appendChild(label);
-
-    applyContextPresentation(context, result);
-    return context;
+  function formatModelName(result) {
+    var model = ((result.effectiveModel || '') + '').trim();
+    if (model) return model;
+    var toolFamily = ((result.tool || '') + '').trim().toLowerCase();
+    return toolFamily ? (toolFamily + ' \u00B7 model unknown') : 'unknown model';
   }
 
-  function updateContextBlock(row, result) {
-    var context = row.querySelector('.row__context');
-    if (!context) return;
-    applyContextPresentation(context, result);
+  function formatTrustedTokenCount(result) {
+    if (!isTokenConfidenceTrustworthy(result)) return '';
+
+    var usedEstimate = asNumber(result.contextUsedEstimate);
+    if (usedEstimate !== null) return formatCompactCount(usedEstimate);
+
+    var tokenCount = asNumber(result.tokenCount);
+    if (tokenCount !== null) return formatCompactCount(tokenCount);
+    return '';
   }
 
-  function applyContextPresentation(context, result) {
-    var label = context.querySelector('.row__context-label');
-    var railFill = context.querySelector('.row__context-rail-fill');
-    var labelText = formatContextLabel(result);
-    var width = formatContextRailWidth(result);
-    if (label) {
-      label.textContent = labelText;
-    }
-    if (railFill) {
-      railFill.style.width = width;
-    }
-    if (labelText === '?' || labelText.indexOf('? ') === 0) {
-      context.classList.add('row__context--unknown');
-    } else {
-      context.classList.remove('row__context--unknown');
-    }
+  function isTokenConfidenceTrustworthy(result) {
+    var confidence = normalizeConfidence(result.contextConfidence);
+    return confidence === 'high' || confidence === 'medium';
   }
 
-  function formatContextLabel(result) {
-    var used = asNumber(result.contextUsedEstimate);
-    var percent = asNumber(result.contextPercentEstimate);
-    var confidence = ((result.contextConfidence || 'unknown') + '').toLowerCase();
-    var shouldShowNumericPercent = confidence === 'high' || confidence === 'medium';
-    var usedLabel = used !== null ? formatCompactCount(used) : '';
-    if (percent !== null && shouldShowNumericPercent) {
-      var prefix = confidence === 'high' ? '' : '~';
-      return usedLabel ? prefix + percent + '% ' + usedLabel : prefix + percent + '%';
-    }
-    if (usedLabel) {
-      return '? ' + usedLabel;
-    }
-    return '?';
-  }
-
-  function formatContextRailWidth(result) {
-    var percent = asNumber(result.contextPercentEstimate);
-    var confidence = ((result.contextConfidence || 'unknown') + '').toLowerCase();
-    var shouldDerivePercent = confidence === 'high' || confidence === 'medium';
-    if (percent === null) {
-      var used = asNumber(result.contextUsedEstimate);
-      var windowTokens = asNumber(result.contextWindowTokens);
-      if (shouldDerivePercent && used !== null && windowTokens !== null && windowTokens > 0) {
-        percent = Math.round((used / windowTokens) * 100);
-      } else if (shouldDerivePercent && used !== null) {
-        percent = 24;
-      } else if (used !== null) {
-        percent = 24;
-      } else {
-        percent = 10;
-      }
-    }
-    percent = Math.max(0, Math.min(100, percent));
-    if (percent > 0) {
-      percent = Math.max(10, percent);
-    }
-    return percent + '%';
+  function normalizeConfidence(value) {
+    return ((value || 'unknown') + '').toLowerCase();
   }
 
   function formatCompactCount(count) {

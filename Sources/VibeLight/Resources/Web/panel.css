@@ -300,10 +300,6 @@ body {
   border-color: var(--selection-edge);
 }
 
-.row--selected .row__context-rail {
-  background: rgba(170,255,220,0.16);
-}
-
 /* Row icon */
 .row__icon {
   width: var(--icon-size);
@@ -336,29 +332,15 @@ body {
 .row__body {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 42%);
-  grid-template-rows: auto auto;
-  column-gap: 16px;
-  row-gap: 6px;
-  align-items: center;
-}
-
-.row__top,
-.row__bottom {
-  display: contents;
-}
-
-.row__title-group {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+  flex-direction: column;
+  row-gap: 6px;
+  align-items: stretch;
 }
 
 .row__title {
-  grid-column: 1;
-  grid-row: 1;
+  display: block;
+  width: 100%;
   font-family: var(--font-title);
   font-size: 14px;
   font-weight: 500;
@@ -370,78 +352,37 @@ body {
   min-width: 0;
 }
 
-.row__status-slot {
-  display: inline-flex;
-  align-items: center;
-  min-height: 10px;
-  flex-shrink: 0;
+.row__meta-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.row__model-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-activity);
+  font-size: 11px;
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .row__path {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
+  flex: 0 1 48%;
   min-width: 0;
-  max-width: 100%;
   font-family: var(--font-activity);
-  font-size: 11px;
-  color: var(--label-tertiary);
+  font-size: 12px;
+  color: var(--label-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: right;
-}
-
-.row__model-meta {
-  grid-column: 1;
-  grid-row: 2;
-  font-family: var(--font-activity);
-  font-size: 11px;
-  color: var(--label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
-}
-
-.row__context {
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  align-items: center;
-  justify-self: stretch;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-
-.row__context-rail {
-  flex: 1;
-  min-width: 132px;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.08);
-  overflow: hidden;
-}
-
-.row__context-rail-fill {
-  height: 100%;
-  min-width: 12px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgba(125,216,192,0.55), rgba(170,255,220,0.95));
-}
-
-.row__context-label {
-  font-family: var(--font-activity);
-  font-size: 11px;
-  color: var(--label-secondary);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-
-.row__context--unknown .row__context-label {
-  color: var(--label-tertiary);
 }
 
 .row__activity--tool,
@@ -456,47 +397,6 @@ body {
   opacity: 0.7;
 }
 
-/* Status dot */
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-dot--green {
-  background: var(--neon-dim);
-  box-shadow: 0 0 4px var(--neon-glow);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.status-dot--amber {
-  background: var(--waiting-amber);
-  box-shadow: 0 0 4px var(--amber-glow);
-}
-
-/* Typing dots */
-.typing-dots {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.typing-dot {
-  width: 3.5px;
-  height: 3.5px;
-  border-radius: 50%;
-  background: var(--neon-dim);
-  animation: bounce 1.4s infinite;
-}
-
-[data-theme="light"] .typing-dot {
-  background: var(--label-tertiary);
-}
-
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
-
 /* Row states */
 
 /* Working — shimmer title */
@@ -508,7 +408,7 @@ body {
   animation: shimmer 2.5s linear infinite;
 }
 
-/* Waiting — amber pulsing dot only */
+/* Waiting — uses default row chrome */
 
 /* Closed — dimmed title */
 .row--closed .row__title {
@@ -596,44 +496,37 @@ body {
   pointer-events: auto;
 }
 
-.preview__headline {
+.preview__state {
+  font-family: var(--font-title);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--kicker);
+  margin-bottom: 4px;
+}
+
+.preview__detail {
   font-family: var(--font-ui);
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.4;
   color: var(--label);
-  font-weight: 600;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .preview__rounds {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   margin-bottom: 12px;
+  border-top: 1px solid var(--ghost);
 }
 
 .preview__round {
-  padding: 9px 10px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--ghost);
-}
-
-[data-theme="light"] .preview__round {
-  background: rgba(0,0,0,0.02);
-}
-
-.preview__round--user {
-  background: rgba(125,216,192,0.06);
-}
-
-.preview__round--assistant {
-  background: rgba(255,255,255,0.02);
-}
-
-.preview__round--error {
-  background: var(--error-tint);
-  border-color: rgba(255,107,107,0.18);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ghost);
+  border-radius: 0;
+  padding: 8px 0;
 }
 
 .preview__round-role {
@@ -646,7 +539,7 @@ body {
 }
 
 .preview__round--user .preview__round-role {
-  color: var(--activity-cyan);
+  color: var(--label-secondary);
 }
 
 .preview__round--error .preview__round-role {
@@ -667,8 +560,9 @@ body {
 
 .preview__files {
   border-top: 1px solid var(--ghost);
-  margin-top: 4px;
-  padding-top: 10px;
+  margin-top: 2px;
+  padding-top: 8px;
+  opacity: 0.82;
 }
 
 .preview__section-label {
@@ -683,7 +577,7 @@ body {
 .preview__file-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .preview__file {
@@ -700,7 +594,7 @@ body {
 .preview__file-dir {
   color: var(--label-tertiary);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -709,21 +603,6 @@ body {
 @keyframes shimmer {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
-}
-
-@keyframes breathe {
-  from { opacity: 0.4; }
-  to { opacity: 0.9; }
-}
-
-@keyframes bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-3px); }
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 0.6; }
-  50% { transform: scale(1.2); opacity: 1; }
 }
 
 @keyframes blink-cursor {
