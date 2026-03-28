@@ -302,6 +302,11 @@
     } else if (result.activityStatus === 'closed' || result.status !== 'live') {
       row.classList.add('row--closed');
     }
+    if (result.healthStatus === 'error') {
+      row.classList.add('row--error');
+    } else if (result.healthStatus === 'stale') {
+      row.classList.add('row--stale');
+    }
     if (index === selectedIndex) {
       row.classList.add('row--selected');
     }
@@ -338,6 +343,11 @@
       row.classList.add('row--waiting');
     } else if (result.activityStatus === 'closed' || result.status !== 'live') {
       row.classList.add('row--closed');
+    }
+    if (result.healthStatus === 'error') {
+      row.classList.add('row--error');
+    } else if (result.healthStatus === 'stale') {
+      row.classList.add('row--stale');
     }
 
     if (index === selectedIndex) {
@@ -383,20 +393,6 @@
     meta.textContent = formatMetadata(result);
     body.appendChild(meta);
 
-    // Activity
-    if (result.activityPreview && result.activityStatus !== 'closed') {
-      var activity = document.createElement('span');
-      activity.className = 'row__activity';
-      var kind = result.activityPreviewKind || 'tool';
-      if (kind === 'assistant') {
-        activity.classList.add('row__activity--assistant');
-      } else {
-        activity.classList.add('row__activity--tool');
-      }
-      activity.textContent = stripMarkdown(result.activityPreview);
-      body.appendChild(activity);
-    }
-
     row.appendChild(body);
 
     // Click handler
@@ -431,16 +427,32 @@
 
   function formatMetadata(result) {
     var parts = [];
-    if (result.relativeTime) parts.push(result.relativeTime);
+    if (result.status === 'live' && result.startedAt) {
+        parts.push(formatRunningTime(result.startedAt));
+    } else if (result.relativeTime) {
+        parts.push(result.relativeTime);
+    }
     var projectName = result.projectName || lastPathComponent(result.project);
     if (projectName) {
-      var branch = (result.gitBranch || '').trim();
-      parts.push(branch ? projectName + ' / ' + branch : projectName);
+        var branch = (result.gitBranch || '').trim();
+        parts.push(branch ? projectName + ' / ' + branch : projectName);
     }
     if (result.tokenCount > 0) {
-      parts.push(formatTokens(result.tokenCount));
+        parts.push(formatTokens(result.tokenCount));
     }
     return parts.join(' \u00B7 ');
+  }
+
+  function formatRunningTime(startedAtISO) {
+    var start = new Date(startedAtISO);
+    var now = new Date();
+    var minutes = Math.floor((now - start) / 60000);
+    if (minutes < 1) return 'running <1m';
+    if (minutes < 60) return 'running ' + minutes + 'm';
+    var hours = Math.floor(minutes / 60);
+    var mins = minutes % 60;
+    if (hours >= 3) return 'running ' + hours + 'h+';
+    return 'running ' + hours + 'h ' + mins + 'm';
   }
 
   function formatTokens(count) {
