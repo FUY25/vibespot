@@ -1,6 +1,6 @@
 # VibeLight — Panel Visual Retune And Preview Eligibility Design
 
-**Project:** `~/Desktop/project/vibelight`
+**Project:** `VibeLight`
 **Date:** `2026-03-29`
 **Status:** Approved in interactive design review
 
@@ -10,9 +10,9 @@ This spec refines the March 28 context-rail and smart-preview design into the ex
 
 It does four things:
 
-1. Retunes the search results row so the path is more visible and the context rail feels premium instead of loud.
+1. Retunes the search results row so the path is more visible and the title/meta split scans faster.
 2. Simplifies the preview pane into a cleaner split-transcript layout with better hierarchy.
-3. Makes low-confidence context honest without showing `?` in the product UI.
+3. Makes low-confidence token display honest without showing `?` in the product UI.
 4. Fixes preview eligibility so finished sessions still open preview normally.
 
 This spec narrows and overrides the relevant visual details from:
@@ -26,10 +26,10 @@ It does not replace the underlying telemetry and parsing direction from that doc
 The current panel still has several product-level issues:
 
 1. The right-side path is too small and too faint to be useful as quick scan data.
-2. The context rail is visually noisy in the wrong places:
-   - the fill is too bright
-   - the numeric text competes too much with the rest of the row
-   - rails do not align cleanly from row to row
+2. The row metadata is not using the available width cleanly:
+   - title and path compete for attention in the wrong places
+   - token telemetry can overpower more important scan data
+   - the second-line layout needs to align cleanly from row to row
 3. The preview pane still feels over-designed:
    - too many visual layers near the top
    - transcript chunks can feel boxed rather than editorial
@@ -39,8 +39,8 @@ The current panel still has several product-level issues:
 
 ## Goals
 
-- Make the results pane scan faster by strengthening the path and calming the context display.
-- Keep the context rail as the primary occupancy signal, with numeric text always secondary.
+- Make the results pane scan faster by strengthening the path and calming the telemetry display.
+- Keep only the compact token count in this slice, and suppress it when confidence is too weak.
 - Remove `?` from the UI. Uncertain states should be understated, not noisy.
 - Make the preview feel editorial and useful:
   - one clear top line
@@ -61,23 +61,22 @@ The current panel still has several product-level issues:
 
 ### Layout
 
-Each row remains a two-row composition, but the right side becomes a fixed visual column so path and context align across rows.
+Each row remains a two-row composition, but the bottom line becomes a stable left/right split so meta and path align across rows.
 
 Top row:
 
-- Left: session title
-- Right: full session path, visually stronger than before
+- Full-width session title
 
 Bottom row:
 
-- Left: model name and relative time
-- Right: context rail and numeric suffix
+- Left: model name, token count when trustworthy, and relative time
+- Right: full session path, visually stronger than before
 
 Approved shape:
 
 ```text
-Fix live Codex session resolution     /Users/fuyuming/Desktop/project/vibelight/.worktrees/v1-implementation
-gpt-5.2-codex · 2m ago                [───────────────] ~18% · 84k
+Fix live Codex session resolution after rollout path remap and title refresh
+gpt-5.2-codex · 84k · 2m ago          /path/to/worktree/or/project
 ```
 
 ### Path
@@ -95,7 +94,7 @@ Rules:
 Reasoning:
 
 - the path answers “where is this session?” immediately
-- the right side has enough horizontal space to carry this information
+- the bottom-right side has enough horizontal space to carry this information
 - strengthening the path improves orientation without making the row noisy
 
 ### Model And Time
@@ -131,10 +130,10 @@ Approved shape:
 
 ```text
 Fix live Codex session resolution after rollout path remap and title refresh
-gpt-5.2-codex · 84k · 2m ago          /Users/fuyuming/Desktop/project/vibelight/.worktrees/v1-implementation
+gpt-5.2-codex · 84k · 2m ago          /path/to/worktree/or/project
 ```
 
-This overrides the rail display for the current slice. The context rail and rough percentage are deferred to a later update.
+This overrides the rail display for the current slice. Rough percentage and occupancy rail are deferred to a later update.
 
 ### Token Count Rules
 
