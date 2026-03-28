@@ -457,6 +457,124 @@ struct SearchPanelScriptTests {
         #expect(previewHideCountAfter == previewHideCountBefore)
     }
 
+    @Test("action row selection hides preview immediately and does not request dwell preview")
+    func actionRowSelectionHidesPreviewAndSkipsDwellRequest() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-normal",
+          "tool": "claude",
+          "title": "Normal Session",
+          "project": "/tmp/normal",
+          "projectName": "normal",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }, {
+          "sessionId": "new-codex",
+          "tool": "codex",
+          "title": "New Codex session",
+          "project": "/tmp/normal",
+          "projectName": "normal",
+          "gitBranch": "",
+          "status": "action",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let visiblePreviewPayload = #"""
+        {
+          "sessionId": "sess-normal",
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "state": "Task",
+          "detail": "Preview detail",
+          "exchanges": [{ "role": "assistant", "text": "Preview text" }],
+          "files": []
+        }
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'mouseenter');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+        _ = context.evaluateScript("window.updatePreview(\(visiblePreviewPayload));")
+
+        #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
+
+        _ = context.evaluateScript("__dispatch(__els.results.children[1], 'click');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        #expect(!(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context)))
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'new-codex'; })",
+            in: context
+        ) == false)
+    }
+
+    @Test("stale preview payload is ignored when session identity does not match latest request")
+    func stalePreviewPayloadIsIgnoredWhenSessionIdentityDoesNotMatchLatestRequest() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-current",
+          "tool": "claude",
+          "title": "Current Session",
+          "project": "/tmp/current",
+          "projectName": "current",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let stalePayload = #"""
+        {
+          "sessionId": "sess-stale",
+          "lastActivityAt": "2026-03-28T09:41:00Z",
+          "state": "Task",
+          "detail": "Stale preview",
+          "exchanges": [{ "role": "assistant", "text": "Stale" }],
+          "files": []
+        }
+        """#
+        let freshPayload = #"""
+        {
+          "sessionId": "sess-current",
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "state": "Task",
+          "detail": "Fresh preview",
+          "exchanges": [{ "role": "assistant", "text": "Fresh" }],
+          "files": []
+        }
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'mouseenter');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        _ = context.evaluateScript("window.updatePreview(\(stalePayload));")
+        #expect(!(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context)))
+
+        _ = context.evaluateScript("window.updatePreview(\(freshPayload));")
+        #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Fresh preview")
+    }
+
     @Test("context label falls back to unknown percent when percent estimate is missing")
     func contextLabelFallsBackToUnknownPercent() throws {
         let context = try makePanelScriptContext()

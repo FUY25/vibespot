@@ -140,12 +140,16 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String) {
-        guard let fileURL = findSessionFile(sessionId: sessionId) else { return }
-        let liveResult = results.first(where: { $0.sessionId == sessionId })
+        guard let fileURL = findSessionFile(sessionId: sessionId),
+              let liveResult = results.first(where: { $0.sessionId == sessionId }) else { return }
         Task.detached(priority: .utility) { [weak self] in
             let transcriptPreview = TranscriptTailReader.read(fileURL: fileURL)
             let mergedPreview = Self.mergePreviewState(transcriptPreview: transcriptPreview, with: liveResult)
-            let json = TranscriptTailReader.previewToJSONString(mergedPreview)
+            let json = Self.previewPayloadToJSONString(
+                preview: mergedPreview,
+                sessionId: sessionId,
+                lastActivityAt: liveResult.lastActivityAt
+            )
             await MainActor.run { [weak self] in
                 guard let self, self.isWebViewReady else { return }
                 let escaped = self.escapeForSingleQuotedJavaScriptString(json)
@@ -503,6 +507,37 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     nonisolated private static let leadingPreviewSymbols = CharacterSet(charactersIn: "▶▸▹✎•●◦▪▫")
+
+    nonisolated private static func previewPayloadToJSONString(
+        preview: PreviewData,
+        sessionId: String,
+        lastActivityAt: Date
+    ) -> String {
+        var exchangeArray: [[String: Any]] = []
+        for exchange in preview.exchanges {
+            exchangeArray.append([
+                "role": exchange.role,
+                "text": exchange.text,
+                "isError": exchange.isError,
+            ])
+        }
+
+        let formatter = ISO8601DateFormatter()
+        let payload: [String: Any] = [
+            "sessionId": sessionId,
+            "lastActivityAt": formatter.string(from: lastActivityAt),
+            "state": preview.state?.rawValue ?? NSNull(),
+            "detail": preview.detail ?? NSNull(),
+            "exchanges": exchangeArray,
+            "files": preview.files,
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return "{\"sessionId\":\"\(sessionId)\",\"lastActivityAt\":null,\"state\":null,\"detail\":null,\"exchanges\":[],\"files\":[]}"
+        }
+        return json
+    }
 
     private func pushTheme() {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

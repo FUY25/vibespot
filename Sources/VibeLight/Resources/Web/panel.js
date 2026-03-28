@@ -338,7 +338,11 @@
     dwellTimer = null;
     if (currentResults.length === 0) return;
     var result = currentResults[selectedIndex];
-    if (!result || result.status === 'action') return;
+    if (!result) return;
+    if (result.status === 'action') {
+      hidePreview();
+      return;
+    }
 
     var isPreviewCurrent = isPreviewShowing &&
       previewedSessionId === result.sessionId &&
@@ -834,6 +838,12 @@
       data = typeof previewJSON === 'string' ? JSON.parse(previewJSON) : previewJSON;
     } catch (e) {
       return;
+    }
+
+    if (data && data.sessionId && data.lastActivityAt) {
+      if (data.sessionId !== previewedSessionId || data.lastActivityAt !== previewedLastActivity) {
+        return;
+      }
     }
 
     previewCard.innerHTML = '';
