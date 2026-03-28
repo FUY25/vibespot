@@ -426,23 +426,26 @@ final class Indexer {
                 lastActivityAt: result.lastActivityAt,
                 now: now
             )
-            var health = result.healthStatus == "error"
-                ? HealthDetector.Result(status: result.healthStatus, detail: result.healthDetail)
-                : staleHealth
+            let currentHealth = HealthDetector.Result(
+                status: result.healthStatus,
+                detail: result.healthDetail
+            )
+            var tailHealth: HealthDetector.Result?
 
             if let fileURL = findSessionFile(sessionId: result.sessionId),
                let currentMtime = fileMtime(at: fileURL.path) {
                 // Only tail-read when the session file has new content.
                 if lastTailReadMtimeBySessionId[result.sessionId] != currentMtime {
                     lastTailReadMtimeBySessionId[result.sessionId] = currentMtime
-                    let tailHealth = HealthDetector.detectFromTail(fileURL: fileURL)
-                    if tailHealth.status == "error" {
-                        health = tailHealth
-                    } else {
-                        health = staleHealth
-                    }
+                    tailHealth = HealthDetector.detectFromTail(fileURL: fileURL)
                 }
             }
+
+            let health = HealthDetector.resolveHealth(
+                current: currentHealth,
+                stale: staleHealth,
+                tail: tailHealth
+            )
 
             if health.status != result.healthStatus || health.detail != result.healthDetail {
                 try? sessionIndex.updateHealthStatus(

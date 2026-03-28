@@ -38,10 +38,7 @@ enum HealthDetector {
         let readSize = min(fileSize, UInt64(2048))
         handle.seek(toFileOffset: fileSize - readSize)
         let data = handle.readData(ofLength: Int(readSize))
-
-        guard let text = String(data: data, encoding: .utf8) else {
-            return .ok
-        }
+        let text = String(decoding: data, as: UTF8.self)
 
         let lines = text.split(whereSeparator: \.isNewline).reversed()
         for line in lines.prefix(20) {
@@ -69,6 +66,22 @@ enum HealthDetector {
         }
 
         return .stale("No activity for \(Int(elapsed / 60))m")
+    }
+
+    static func resolveHealth(
+        current: Result,
+        stale: Result,
+        tail: Result?
+    ) -> Result {
+        if let tail {
+            return tail.status == "error" ? tail : stale
+        }
+
+        if current.status == "error" {
+            return current
+        }
+
+        return stale
     }
 
     private static func extractErrorDetail(from line: String) -> String {
