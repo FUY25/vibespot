@@ -21,6 +21,11 @@
   let iconBaseURL = '';
   let currentHintTool = null;
 
+  var previewCard = document.getElementById('previewCard');
+  var dwellTimer = null;
+  var previewedSessionId = null;
+  var previewedLastActivity = null;
+
   // --- Swift → JS API ---
 
   window.updateResults = function(resultsJSON) {
@@ -49,6 +54,14 @@
     updateSessionCount();
     computeAndShowGhost();
     notifyResize();
+
+    // Live-refresh preview if the previewed session's activity changed
+    if (previewedSessionId) {
+      var current = currentResults.find(function(r) { return r.sessionId === previewedSessionId; });
+      if (current && current.lastActivityAt !== previewedLastActivity) {
+        requestPreview(current.sessionId, current.lastActivityAt);
+      }
+    }
   };
 
   window.setTheme = function(theme) {
@@ -107,6 +120,7 @@
         break;
       case 'Escape':
         e.preventDefault();
+        hidePreview();
         if (bridge) bridge.postMessage({ type: 'escape' });
         break;
       case 'Tab':
@@ -131,6 +145,7 @@
       updateSelection();
       updateActionHint();
     }
+    scheduleDwell();
   }
 
   function updateSelection() {
@@ -144,6 +159,7 @@
   }
 
   function activateSelected() {
+    hidePreview();
     if (currentResults.length === 0) return;
     const result = currentResults[selectedIndex];
     if (result && bridge) {
@@ -255,6 +271,31 @@
     if (actionHint.textContent !== newHint) {
       actionHint.textContent = newHint;
     }
+  }
+
+  function scheduleDwell() {
+    clearTimeout(dwellTimer);
+    hidePreview();
+    if (currentResults.length === 0) return;
+    var result = currentResults[selectedIndex];
+    if (!result || result.status === 'action') return;
+    dwellTimer = setTimeout(function() {
+      requestPreview(result.sessionId, result.lastActivityAt);
+    }, 300);
+  }
+
+  function requestPreview(sessionId, lastActivity) {
+    previewedSessionId = sessionId;
+    previewedLastActivity = lastActivity;
+    if (bridge) {
+      bridge.postMessage({ type: 'preview', sessionId: sessionId });
+    }
+  }
+
+  function hidePreview() {
+    previewCard.classList.remove('preview--visible');
+    previewedSessionId = null;
+    previewedLastActivity = null;
   }
 
   // --- Result Rendering (diff-based) ---
@@ -562,4 +603,67 @@
   // --- Init ---
   searchInput.focus();
   updateBlockCursor();
+
+  window.updatePreview = function(previewJSON) {
+    var data;
+    try {
+      data = typeof previewJSON === 'string' ? JSON.parse(previewJSON) : previewJSON;
+    } catch (e) {
+      return;
+    }
+
+    previewCard.innerHTML = '';
+
+    // Exchanges
+    var exchanges = data.exchanges || [];
+    for (var i = 0; i < exchanges.length; i++) {
+      var ex = exchanges[i];
+      var div = document.createElement('div');
+      div.className = 'preview__exchange';
+      if (ex.isError) {
+        div.classList.add('preview__exchange--error');
+      } else if (ex.role === 'user') {
+        div.classList.add('preview__exchange--user');
+      } else {
+        div.classList.add('preview__exchange--assistant');
+      }
+      div.textContent = stripMarkdown(stripANSI(ex.text));
+      previewCard.appendChild(div);
+    }
+
+    // Files
+    var files = data.files || [];
+    if (files.length > 0) {
+      var filesSection = document.createElement('div');
+      filesSection.className = 'preview__files';
+      for (var j = 0; j < files.length; j++) {
+        var filePath = files[j];
+        var parts = filePath.split('/');
+        var basename = parts[parts.length - 1] || filePath;
+        var dir = parts.slice(Math.max(0, parts.length - 3), parts.length - 1).join('/');
+
+        var fileDiv = document.createElement('div');
+        fileDiv.className = 'preview__file';
+        fileDiv.textContent = basename;
+        if (dir) {
+          var dirSpan = document.createElement('span');
+          dirSpan.className = 'preview__file-dir';
+          dirSpan.textContent = dir + '/';
+          fileDiv.appendChild(dirSpan);
+        }
+        filesSection.appendChild(fileDiv);
+      }
+      previewCard.appendChild(filesSection);
+    }
+
+    // Position relative to selected row
+    var rows = resultsContainer.querySelectorAll('.row');
+    if (rows[selectedIndex]) {
+      var rowRect = rows[selectedIndex].getBoundingClientRect();
+      var panelRect = panel.getBoundingClientRect();
+      previewCard.style.top = (rowRect.top - panelRect.top) + 'px';
+    }
+
+    previewCard.classList.add('preview--visible');
+  };
 })();

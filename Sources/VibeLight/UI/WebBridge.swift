@@ -88,6 +88,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             "healthStatus": result.healthStatus,
             "healthDetail": result.healthDetail,
         ]
+        dict["lastActivityAt"] = ISO8601DateFormatter().string(from: result.lastActivityAt)
         if let preview = result.activityPreview {
             dict["activityPreview"] = preview.text
             dict["activityPreviewKind"] = preview.kind.rawValue
