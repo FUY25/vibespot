@@ -611,6 +611,32 @@ final class SessionIndex: @unchecked Sendable {
         return rows.first
     }
 
+    /// Returns sessions whose title matches their project_name, is "Untitled", or is empty.
+    func sessionsWithWeakTitles(limit: Int = 50) throws -> [(sessionId: String, tool: String, projectName: String)] {
+        let sql = """
+            SELECT id, tool, project_name
+            FROM sessions
+            WHERE title = project_name
+               OR title = 'Untitled'
+               OR title = ''
+            ORDER BY started_at DESC
+            LIMIT ?1
+        """
+        return try db.query(
+            sql,
+            bind: { statement in
+                try statement.bind(index: 1, int: Int64(limit))
+            },
+            map: { statement in
+                (
+                    sessionId: textColumn(statement, index: 0),
+                    tool: textColumn(statement, index: 1),
+                    projectName: textColumn(statement, index: 2)
+                )
+            }
+        )
+    }
+
     private func listSessions(liveOnly: Bool) throws -> [SearchResult] {
         let sql = """
             SELECT

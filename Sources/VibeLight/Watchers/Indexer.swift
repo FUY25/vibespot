@@ -7,6 +7,7 @@ final class Indexer {
     private let homeDirectoryPath: String
     private var fileWatcher: FileWatcher?
     private var refreshTimer: Timer?
+    private var titleSweepTimer: Timer?
     private var startupScanTask: Task<Void, Never>?
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
@@ -62,6 +63,13 @@ final class Indexer {
                 self?.refreshLiveSessions()
             }
         }
+
+        // Periodic title improvement sweep every 60s
+        titleSweepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.runTitleSweep()
+            }
+        }
     }
 
     func stop() {
@@ -72,6 +80,8 @@ final class Indexer {
         fileWatcher = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
+        titleSweepTimer?.invalidate()
+        titleSweepTimer = nil
     }
 
     // MARK: - Full scan
@@ -622,6 +632,84 @@ final class Indexer {
         )
     }
 
+    // MARK: - Title Sweep
+
+    /// Periodically re-checks sessions with weak titles (project name, "Untitled", empty)
+    /// and attempts to find better titles from JSONL tails and external title sources.
+    private func runTitleSweep() {
+        // Refresh the Codex title map from session_index.jsonl (may have new entries)
+        let freshCodexTitleMap = IndexingHelpers.loadCodexTitleMap(homeDirectoryPath: homeDirectoryPath)
+        if !freshCodexTitleMap.isEmpty {
+            codexTitleMap.merge(freshCodexTitleMap) { _, new in new }
+        }
+
+        // Load Claude summaries from all sessions-index.json files
+        let claudeSummaries = loadClaudeSummaries()
+
+        guard let weakSessions = try? sessionIndex.sessionsWithWeakTitles() else { return }
+        guard !weakSessions.isEmpty else { return }
+
+        let sessionIndex = sessionIndex
+        let codexTitleMap = codexTitleMap
+
+        Task.detached(priority: .utility) {
+            for session in weakSessions {
+                var betterTitle: String?
+
+                // Source 1: Codex thread_name from session_index.jsonl
+                if session.tool == "codex" {
+                    betterTitle = codexTitleMap[session.sessionId]
+                }
+
+                // Source 2: Claude summary from sessions-index.json
+                if betterTitle == nil && session.tool == "claude" {
+                    betterTitle = claudeSummaries[session.sessionId]
+                }
+
+                // Source 3: Last user prompt from JSONL tail
+                if betterTitle == nil {
+                    let fileURL = Self.findSessionFileStatic(
+                        sessionId: session.sessionId,
+                        homeDirectoryPath: FileManager.default.homeDirectoryForCurrentUser.path
+                    )
+                    if let fileURL {
+                        betterTitle = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
+                    }
+                }
+
+                if let betterTitle, !betterTitle.isEmpty, betterTitle != session.projectName {
+                    try? sessionIndex.updateTitle(sessionId: session.sessionId, title: betterTitle)
+                }
+            }
+        }
+    }
+
+    /// Loads Claude session summaries from all sessions-index.json files,
+    /// filtering out "New Conversation" and firstPrompt fallbacks.
+    private func loadClaudeSummaries() -> [String: String] {
+        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        let fm = FileManager.default
+        guard let dirs = try? fm.contentsOfDirectory(atPath: projectsPath) else { return [:] }
+
+        var summaries: [String: String] = [:]
+        for dir in dirs {
+            let indexPath = (projectsPath as NSString).appendingPathComponent(dir)
+            let indexURL = URL(fileURLWithPath: indexPath).appendingPathComponent("sessions-index.json")
+            guard let metas = try? ClaudeParser.parseSessionsIndex(url: indexURL) else { continue }
+            for meta in metas {
+                let title = meta.title
+                // Only use if it differs from firstPrompt — means it's an AI summary
+                let isSmartTitle = meta.firstPrompt.map { title != $0 } ?? true
+                if isSmartTitle,
+                   !title.isEmpty,
+                   title != "Untitled" {
+                    summaries[meta.sessionId] = title
+                }
+            }
+        }
+        return summaries
+    }
+
     // MARK: - Helpers
 
     private func updateLiveSessionTitle(result: SearchResult) {
@@ -798,6 +886,36 @@ final class Indexer {
         }
 
         sessionFileLookupMissAt[sessionId] = now
+        return nil
+    }
+
+    /// Thread-safe, uncached file lookup for background title sweeps.
+    nonisolated static func findSessionFileStatic(sessionId: String, homeDirectoryPath: String) -> URL? {
+        let fm = FileManager.default
+
+        let claudeProjectsPath = homeDirectoryPath + "/.claude/projects"
+        if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
+            for projectDir in projectDirs {
+                let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
+                if fm.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+            }
+        }
+
+        let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+        if let enumerator = fm.enumerator(
+            at: codexRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
+                let fileNameID = fileURL.deletingPathExtension().lastPathComponent
+                let candidateIDs = [fileNameID, IndexingHelpers.codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
+                if candidateIDs.contains(sessionId) {
+                    return fileURL
+                }
+            }
+        }
+
         return nil
     }
 }
