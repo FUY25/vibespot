@@ -92,7 +92,9 @@ enum ClaudeParser {
                 return nil
             }
 
-            let title = (entry["summary"] as? String)?.nonEmpty
+            let rawSummary = (entry["summary"] as? String)?.nonEmpty
+            let summary = (rawSummary != nil && rawSummary != "New Conversation") ? rawSummary : nil
+            let title = summary
                 ?? (entry["firstPrompt"] as? String)?.nonEmpty
                 ?? "Untitled"
 

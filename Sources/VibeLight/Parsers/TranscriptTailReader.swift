@@ -93,6 +93,50 @@ enum TranscriptTailReader {
         return PreviewData(exchanges: exchanges.reversed(), files: files)
     }
 
+    static func extractLastUserPrompt(fileURL: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        let fileSize = handle.seekToEndOfFile()
+        let readSize: UInt64 = min(fileSize, 8192)
+        handle.seek(toFileOffset: fileSize - readSize)
+        let data = handle.readData(ofLength: Int(readSize))
+
+        guard let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let lines = text.split(whereSeparator: \.isNewline).reversed()
+        for line in lines {
+            guard let record = jsonObject(from: String(line)) else { continue }
+            guard let type = record["type"] as? String else { continue }
+
+            // Claude format: type == "user"
+            if type == "user" {
+                let message = record["message"] as? [String: Any] ?? [:]
+                let content = extractText(from: message["content"])
+                if let title = SessionTitleNormalizer.displayTitleCandidate(from: content) {
+                    return title
+                }
+            }
+
+            // Codex format: response_item with role == "user"
+            if type == "response_item",
+               let payload = record["payload"] as? [String: Any],
+               let payloadType = payload["type"] as? String, payloadType == "message",
+               let role = payload["role"] as? String, role == "user" {
+                let content = extractText(from: payload["content"])
+                if let title = SessionTitleNormalizer.displayTitleCandidate(from: content) {
+                    return title
+                }
+            }
+        }
+
+        return nil
+    }
+
     static func previewToJSONString(_ preview: PreviewData) -> String {
         var exchangeArray: [[String: Any]] = []
         for ex in preview.exchanges {

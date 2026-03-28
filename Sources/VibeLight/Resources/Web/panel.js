@@ -26,6 +26,7 @@
   var previewedSessionId = null;
   var previewedLastActivity = null;
   var isPreviewShowing = false;
+  var currentMode = 'all'; // 'all' = live + history, 'live' = live only
 
   // --- Swift → JS API ---
 
@@ -598,9 +599,19 @@
   // --- Expose to Swift for direct native key interception ---
   window.moveSelection = moveSelection;
   window.activateSelected = activateSelected;
+
+  window.setMode = function(mode) {
+    currentMode = mode;
+    if (sessionCountEl) {
+      var label = mode === 'live' ? 'live' : 'all';
+      // Append mode indicator after session count
+      var countText = sessionCountEl.textContent.replace(/ ·.*$/, '');
+      sessionCountEl.textContent = countText + ' · ' + label;
+    }
+  };
   window.handleTab = function() {
     if (!acceptGhostSuggestion()) {
-      drillIntoSelectedHistory();
+      if (bridge) bridge.postMessage({ type: 'toggleMode' });
     }
   };
 

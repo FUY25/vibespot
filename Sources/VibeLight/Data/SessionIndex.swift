@@ -587,6 +587,30 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func updateTitle(sessionId: String, title: String) throws {
+        let cleaned = Self.cleanTitle(title)
+        try runStatement(
+            "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3"
+        ) { statement in
+            try statement.bind(index: 1, text: cleaned)
+            try statement.bind(index: 2, double: Date().timeIntervalSince1970)
+            try statement.bind(index: 3, text: sessionId)
+        }
+    }
+
+    func currentTitle(sessionId: String) throws -> String? {
+        let rows = try db.query(
+            "SELECT title FROM sessions WHERE id = ?1",
+            bind: { statement in
+                try statement.bind(index: 1, text: sessionId)
+            },
+            map: { statement in
+                textColumn(statement, index: 0)
+            }
+        )
+        return rows.first
+    }
+
     private func listSessions(liveOnly: Bool) throws -> [SearchResult] {
         let sql = """
             SELECT

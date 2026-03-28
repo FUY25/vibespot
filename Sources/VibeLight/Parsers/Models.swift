@@ -134,6 +134,15 @@ enum SessionTitleNormalizer {
         return parserTitle
     }
 
+    static func lastMeaningfulUserPrompt(in messages: [ParsedMessage]) -> String? {
+        for message in messages.reversed() where message.role == "user" {
+            if let title = displayTitleCandidate(from: message.content) {
+                return title
+            }
+        }
+        return nil
+    }
+
     static func firstMeaningfulDisplayTitle(in messages: [ParsedMessage]) -> String? {
         for message in messages where message.role == "user" {
             if let title = displayTitleCandidate(from: message.content) {

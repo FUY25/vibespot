@@ -188,6 +188,7 @@ final class Indexer {
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
         let cleanedPreferredTitle = preferredTitle.flatMap(IndexingHelpers.normalizedDisplayTitle(from:))
         let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
+            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let startedAt = messages.first?.timestamp ?? .distantPast
@@ -287,6 +288,7 @@ final class Indexer {
         let mtime = IndexingHelpers.fileMtime(at: path)
 
         let title = titleMap[sessionId]
+            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -412,6 +414,11 @@ final class Indexer {
         }
 
         primeSessionFileCache(sessionIDs: eligibleIDs, toolBySessionId: toolBySessionId)
+
+        // Update titles for live sessions from smart sources
+        for result in eligibleResults {
+            updateLiveSessionTitle(result: result)
+        }
 
         for result in eligibleResults {
             let staleHealth = HealthDetector.detectStale(
@@ -616,6 +623,35 @@ final class Indexer {
     }
 
     // MARK: - Helpers
+
+    // MARK: - Helpers
+
+    private func updateLiveSessionTitle(result: SearchResult) {
+        let currentTitle = result.title
+        let projectName = result.projectName
+
+        // Skip if title already looks meaningful (not just project name or "Untitled")
+        let isGenericTitle = currentTitle == projectName
+            || currentTitle == "Untitled"
+            || currentTitle.isEmpty
+        guard isGenericTitle else { return }
+
+        var betterTitle: String?
+
+        // For Codex: prefer thread_name from titleMap
+        if result.tool == "codex" {
+            betterTitle = codexTitleMap[result.sessionId]
+        }
+
+        // Fall back to last user prompt from JSONL tail
+        if betterTitle == nil, let fileURL = findSessionFile(sessionId: result.sessionId) {
+            betterTitle = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
+        }
+
+        if let betterTitle, !betterTitle.isEmpty {
+            try? sessionIndex.updateTitle(sessionId: result.sessionId, title: betterTitle)
+        }
+    }
 
     /// Reads the tail of a session file and returns the type of the last JSONL entry.
     nonisolated static func detectLastEntryType(fileURL: URL) -> String? {

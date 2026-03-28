@@ -18,6 +18,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appearanceObservation: NSKeyValueObservation?
     private var lastPushedResultsJSON: String = ""
+    private var lastSearchQuery: String?
     private var isWebViewReady = false
     private var pendingResetAndFocus = false
     private var pendingTheme: String?
@@ -28,6 +29,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private let previewExtraWidth: CGFloat = 330
     private let minPanelHeight: CGFloat = 104
     private var isPreviewVisible = false
+    private var isLiveOnlyMode = false
 
     private static let isRunningTests: Bool = {
         if NSClassFromString("XCTestCase") != nil { return true }
@@ -81,6 +83,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         requestResetAndFocus()
         pushTheme()
+        pushMode()
         refreshResults(query: "")
     }
 
@@ -93,6 +96,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     // MARK: - WebBridgeDelegate
 
     func webBridge(_ bridge: WebBridge, didReceiveSearch query: String) {
+        lastSearchQuery = query
         refreshResults(query: query)
     }
 
@@ -136,6 +140,17 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         let targetWidth = visible ? panelWidth + previewExtraWidth : panelWidth
         frame.size.width = targetWidth
         panel.setFrame(frame, display: true, animate: false)
+    }
+
+    func webBridgeDidToggleMode(_ bridge: WebBridge) {
+        isLiveOnlyMode.toggle()
+        let currentQuery = lastSearchQuery ?? ""
+        refreshResults(query: currentQuery)
+        // Tell JS the current mode so it can update the indicator
+        if isWebViewReady {
+            let mode = isLiveOnlyMode ? "live" : "all"
+            webView.evaluateJavaScript("setMode('\(mode)')", completionHandler: nil)
+        }
     }
 
     // MARK: - Private
@@ -183,7 +198,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         do {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = try sessionIndex.search(query: trimmed, liveOnly: trimmed.isEmpty)
+            let matches = try sessionIndex.search(query: trimmed, liveOnly: isLiveOnlyMode)
             if trimmed.lowercased().hasPrefix("new") {
                 let actionRows = makeNewSessionActionRows()
                 pushResults(actionRows + matches)
@@ -249,6 +264,12 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         guard isWebViewReady else { return }
         pushThemeIfNeeded()
+    }
+
+    private func pushMode() {
+        guard isWebViewReady else { return }
+        let mode = isLiveOnlyMode ? "live" : "all"
+        webView.evaluateJavaScript("setMode('\(mode)')", completionHandler: nil)
     }
 
     private func pushThemeIfNeeded() {

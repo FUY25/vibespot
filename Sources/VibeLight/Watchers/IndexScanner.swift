@@ -183,6 +183,7 @@ struct IndexScanner {
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
         let cleanedPreferredTitle = preferredTitle.flatMap(IndexingHelpers.normalizedDisplayTitle(from:))
         let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
+            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let startedAt = messages.first?.timestamp ?? .distantPast
@@ -259,6 +260,7 @@ struct IndexScanner {
         let mtime = parseStartMtime ?? IndexingHelpers.fileMtime(at: path)
 
         let title = titleMap[sessionId]
+            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
             ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
             ?? "Untitled"
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

@@ -10,6 +10,7 @@ protocol WebBridgeDelegate: AnyObject {
     func webBridge(_ bridge: WebBridge, didRequestResize height: CGFloat)
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String)
     func webBridge(_ bridge: WebBridge, didChangePreviewVisibility visible: Bool)
+    func webBridgeDidToggleMode(_ bridge: WebBridge)
 }
 
 @MainActor
@@ -23,6 +24,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         case resize(height: CGFloat)
         case preview(sessionId: String)
         case previewVisible(visible: Bool)
+        case toggleMode
 
         static func parse(_ body: [String: Any]) -> Message? {
             guard let type = body["type"] as? String else { return nil }
@@ -48,6 +50,8 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             case "previewVisible":
                 guard let visible = body["visible"] as? Bool else { return nil }
                 return .previewVisible(visible: visible)
+            case "toggleMode":
+                return .toggleMode
             default:
                 return nil
             }
@@ -77,6 +81,8 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
                 delegate?.webBridge(self, didRequestPreview: sessionId)
             case .previewVisible(let visible):
                 delegate?.webBridge(self, didChangePreviewVisibility: visible)
+            case .toggleMode:
+                delegate?.webBridgeDidToggleMode(self)
             }
         }
     }
