@@ -239,6 +239,62 @@ Desired behavior:
 
 This should feel live without becoming raw terminal streaming.
 
+## New Session Command UX
+
+The search bar should also work as a lightweight new-session command surface.
+
+### Fuzzy Action Ranking
+
+Action rows for creating sessions should rank aggressively when the query looks like session-creation intent.
+
+Examples of intent-bearing prefixes:
+
+- `new`
+- `claude`
+- `codex`
+- short fuzzy prefixes such as `co`
+
+Desired behavior:
+
+- typing `co` should immediately bias the top action to `New Codex session`
+- typing `cl` should immediately bias the top action to `New Claude session`
+- these action rows should outrank ordinary history/live matches when the query clearly looks like launch intent
+
+### Command-Like Input Shape
+
+Once a new-session action is selected, the remaining input should behave like a lightweight command composer.
+
+Supported shape:
+
+- tool selection prefix
+- zero or more recognized launch flags
+- remaining text becomes the initial prompt automatically
+
+Examples:
+
+- `co`
+  - selects `New Codex session`
+- `new codex --yolo`
+  - launches Codex with `--yolo`
+- `new codex --yolo fix auth bug`
+  - launches Codex with `--yolo`
+  - sends `fix auth bug` as the first prompt
+- `new claude --help`
+  - launches Claude help without an initial prompt
+
+### Scope Limits
+
+This should not become a general shell parser.
+
+Rules:
+
+- only support a small allowlist of known launch flags per tool
+- support lightweight fuzzy completion for those flags
+- do not attempt arbitrary quoting/escaping semantics beyond what the tool launch path already supports
+- if a token is not recognized as a flag, treat it as prompt text
+
+This preserves the “new session command” feel without making the search bar unpredictable.
+
 ## Data Model Changes
 
 Add indexed session fields for current-context telemetry and model identity:
