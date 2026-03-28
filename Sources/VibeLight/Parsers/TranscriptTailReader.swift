@@ -37,6 +37,7 @@ enum TranscriptTailReader {
             guard let record = jsonObject(from: String(line)) else { continue }
             guard let type = record["type"] as? String else { continue }
 
+            // Claude format: type == "user" | "assistant", message.content holds text
             if (type == "user" || type == "assistant") && exchanges.count < exchangeCount {
                 let message = record["message"] as? [String: Any] ?? [:]
                 let content = extractText(from: message["content"])
@@ -46,7 +47,19 @@ enum TranscriptTailReader {
                 }
             }
 
-            // Extract file paths from tool_use
+            // Codex format: type == "response_item", payload.type == "message", payload.role + payload.content
+            if type == "response_item", exchanges.count < exchangeCount,
+               let payload = record["payload"] as? [String: Any],
+               let payloadType = payload["type"] as? String, payloadType == "message",
+               let role = payload["role"] as? String, role == "user" || role == "assistant" {
+                let content = extractText(from: payload["content"])
+                if !content.isEmpty {
+                    let isError = content.contains("API Error:") || content.contains("\"type\":\"invalid_request_error\"")
+                    exchanges.append(PreviewExchange(role: role, text: String(content.prefix(200)), isError: isError))
+                }
+            }
+
+            // Extract file paths from tool_use (Claude format)
             if type == "assistant" {
                 let message = record["message"] as? [String: Any] ?? [:]
                 if let blocks = message["content"] as? [[String: Any]] {
@@ -60,6 +73,19 @@ enum TranscriptTailReader {
                             }
                         }
                     }
+                }
+            }
+
+            // Extract file paths from function_call (Codex format)
+            if type == "response_item",
+               let payload = record["payload"] as? [String: Any],
+               let payloadType = payload["type"] as? String,
+               (payloadType == "function_call" || payloadType == "custom_tool_call") {
+                let args = payload["arguments"] as? [String: Any] ?? payload["input"] as? [String: Any] ?? [:]
+                let path = (args["file_path"] as? String) ?? (args["path"] as? String) ?? ""
+                if !path.isEmpty && !seenFiles.contains(path) && files.count < 5 {
+                    seenFiles.insert(path)
+                    files.append(path)
                 }
             }
         }

@@ -149,9 +149,12 @@ final class CodexStateDB {
             return nil
         }
 
+        // Use immutable URI mode to read WAL databases locked by Codex.
+        // SQLITE_OPEN_READONLY fails on WAL databases held by another process.
+        let uri = "file://\(path)?immutable=1"
         var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-        let rc = sqlite3_open_v2(path, &handle, flags, nil)
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI
+        let rc = sqlite3_open_v2(uri, &handle, flags, nil)
 
         guard rc == SQLITE_OK, let db = handle else {
             recordFailure()
@@ -164,10 +167,6 @@ final class CodexStateDB {
 
         // Reset failure tracking on successful open
         clearFailure()
-
-        if sqlite3_busy_timeout(db, 300) != SQLITE_OK {
-            logSQLiteError(db, context: "configure busy timeout")
-        }
 
         defer {
             let closeRC = sqlite3_close_v2(db)

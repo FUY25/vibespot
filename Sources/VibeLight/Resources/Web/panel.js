@@ -25,6 +25,7 @@
   var dwellTimer = null;
   var previewedSessionId = null;
   var previewedLastActivity = null;
+  var isPreviewShowing = false;
 
   // --- Swift → JS API ---
 
@@ -73,6 +74,7 @@
   };
 
   window.resetAndFocus = function() {
+    hidePreview();
     searchInput.value = '';
     ghostSuggestion.innerHTML = '';
     selectedIndex = 0;
@@ -296,6 +298,10 @@
     previewCard.classList.remove('preview--visible');
     previewedSessionId = null;
     previewedLastActivity = null;
+    if (isPreviewShowing) {
+      isPreviewShowing = false;
+      if (bridge) bridge.postMessage({ type: 'previewVisible', visible: false });
+    }
   }
 
   // --- Result Rendering (diff-based) ---
@@ -468,7 +474,7 @@
 
   function formatMetadata(result) {
     var parts = [];
-    if (result.status === 'live' && result.startedAt) {
+    if (result.status === 'live' && result.activityStatus === 'working' && result.startedAt) {
         parts.push(formatRunningTime(result.startedAt));
     } else if (result.relativeTime) {
         parts.push(result.relativeTime);
@@ -656,14 +662,31 @@
       previewCard.appendChild(filesSection);
     }
 
-    // Position relative to selected row
+    // Position relative to selected row.
+    // If the row is in the lower half of the panel, anchor the card bottom to the
+    // row bottom so it grows upward — avoiding clipping by the WebView edge.
     var rows = resultsContainer.querySelectorAll('.row');
     if (rows[selectedIndex]) {
       var rowRect = rows[selectedIndex].getBoundingClientRect();
       var panelRect = panel.getBoundingClientRect();
-      previewCard.style.top = (rowRect.top - panelRect.top) + 'px';
+      var rowTop = rowRect.top - panelRect.top;
+      var rowBottom = rowRect.bottom - panelRect.top;
+      var panelHeight = panelRect.height;
+      var cardMaxH = previewCard.scrollHeight || 392; // fallback to CSS max-height
+      previewCard.style.top = '';
+      previewCard.style.bottom = '';
+      if (rowTop + cardMaxH > panelHeight && rowBottom > panelHeight / 2) {
+        // Anchor to row bottom and grow upward
+        previewCard.style.bottom = (panelHeight - rowBottom) + 'px';
+      } else {
+        previewCard.style.top = rowTop + 'px';
+      }
     }
 
     previewCard.classList.add('preview--visible');
+    if (!isPreviewShowing) {
+      isPreviewShowing = true;
+      if (bridge) bridge.postMessage({ type: 'previewVisible', visible: true });
+    }
   };
 })();

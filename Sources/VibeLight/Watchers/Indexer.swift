@@ -387,6 +387,15 @@ final class Indexer {
         )
 
         for sessionId in aliveSessionIDs {
+            if let liveSession = aliveSessionsByID[sessionId] {
+                try? sessionIndex.ensureSessionExists(
+                    id: sessionId,
+                    tool: liveSession.tool,
+                    project: liveSession.cwd,
+                    projectName: (liveSession.cwd as NSString).lastPathComponent,
+                    startedAt: now
+                )
+            }
             try? sessionIndex.updateRuntimeState(
                 sessionId: sessionId,
                 status: "live",
@@ -434,6 +443,14 @@ final class Indexer {
 
             if let fileURL = findSessionFile(sessionId: result.sessionId),
                let currentMtime = fileMtime(at: fileURL.path) {
+                // Update file modification time so activityStatus is fresh
+                let lastEntryType = Self.detectLastEntryType(fileURL: fileURL)
+                try? sessionIndex.updateActivityFields(
+                    sessionId: result.sessionId,
+                    lastFileModification: currentMtime,
+                    lastEntryType: lastEntryType
+                )
+
                 // Only tail-read when the session file has new content.
                 if lastTailReadMtimeBySessionId[result.sessionId] != currentMtime {
                     lastTailReadMtimeBySessionId[result.sessionId] = currentMtime
@@ -593,6 +610,43 @@ final class Indexer {
     }
 
     // MARK: - Helpers
+
+    /// Reads the tail of a session file and returns the type of the last JSONL entry.
+    nonisolated static func detectLastEntryType(fileURL: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+
+        let fileSize = handle.seekToEndOfFile()
+        let readSize = min(fileSize, UInt64(2048))
+        handle.seek(toFileOffset: fileSize - readSize)
+        let data = handle.readData(ofLength: Int(readSize))
+
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+
+        let lines = text.split(whereSeparator: \.isNewline).reversed()
+        for line in lines {
+            guard let lineData = line.data(using: .utf8),
+                  let record = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any],
+                  let type = record["type"] as? String
+            else { continue }
+
+            switch type {
+            case "user": return "user"
+            case "assistant":
+                // Check if the assistant message contains tool_use blocks
+                if let message = record["message"] as? [String: Any],
+                   let content = message["content"] as? [[String: Any]] {
+                    let hasToolUse = content.contains { $0["type"] as? String == "tool_use" }
+                    return hasToolUse ? "tool_use" : "assistant"
+                }
+                return "assistant"
+            case "tool_result": return "tool_result"
+            default: continue
+            }
+        }
+
+        return nil
+    }
 
     private func fileMtime(at path: String) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date

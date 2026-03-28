@@ -68,6 +68,28 @@ struct WebBridgeTests {
         #expect(message == nil)
     }
 
+    @Test("parses preview message")
+    func parsePreviewMessage() {
+        let body: [String: Any] = ["type": "preview", "sessionId": "sess-1"]
+        let message = WebBridge.Message.parse(body)
+        #expect(message == .preview(sessionId: "sess-1"))
+    }
+
+    @Test("parses previewVisible message")
+    func parsePreviewVisibleMessage() {
+        let bodyTrue: [String: Any] = ["type": "previewVisible", "visible": true]
+        #expect(WebBridge.Message.parse(bodyTrue) == .previewVisible(visible: true))
+
+        let bodyFalse: [String: Any] = ["type": "previewVisible", "visible": false]
+        #expect(WebBridge.Message.parse(bodyFalse) == .previewVisible(visible: false))
+    }
+
+    @Test("returns nil for previewVisible missing visible field")
+    func parsePreviewVisibleMissingField() {
+        let body: [String: Any] = ["type": "previewVisible"]
+        #expect(WebBridge.Message.parse(body) == nil)
+    }
+
     @MainActor
     @Test("resultToJSON includes health fields and startedAt")
     func resultToJSONIncludesHealthAndStartedAt() {

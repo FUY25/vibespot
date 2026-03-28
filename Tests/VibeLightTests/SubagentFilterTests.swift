@@ -55,5 +55,9 @@ func testCodexSubagentSessionsDoNotEnterSearchIndex() throws {
     indexer.performFullScan()
 
     let results = try index.search(query: "", includeHistory: true)
-    #expect(results.isEmpty)
+    // Filter to only sessions from the test's fake home directory.
+    // Real running processes may leak via LiveSessionRegistry.scan(),
+    // but those are not what this test is checking.
+    let indexedResults = results.filter { $0.sessionId == "subagent-session" }
+    #expect(indexedResults.isEmpty)
 }

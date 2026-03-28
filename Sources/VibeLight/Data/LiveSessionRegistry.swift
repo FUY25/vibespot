@@ -4,6 +4,7 @@ struct LiveSession {
     let pid: Int
     let sessionId: String
     let cwd: String
+    let tool: String
     let isAlive: Bool
 }
 
@@ -32,8 +33,41 @@ enum LiveSessionRegistry {
             guard let entry = try? ClaudeParser.parsePidFile(url: url) else { return nil }
 
             let alive = isProcessAlive(pid: entry.pid)
-            return LiveSession(pid: entry.pid, sessionId: entry.sessionId, cwd: entry.cwd, isAlive: alive)
+            guard !isGhosttySession(pid: entry.pid) else { return nil }
+            return LiveSession(pid: entry.pid, sessionId: entry.sessionId, cwd: entry.cwd, tool: "claude", isAlive: alive)
         }
+    }
+
+    /// Returns true if any ancestor process of `pid` is the Ghostty terminal.
+    static func isGhosttySession(pid: Int) -> Bool {
+        var current = pid
+        // Walk at most 16 levels up to avoid infinite loops
+        for _ in 0..<16 {
+            guard current > 1 else { return false }
+            guard let ppid = parentPID(of: current) else { return false }
+            guard ppid > 1 else { return false }
+            if let comm = processComm(of: ppid), comm.lowercased().contains("ghostty") {
+                return true
+            }
+            current = ppid
+        }
+        return false
+    }
+
+    private static func parentPID(of pid: Int) -> Int? {
+        guard let output = runCommand(
+            executablePath: "/bin/ps",
+            arguments: ["-p", String(pid), "-o", "ppid="]
+        ) else { return nil }
+        return Int(output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func processComm(of pid: Int) -> String? {
+        guard let output = runCommand(
+            executablePath: "/bin/ps",
+            arguments: ["-p", String(pid), "-o", "comm="]
+        ) else { return nil }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func scanCodexSessions() -> [LiveSession] {
@@ -44,7 +78,9 @@ enum LiveSessionRegistry {
             return []
         }
 
-        let alivePids = parseCodexPIDs(from: psOutput).filter { isProcessAlive(pid: $0) }
+        let alivePids = parseCodexPIDs(from: psOutput)
+            .filter { isProcessAlive(pid: $0) }
+            .filter { !isGhosttySession(pid: $0) }
 
         // Evict dead PIDs from cache
         let aliveSet = Set(alivePids)
@@ -58,7 +94,7 @@ enum LiveSessionRegistry {
             let pidArgs = uncachedPids.map(String.init).joined(separator: ",")
             if let lsofOutput = runCommand(
                 executablePath: "/usr/sbin/lsof",
-                arguments: ["-d", "cwd", "-Fn", "-p", pidArgs]
+                arguments: ["-a", "-d", "cwd", "-Fn", "-p", pidArgs]
             ) {
                 for pid in uncachedPids {
                     if let cwd = parseCwd(from: lsofOutput, pid: pid) {
@@ -73,7 +109,7 @@ enum LiveSessionRegistry {
         return alivePids.compactMap { pid in
             guard let cwd = cwdCache[pid] else { return nil }
             guard let sessionId = stateDB.sessionIdByCwd(cwd) else { return nil }
-            return LiveSession(pid: pid, sessionId: sessionId, cwd: cwd, isAlive: true)
+            return LiveSession(pid: pid, sessionId: sessionId, cwd: cwd, tool: "codex", isAlive: true)
         }
     }
 

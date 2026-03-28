@@ -25,7 +25,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var iconBaseURL: String?
 
     private let panelWidth: CGFloat = 720
+    private let previewExtraWidth: CGFloat = 330
     private let minPanelHeight: CGFloat = 104
+    private var isPreviewVisible = false
 
     private static let isRunningTests: Bool = {
         if NSClassFromString("XCTestCase") != nil { return true }
@@ -68,6 +70,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func show() {
         searchDebouncer.cancel()
+        isPreviewVisible = false
 
         if !panel.isVisible {
             centerPanelOnActiveScreen()
@@ -83,6 +86,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func hide() {
         searchDebouncer.cancel()
+        isPreviewVisible = false
         panel.orderOut(nil)
     }
 
@@ -107,7 +111,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         var frame = panel.frame
         let maxY = frame.maxY
         let newHeight = max(minPanelHeight, height + 2) // +2 for border
-        frame.size = NSSize(width: panelWidth, height: newHeight)
+        let currentWidth = isPreviewVisible ? panelWidth + previewExtraWidth : panelWidth
+        frame.size = NSSize(width: currentWidth, height: newHeight)
         frame.origin.y = maxY - newHeight
         panel.setFrame(frame, display: true, animate: panel.isVisible)
     }
@@ -125,6 +130,14 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
     }
 
+    func webBridge(_ bridge: WebBridge, didChangePreviewVisibility visible: Bool) {
+        isPreviewVisible = visible
+        var frame = panel.frame
+        let targetWidth = visible ? panelWidth + previewExtraWidth : panelWidth
+        frame.size.width = targetWidth
+        panel.setFrame(frame, display: true, animate: false)
+    }
+
     // MARK: - Private
 
     private func findSessionFile(sessionId: String) -> URL? {
@@ -139,8 +152,25 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             }
         }
 
+        // Codex: exact match first
         let codexPath = home + "/.codex/sessions/\(sessionId).jsonl"
         if fm.fileExists(atPath: codexPath) { return URL(fileURLWithPath: codexPath) }
+
+        // Codex: session files may have prefixed names (e.g. rollout-...-<uuid>.jsonl)
+        let codexRoot = URL(fileURLWithPath: home + "/.codex/sessions", isDirectory: true)
+        if let enumerator = fm.enumerator(
+            at: codexRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let fileURL as URL in enumerator {
+                guard fileURL.pathExtension == "jsonl" else { continue }
+                let fileName = fileURL.deletingPathExtension().lastPathComponent
+                if fileName.contains(sessionId) {
+                    return fileURL
+                }
+            }
+        }
 
         return nil
     }

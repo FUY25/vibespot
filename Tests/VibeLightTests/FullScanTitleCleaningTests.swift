@@ -44,9 +44,12 @@ func testFullScanStoresCleanedTitle() throws {
     indexer.performFullScan()
 
     let results = try index.search(query: "", includeHistory: true)
-    #expect(results.count == 1)
+    // Filter to the test session only — real running processes may
+    // leak via LiveSessionRegistry.scan() during performFullScan().
+    let testResults = results.filter { $0.sessionId == sessionId }
+    #expect(testResults.count == 1)
 
-    let stored = results[0].title
+    let stored = testResults[0].title
     #expect(stored == expectedTitle)
     #expect(!stored.contains("\u{001b}"))
     #expect(stored.count <= 61)

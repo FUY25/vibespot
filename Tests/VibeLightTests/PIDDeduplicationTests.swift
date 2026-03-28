@@ -53,8 +53,8 @@ struct PIDDeduplicationTests {
     func missingStartedAtIsExcludedFromDedupDecision() throws {
         let now = Date()
         let aliveSessionsByID: [String: LiveSession] = [
-            "known": LiveSession(pid: 1234, sessionId: "known", cwd: "/tmp/a", isAlive: true),
-            "unknown": LiveSession(pid: 1234, sessionId: "unknown", cwd: "/tmp/b", isAlive: true),
+            "known": LiveSession(pid: 1234, sessionId: "known", cwd: "/tmp/a", tool: "claude", isAlive: true),
+            "unknown": LiveSession(pid: 1234, sessionId: "unknown", cwd: "/tmp/b", tool: "claude", isAlive: true),
         ]
         let startedAtBySessionID: [String: Date] = [
             "known": now,

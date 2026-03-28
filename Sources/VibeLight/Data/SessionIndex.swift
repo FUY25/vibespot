@@ -532,6 +532,50 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func ensureSessionExists(
+        id: String,
+        tool: String,
+        project: String,
+        projectName: String,
+        startedAt: Date
+    ) throws {
+        let sql = """
+            INSERT OR IGNORE INTO sessions (
+                id, tool, title, project, project_name, git_branch, status, started_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, '', 'live', ?6, ?7)
+        """
+        try runStatement(sql) { statement in
+            try statement.bind(index: 1, text: id)
+            try statement.bind(index: 2, text: tool)
+            try statement.bind(index: 3, text: projectName.isEmpty ? "Untitled" : projectName)
+            try statement.bind(index: 4, text: project)
+            try statement.bind(index: 5, text: projectName)
+            try statement.bind(index: 6, double: startedAt.timeIntervalSince1970)
+            try statement.bind(index: 7, double: Date().timeIntervalSince1970)
+        }
+    }
+
+    func updateActivityFields(sessionId: String, lastFileModification: Date, lastEntryType: String?) throws {
+        if let lastEntryType {
+            try runStatement(
+                "UPDATE sessions SET last_file_mod = ?1, last_entry_type = ?2, updated_at = ?3 WHERE id = ?4"
+            ) { statement in
+                try statement.bind(index: 1, double: lastFileModification.timeIntervalSince1970)
+                try statement.bind(index: 2, text: lastEntryType)
+                try statement.bind(index: 3, double: Date().timeIntervalSince1970)
+                try statement.bind(index: 4, text: sessionId)
+            }
+        } else {
+            try runStatement(
+                "UPDATE sessions SET last_file_mod = ?1, updated_at = ?2 WHERE id = ?3"
+            ) { statement in
+                try statement.bind(index: 1, double: lastFileModification.timeIntervalSince1970)
+                try statement.bind(index: 2, double: Date().timeIntervalSince1970)
+                try statement.bind(index: 3, text: sessionId)
+            }
+        }
+    }
+
     func updateHealthStatus(sessionId: String, healthStatus: String, healthDetail: String) throws {
         try runStatement(
             "UPDATE sessions SET health_status = ?1, health_detail = ?2, updated_at = ?3 WHERE id = ?4"
