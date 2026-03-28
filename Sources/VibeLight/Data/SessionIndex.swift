@@ -710,4 +710,31 @@ final class SessionIndex: @unchecked Sendable {
 
         return ActivityPreview(text: text, kind: kind)
     }
+
+    // MARK: - Title cleaning
+
+    static func stripANSI(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "\u{001b}\\[[0-9;]*[A-Za-z]",
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    static func smartTruncate(_ text: String, maxLength: Int = 60) -> String {
+        let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stripped.count > maxLength else { return stripped }
+        let truncated = String(stripped.prefix(maxLength))
+        if stripped.last == "?" {
+            return String(stripped.prefix(maxLength - 1)) + "…?"
+        }
+        if let lastSpace = truncated.lastIndex(of: " ") {
+            return String(truncated[..<lastSpace]) + "…"
+        }
+        return truncated + "…"
+    }
+
+    static func cleanTitle(_ rawTitle: String) -> String {
+        smartTruncate(stripANSI(rawTitle))
+    }
 }

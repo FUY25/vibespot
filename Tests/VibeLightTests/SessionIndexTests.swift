@@ -1153,6 +1153,48 @@ func testUpsertSessionPreservesLastIndexedMtimeWhenArgumentOmitted() throws {
     #expect(try index.lastIndexedMtime(sessionId: "s1") == originalMtime)
 }
 
+@Test
+func testStripANSI() {
+    let raw = "\u{001b}[1;31mHello\u{001b}[0m world"
+    #expect(SessionIndex.stripANSI(raw) == "Hello world")
+}
+
+@Test
+func testStripANSINoEscapes() {
+    let raw = "Hello [1;31m world"
+    #expect(SessionIndex.stripANSI(raw) == raw)
+}
+
+@Test
+func testSmartTruncateShortText() {
+    #expect(SessionIndex.smartTruncate("  hi there \n") == "hi there")
+}
+
+@Test
+func testSmartTruncateLongText() {
+    let raw = String(repeating: "word ", count: 20)
+    let expected = Array(repeating: "word", count: 12).joined(separator: " ") + "…"
+    #expect(SessionIndex.smartTruncate(raw) == expected)
+}
+
+@Test
+func testSmartTruncatePreservesQuestion() {
+    let raw = String(repeating: "a", count: 80) + "?"
+    let expected = String(repeating: "a", count: 59) + "…?"
+    #expect(SessionIndex.smartTruncate(raw) == expected)
+    #expect(SessionIndex.smartTruncate(raw).count == 61)
+}
+
+@Test
+func testCleanTitleCombined() {
+    let raw = "\u{001b}[32m" + String(repeating: "word ", count: 20) + "\u{001b}[0m"
+    let cleaned = SessionIndex.cleanTitle(raw)
+    let expected = Array(repeating: "word", count: 12).joined(separator: " ") + "…"
+    #expect(cleaned == expected)
+    #expect(!cleaned.contains("\u{001b}"))
+    #expect(cleaned.count <= 61)
+}
+
 private func makeTestIndex() throws -> (SessionIndex, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path

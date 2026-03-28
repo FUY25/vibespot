@@ -148,7 +148,7 @@ final class Indexer {
         try? sessionIndex.upsertSession(
             id: meta.sessionId,
             tool: "claude",
-            title: title,
+            title: SessionIndex.cleanTitle(title),
             project: projectPath,
             projectName: projectName,
             gitBranch: meta.gitBranch,
@@ -193,7 +193,7 @@ final class Indexer {
         try? sessionIndex.upsertSession(
             id: sessionId,
             tool: "claude",
-            title: String(title.prefix(200)),
+            title: SessionIndex.cleanTitle(title),
             project: cwd,
             projectName: resolvedProjectName,
             gitBranch: gitBranch,
@@ -304,7 +304,7 @@ final class Indexer {
         try? sessionIndex.upsertSession(
             id: sessionId,
             tool: "codex",
-            title: String(title.prefix(200)),
+            title: SessionIndex.cleanTitle(title),
             project: cwd,
             projectName: cwd.isEmpty ? "" : (cwd as NSString).lastPathComponent,
             gitBranch: gitBranchMap[sessionId] ?? "",
