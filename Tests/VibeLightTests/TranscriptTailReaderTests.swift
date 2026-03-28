@@ -14,7 +14,7 @@ func testPreviewPrefersWaitingQuestionStateAndCompactsToTwoExchanges() throws {
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Question")
+    #expect(preview.state == .question)
     #expect(preview.detail == "Which layout do you prefer?")
     #expect(preview.exchanges.count == 2)
     #expect(preview.exchanges[0].role == "user")
@@ -33,10 +33,27 @@ func testPreviewPrefersErrorSummaryState() throws {
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Error")
+    #expect(preview.state == .error)
     #expect(preview.detail == "swift build failed in SearchPanelController.swift")
     #expect(preview.exchanges.count == 2)
     #expect(preview.exchanges[1].isError)
+}
+
+@Test
+func testPreviewUsesWaitingStateWhenAssistantNeedsInputWithoutQuestionMark() throws {
+    let tempURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("jsonl")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+
+    let lines = [
+        #"{"type":"assistant","message":{"content":"Please confirm I should keep the current fixture names."}}"#,
+    ]
+    try lines.joined(separator: "\n").write(to: tempURL, atomically: true, encoding: .utf8)
+
+    let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
+    #expect(preview.state == .waiting)
+    #expect(preview.detail == "Please confirm I should keep the current fixture names.")
 }
 
 @Test
@@ -63,9 +80,9 @@ func testPreviewFilesRemainRecentFirstAndCappedAtFive() throws {
     let json = TranscriptTailReader.previewToJSONString(preview)
     let data = try #require(json.data(using: .utf8))
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-    #expect(object["state"] as? String == "Question")
+    #expect(object["state"] as? String == PreviewState.question.rawValue)
     #expect(object["detail"] as? String == "Which layout do you prefer?")
-    #expect(object["headline"] == nil)
+    #expect(object.keys.contains("headline") == false)
 }
 
 @Test
@@ -83,7 +100,7 @@ func testPreviewJSONIncludesStateAndDetailWithoutHeadline() throws {
     let data = try #require(json.data(using: .utf8))
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-    #expect(object["state"] as? String == "Question")
+    #expect(object["state"] as? String == PreviewState.question.rawValue)
     #expect(object["detail"] as? String == "Which layout do you prefer?")
     #expect(object.keys.contains("headline") == false)
 }
@@ -123,7 +140,7 @@ func testPreviewExtractsCodexFilePathsWhenArgumentsAreJSONString() throws {
 }
 
 @Test
-func testHeadlineSuppressesOlderWaitingWhenNewerStateIsAction() throws {
+func testStateSuppressesOlderWaitingWhenNewerStateIsAction() throws {
     let fixtureURL = try #require(
         Bundle.module.url(
             forResource: "claude_context_session_state_newer_action_over_old_waiting",
@@ -134,12 +151,12 @@ func testHeadlineSuppressesOlderWaitingWhenNewerStateIsAction() throws {
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Working")
+    #expect(preview.state == .working)
     #expect(preview.detail == "Running targeted tests before final response.")
 }
 
 @Test
-func testHeadlineSuppressesOlderErrorWhenNewerStateIsWaiting() throws {
+func testStateSuppressesOlderErrorWhenNewerStateIsWaiting() throws {
     let fixtureURL = try #require(
         Bundle.module.url(
             forResource: "claude_context_session_state_newer_waiting_over_old_error",
@@ -150,12 +167,12 @@ func testHeadlineSuppressesOlderErrorWhenNewerStateIsWaiting() throws {
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Question")
+    #expect(preview.state == .question)
     #expect(preview.detail == "Could you confirm I should keep the current fixture names?")
 }
 
 @Test
-func testHeadlineSuppressesOlderActionWhenNewerStateIsError() throws {
+func testStateSuppressesOlderActionWhenNewerStateIsError() throws {
     let fixtureURL = try #require(
         Bundle.module.url(
             forResource: "claude_context_session_state_newer_error_over_old_action",
@@ -166,12 +183,12 @@ func testHeadlineSuppressesOlderActionWhenNewerStateIsError() throws {
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Error")
+    #expect(preview.state == .error)
     #expect(preview.detail == "command timed out during swift build")
 }
 
 @Test
-func testHeadlineSuppressesOlderWaitingWhenNewerStateIsNeutralAssistantMessage() throws {
+func testStateSuppressesOlderWaitingWhenNewerStateIsNeutralAssistantMessage() throws {
     let fixtureURL = try #require(
         Bundle.module.url(
             forResource: "claude_context_session_state_neutral_newer_than_waiting",
@@ -182,12 +199,12 @@ func testHeadlineSuppressesOlderWaitingWhenNewerStateIsNeutralAssistantMessage()
 
     let preview = TranscriptTailReader.read(fileURL: fixtureURL, exchangeCount: 2)
 
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please proceed with the parser update and tests.")
 }
 
 @Test
-func testHeadlineDoesNotTreatGenericCompletionUpdateAsWaiting() throws {
+func testStateDoesNotTreatGenericCompletionUpdateAsWaiting() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -198,12 +215,12 @@ func testHeadlineDoesNotTreatGenericCompletionUpdateAsWaiting() throws {
     try lines.joined(separator: "\n").write(to: tempURL, atomically: true, encoding: .utf8)
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please add permission flow tests.")
 }
 
 @Test
-func testHeadlineDoesNotPromoteUserErrorWordingToErrorState() throws {
+func testStateDoesNotPromoteUserErrorWordingToErrorState() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -216,13 +233,13 @@ func testHeadlineDoesNotPromoteUserErrorWordingToErrorState() throws {
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please improve parser diagnostics around transcript tails.")
     #expect(preview.exchanges.contains(where: { $0.role == "user" && $0.isError }) == false)
 }
 
 @Test
-func testHeadlinePrefersAssistantActionEvenWhenMentioningEarlierFailure() throws {
+func testStatePrefersAssistantActionEvenWhenMentioningEarlierFailure() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -234,7 +251,7 @@ func testHeadlinePrefersAssistantActionEvenWhenMentioningEarlierFailure() throws
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Working")
+    #expect(preview.state == .working)
     #expect(preview.detail == "Running focused tests after earlier error: swift build failed.")
     #expect(preview.exchanges[1].role == "assistant")
     #expect(preview.exchanges[1].isError == false)
@@ -253,7 +270,7 @@ func testStateForCodexResponseItemPrefersWorkingOverOlderError() throws {
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Working")
+    #expect(preview.state == .working)
     #expect(preview.detail == "Running a narrower retry now.")
 }
 
@@ -273,7 +290,7 @@ func testPreviewExtractsCodexFilePathsWhenInputIsJSONString() throws {
 }
 
 @Test
-func testHeadlineDoesNotPromoteResolvedAssistantErrorStatusToActiveError() throws {
+func testStateDoesNotPromoteResolvedAssistantErrorStatusToActiveError() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -285,7 +302,7 @@ func testHeadlineDoesNotPromoteResolvedAssistantErrorStatusToActiveError() throw
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please finish parser cleanup and keep the current behavior.")
     #expect(preview.exchanges.count == 2)
     #expect(preview.exchanges[1].role == "assistant")
@@ -310,7 +327,7 @@ func testReadBackfillsTailWindowWhenInitialChunkHasOnlyNoise() throws {
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
     #expect(preview.exchanges.count == 2)
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please make search result navigation keyboard friendly.")
     if preview.exchanges.count == 2 {
         #expect(preview.exchanges[0].role == "user")
@@ -321,7 +338,7 @@ func testReadBackfillsTailWindowWhenInitialChunkHasOnlyNoise() throws {
 }
 
 @Test
-func testHeadlinePrefersActiveErrorOverActionWhenSameAssistantLineContainsBoth() throws {
+func testStatePrefersActiveErrorOverActionWhenSameAssistantLineContainsBoth() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -333,13 +350,13 @@ func testHeadlinePrefersActiveErrorOverActionWhenSameAssistantLineContainsBoth()
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Error")
+    #expect(preview.state == .error)
     #expect(preview.detail == "Running swift build now. Command timed out.")
     #expect(preview.exchanges.last?.isError == true)
 }
 
 @Test
-func testHeadlinePrefersFreshFailureOverHistoricalErrorMention() throws {
+func testStatePrefersFreshFailureOverHistoricalErrorMention() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -351,13 +368,13 @@ func testHeadlinePrefersFreshFailureOverHistoricalErrorMention() throws {
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Error")
+    #expect(preview.state == .error)
     #expect(preview.detail == "Running retry after earlier error. Command timed out again.")
     #expect(preview.exchanges.last?.isError == true)
 }
 
 @Test
-func testHeadlinePrefersFreshBuildFailureAfterHistoricalErrorMention() throws {
+func testStatePrefersFreshBuildFailureAfterHistoricalErrorMention() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
@@ -369,7 +386,7 @@ func testHeadlinePrefersFreshBuildFailureAfterHistoricalErrorMention() throws {
 
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
-    #expect(preview.state == "Error")
+    #expect(preview.state == .error)
     #expect(preview.detail == "After fixing one compile issue, build failed in SearchPanelController.swift.")
     #expect(preview.exchanges.last?.isError == true)
 }
@@ -407,6 +424,6 @@ func testReadBackfillsForCurrentTaskStateWhenRecentAssistantUpdatesFillExchangeQ
     let preview = TranscriptTailReader.read(fileURL: tempURL, exchangeCount: 2)
 
     #expect(preview.exchanges.count == 2)
-    #expect(preview.state == "Task")
+    #expect(preview.state == .task)
     #expect(preview.detail == "Please keep the parser headline focused on the current task.")
 }

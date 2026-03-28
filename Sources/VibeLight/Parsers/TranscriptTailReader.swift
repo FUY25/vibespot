@@ -7,8 +7,16 @@ struct PreviewExchange: Sendable {
     let isError: Bool
 }
 
+enum PreviewState: String, Sendable {
+    case question = "Question"
+    case waiting = "Waiting"
+    case error = "Error"
+    case working = "Working"
+    case task = "Task"
+}
+
 struct PreviewData: Sendable {
-    let state: String?
+    let state: PreviewState?
     let detail: String?
     let exchanges: [PreviewExchange]
     let files: [String]  // full paths, most recent first
@@ -48,6 +56,11 @@ enum TranscriptTailReader {
         let files: [String]
     }
 
+    private struct WaitingPrompt: Sendable {
+        let detail: String
+        let isQuestion: Bool
+    }
+
     private enum PreviewHeader {
         case question(String)
         case waiting(String)
@@ -55,18 +68,18 @@ enum TranscriptTailReader {
         case working(String)
         case task(String)
 
-        var state: String {
+        var state: PreviewState {
             switch self {
             case .question:
-                return "Question"
+                return .question
             case .waiting:
-                return "Waiting"
+                return .waiting
             case .error:
-                return "Error"
+                return .error
             case .working:
-                return "Working"
+                return .working
             case .task:
-                return "Task"
+                return .task
             }
         }
 
@@ -176,7 +189,7 @@ enum TranscriptTailReader {
         }
 
         let dict: [String: Any] = [
-            "state": preview.state ?? NSNull(),
+            "state": preview.state?.rawValue ?? NSNull(),
             "detail": preview.detail ?? NSNull(),
             "exchanges": exchangeArray,
             "files": preview.files,
@@ -203,10 +216,10 @@ enum TranscriptTailReader {
         for message in messagesNewestFirst {
             if message.role == "assistant",
                let prompt = waitingPromptCandidate(from: message.text) {
-                if prompt.contains("?") {
-                    return .question(prompt)
+                if prompt.isQuestion {
+                    return .question(prompt.detail)
                 }
-                return .waiting(prompt)
+                return .waiting(prompt.detail)
             }
 
             if message.role == "assistant" {
@@ -260,18 +273,25 @@ enum TranscriptTailReader {
         return nil
     }
 
-    private static func waitingPromptCandidate(from text: String) -> String? {
+    private static func waitingPromptCandidate(from text: String) -> WaitingPrompt? {
         let normalized = normalizeWhitespace(in: text)
         guard !normalized.isEmpty else { return nil }
         guard IndexingHelpers.assistantMessageNeedsUserInput(normalized) else {
             return nil
         }
 
+        let isQuestion = normalized.contains("?")
         if let question = firstQuestionSentence(in: normalized) {
-            return conciseSnippet(from: question, maxLength: 160)
+            return WaitingPrompt(
+                detail: conciseSnippet(from: question, maxLength: 160),
+                isQuestion: isQuestion
+            )
         }
 
-        return conciseSnippet(from: normalized, maxLength: 160)
+        return WaitingPrompt(
+            detail: conciseSnippet(from: normalized, maxLength: 160),
+            isQuestion: isQuestion
+        )
     }
 
     private static func firstQuestionSentence(in text: String) -> String? {
