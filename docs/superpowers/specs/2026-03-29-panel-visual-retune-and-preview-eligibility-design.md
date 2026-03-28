@@ -105,68 +105,75 @@ Model stays in the results pane and remains high-value scan data.
 Rules:
 
 - render model and time together on the lower-left
+- token count may appear inline with model and time when available
 - keep monospace styling if it matches the surrounding row language
 - avoid surfacing extra health or badge clutter here
 
 Examples:
 
-- `gpt-5.2-codex · 2m ago`
-- `claude-sonnet-4-6 · 4d ago`
+- `gpt-5.2-codex · 84k · 2m ago`
+- `claude-sonnet-4-6 · 146k · 4d ago`
 - `model unknown · 9m ago`
 
-### Context Rail
+### Row Structure Override
 
-The rail is the primary context signal. Text is supportive only.
+The approved row structure for this update is simpler than the earlier rail-based design.
 
 Rules:
 
-- rail sits on the lower-right
-- numeric text sits to the right of the rail, not before it
-- rail should be slightly thicker than the current implementation
-- rail should be optically centered on the row line
-- rail total length stays long and visually meaningful
-- fill color should be muted, not neon-bright
+- title gets the full top line
+- the second line is split left/right
+- lower-left shows model, token count when available, and relative time
+- lower-right shows the fuller path
+- omit the token count entirely when it is unavailable or not trustworthy enough to show cleanly
 
-The approved visual intent is:
+Approved shape:
 
-- long muted track
-- restrained sage/gray-green fill
-- compact, quiet numeric text on the far right
+```text
+Fix live Codex session resolution after rollout path remap and title refresh
+gpt-5.2-codex · 84k · 2m ago          /Users/fuyuming/Desktop/project/vibelight/.worktrees/v1-implementation
+```
 
-### Context Text Rules
+This overrides the rail display for the current slice. The context rail and rough percentage are deferred to a later update.
 
-The product should avoid fake precision and should not display `?`.
+### Token Count Rules
 
 Approved rendering rules:
 
-- when numeric context is shown, use the same understated style regardless of whether confidence is high or medium
-- numeric text stays secondary to the rail
-- use approximate presentation for displayed numbers
-- place percentage and token count together on the right
+- show only the compact token count, not the rough percentage
+- do not show `?`
+- do not show a rough estimate badge
+- if the number is too uncertain to show cleanly, omit it
 
 Examples:
 
-- `~18% · 84k`
-- `~34% · 146k`
+- `84k`
+- `146k`
 
-Low-confidence rules:
-
-- do not show `?`
-- if confidence is too weak for numeric text, keep the rail and suppress the number
-- an understated `estimate` label is acceptable if needed, but rail-only is preferred when it reads cleaner
-
-This preserves usefulness while staying honest.
+This preserves usefulness while staying honest while freeing more space for the title and path.
 
 ### Alignment Requirement
 
-The right-side path row and right-side context row must share the same column width.
+The lower-left meta block and lower-right path block must use a stable second-line layout.
 
 Implementation consequence:
 
-- do not let each row size its right side independently
-- use a stable column width or equivalent layout constraint so rails line up across rows
+- do not let each row size its bottom-right path independently
+- use a stable bottom-row split so the path aligns cleanly across rows
 
 This is an explicit design requirement, not a polish detail.
+
+### Status Indicators
+
+The result rows should not use separate status-dot ornaments for this design.
+
+Rules:
+
+- remove the animated three-dot working indicator from the row chrome
+- remove the yellow waiting dot from the row chrome
+- rely on the row’s typography, motion treatment, and preview state header instead of standalone dots
+
+This keeps the rows quieter and avoids low-value decorative status clutter.
 
 ## Preview Design
 
@@ -199,7 +206,7 @@ No extra kicker, badge, or header layer above the title.
 
 Approved behavior:
 
-- title line carries the state and subject together
+- title line carries only the state
 - detail line carries the concrete explanation
 - the detail line must not read like a footnote
 - the detail line should be at least as visible as the user or assistant summary rows
@@ -207,15 +214,41 @@ Approved behavior:
 
 Examples:
 
-- `Question: Claude context estimate policy`
+- `Question`
   - `Should ambiguous sessions stay rail-only until a new assistant turn provides trustworthy usage data?`
-- `Error: swift build failed`
+- `Error`
   - `SearchPanelController.swift is missing a valid preview width update after hover-open.`
-- `Working: redesign preview layout`
+- `Working`
   - `Refining transcript hierarchy and file list emphasis in the search panel preview.`
+- `Waiting`
+  - `Need user input before choosing the next implementation slice.`
 
 This keeps the top coherent and removes the layered feeling from the current preview.
 The actual question, error explanation, or work summary should feel like the main content of the preview top, not like subdued metadata.
+
+### State Detection
+
+The preview title state must be correct for both Codex and Claude.
+
+Rules:
+
+- state detection is provider-neutral at the UI layer
+- the same visible states should be used for Codex and Claude:
+  - `Question`
+  - `Waiting`
+  - `Working`
+  - `Error`
+  - fallback neutral state when none of the above is justified
+- do not infer `Working` merely from live-ness
+- do not infer `Waiting` from styling artifacts such as a green or amber row treatment alone
+- prefer transcript and activity evidence over superficial row status text
+
+Desired behavior:
+
+- if the latest meaningful content is a user-facing ask awaiting input, use `Question` or `Waiting`
+- if the session is actively performing work, use `Working`
+- if the latest meaningful content is a failure, use `Error`
+- the same logic must behave correctly for live Codex sessions and live Claude sessions
 
 ### Transcript Area
 
@@ -325,8 +358,7 @@ The UI should prefer omission over bluffing.
 Rules:
 
 - no `?` marker in the product
-- if the number is not trustworthy, suppress the number
-- keep the rail as the lightweight estimate signal when possible
+- if the token number is not trustworthy, suppress the number
 - do not visually overstate low-confidence data
 
 This is the approved product tone for uncertainty.
@@ -342,23 +374,28 @@ Expected affected areas:
 
 Expected implementation themes:
 
-- stable right-column sizing for row path and context
-- muted rail retune
+- full-width title with second-line meta/path split
+- compact token count instead of rail/percentage
+- removal of row status dots
 - preview top simplification from three layers to two
 - compact file list styling
 - panel width expansion fix
 - preview-open eligibility fix for finished rows
+- provider-correct state derivation for Codex and Claude preview headers
 
 ## Testing
 
 Verify the following:
 
-- paths and rails align across mixed rows
-- the rail is thicker and remains vertically centered
-- numeric context appears to the right of the rail
-- low-confidence rows show no `?`
-- low-confidence rows can render rail-only cleanly
+- title gets the full first line
+- lower-left meta and lower-right path align across mixed rows
+- token count appears only when it is trustworthy enough to show cleanly
+- rows show no `?`
+- rows show no rail and no rough percentage
+- result rows show no three-dot working indicator and no yellow waiting dot
 - preview top renders exactly two layers: title and detail
+- preview title is state-only, such as `Question`, `Working`, `Waiting`, or `Error`
+- preview state detection is correct for both Codex and Claude
 - transcript uses separators, not boxed message cards
 - files changed remains compact and visually secondary
 - preview pane is fully visible with no clipping
