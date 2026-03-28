@@ -36,6 +36,26 @@ enum IndexingHelpers {
             return (tokenCount, lastActivityAt, lastFileModification, nil, nil)
         }
 
+        if lastMessage.role == "user" {
+            return (tokenCount, lastActivityAt, lastFileModification, "user", nil)
+        }
+
+        let trimmedContent = lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lastMessage.role == "assistant",
+           !trimmedContent.isEmpty,
+           assistantMessageNeedsUserInput(trimmedContent) {
+            return (
+                tokenCount,
+                lastActivityAt,
+                lastFileModification,
+                "assistant",
+                ActivityPreview(
+                    text: condensedPreviewText(from: trimmedContent),
+                    kind: .assistant
+                )
+            )
+        }
+
         if let toolCall = lastMessage.toolCalls.last {
             return (
                 tokenCount,
@@ -46,11 +66,6 @@ enum IndexingHelpers {
             )
         }
 
-        if lastMessage.role == "user" {
-            return (tokenCount, lastActivityAt, lastFileModification, "user", nil)
-        }
-
-        let trimmedContent = lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else {
             return (tokenCount, lastActivityAt, lastFileModification, lastMessage.role, nil)
         }
@@ -78,13 +93,38 @@ enum IndexingHelpers {
 
     static func previewForToolCall(_ toolCall: String) -> ActivityPreview {
         let normalized = condensedPreviewText(from: toolCall)
-        let lowercased = normalized.lowercased()
-
-        if lowercased.contains("edit") || lowercased.contains("write") || lowercased.contains("apply_patch") {
+        if isFileEditToolCall(normalized) {
             return ActivityPreview(text: "✎ Editing \(normalized)", kind: .fileEdit)
         }
 
         return ActivityPreview(text: "▶ Running \(normalized)", kind: .tool)
+    }
+
+    private static let fileEditToolNames: Set<String> = [
+        "apply_patch",
+        "edit",
+        "multiedit",
+        "replace",
+        "str_replace_editor",
+        "write",
+    ]
+
+    private static func isFileEditToolCall(_ toolCall: String) -> Bool {
+        let lower = toolCall.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return false }
+
+        for name in fileEditToolNames {
+            if lower.hasPrefix("\(name):")
+                || lower.hasPrefix("\(name) ")
+                || lower.hasPrefix("\(name)(")
+                || lower.contains("\"name\":\"\(name)\"")
+                || lower.contains("\"name\": \"\(name)\"")
+            {
+                return true
+            }
+        }
+
+        return false
     }
 
     static func condensedPreviewText(from text: String, limit: Int = 80) -> String {
@@ -98,6 +138,120 @@ enum IndexingHelpers {
         }
 
         return String(normalized.prefix(limit - 1)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    static func assistantMessageNeedsUserInput(_ text: String) -> Bool {
+        let normalized = text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !normalized.isEmpty else { return false }
+
+        let lower = normalized.lowercased()
+        let directSignals = [
+            "waiting for user",
+            "need your input",
+            "need your confirmation",
+            "please confirm",
+            "need your approval",
+            "requires your approval",
+            "please approve",
+            "can you approve",
+            "could you approve",
+            "would you approve",
+            "do you approve",
+            "please allow write",
+            "can you allow write",
+            "could you allow write",
+            "would you allow write",
+            "need permission to",
+            "requires your permission",
+            "grant permission",
+            "please grant access",
+            "can you grant access",
+        ]
+        if directSignals.contains(where: { lower.contains($0) }) {
+            return true
+        }
+
+        let questionSignals = [
+            "which",
+            "what",
+            "do you",
+            "should i",
+            "can you",
+            "could you",
+            "would you",
+            "prefer",
+            "want",
+            "choose",
+            "pick",
+            "confirm",
+            "approve",
+            "allow",
+        ]
+
+        var cursor = normalized.startIndex
+        while let questionMark = normalized[cursor...].firstIndex(of: "?") {
+            let sentenceStart = normalized[..<questionMark]
+                .lastIndex(where: { ".!?\n".contains($0) })
+                .map { normalized.index(after: $0) } ?? normalized.startIndex
+            let question = normalized[sentenceStart...questionMark]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if questionSignals.contains(where: { question.contains($0) }) {
+                return true
+            }
+            if isYesNoApprovalQuestion(question) {
+                return true
+            }
+            cursor = normalized.index(after: questionMark)
+        }
+
+        return false
+    }
+
+    private static let yesNoQuestionPrefixes = [
+        "is ",
+        "are ",
+        "was ",
+        "were ",
+        "did ",
+        "does ",
+        "do ",
+        "can ",
+        "could ",
+        "would ",
+        "will ",
+        "should ",
+        "has ",
+        "have ",
+        "had ",
+    ]
+
+    private static let approvalQuestionCues = [
+        " ok",
+        " okay",
+        " good",
+        " right",
+        " correct",
+        " fix",
+        " fixed",
+        " work",
+        " working",
+        " layout",
+        " looks",
+        " look",
+        " approve",
+    ]
+
+    private static func isYesNoApprovalQuestion(_ question: String) -> Bool {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard yesNoQuestionPrefixes.contains(where: { trimmed.hasPrefix($0) }) else { return false }
+
+        let padded = " \(trimmed)"
+        return approvalQuestionCues.contains(where: { padded.contains($0) })
     }
 
     static func normalizedDisplayTitle(from rawTitle: String) -> String? {

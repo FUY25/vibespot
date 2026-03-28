@@ -99,6 +99,8 @@
     }
 
     currentResults = newResults;
+    clearTimeout(dwellTimer);
+    dwellTimer = null;
     renderResults();
     if (currentResults.length > 0) {
       selectedIndex = Math.min(selectedIndex, currentResults.length - 1);
@@ -111,10 +113,13 @@
     computeAndShowGhost();
     notifyResize();
 
-    // Live-refresh preview if the previewed session's activity changed
+    // Live-refresh preview if the previewed session's activity changed.
+    // If filtering/refresh removes that session, hide the stale preview.
     if (previewedSessionId) {
       var current = currentResults.find(function(r) { return r.sessionId === previewedSessionId; });
-      if (current && current.lastActivityAt !== previewedLastActivity) {
+      if (!current) {
+        hidePreview();
+      } else if (current.lastActivityAt !== previewedLastActivity) {
         requestPreview(current.sessionId, current.lastActivityAt);
       }
     }
@@ -348,6 +353,8 @@
   }
 
   function hidePreview() {
+    clearTimeout(dwellTimer);
+    dwellTimer = null;
     previewCard.classList.remove('preview--visible');
     previewedSessionId = null;
     previewedLastActivity = null;
@@ -569,16 +576,15 @@
 
   function formatModelMeta(result) {
     var parts = [];
-    var model = ((result.effectiveModel || result.tool || '') + '').trim();
+    var model = ((result.effectiveModel || '') + '').trim();
     if (model) {
       parts.push(model);
+    } else {
+      var toolFamily = ((result.tool || '') + '').trim().toLowerCase();
+      parts.push(toolFamily ? (toolFamily + ' \u00B7 model unknown') : 'unknown model');
     }
     if (result.relativeTime) {
       parts.push(result.relativeTime);
-    }
-    if (!parts.length) {
-      var fallbackPath = result.projectName || lastPathComponent(result.project);
-      if (fallbackPath) parts.push(fallbackPath);
     }
     return parts.join(' \u00B7 ');
   }
@@ -629,9 +635,11 @@
   function formatContextLabel(result) {
     var used = asNumber(result.contextUsedEstimate);
     var percent = asNumber(result.contextPercentEstimate);
+    var confidence = ((result.contextConfidence || 'unknown') + '').toLowerCase();
+    var shouldShowNumericPercent = confidence === 'high' || confidence === 'medium';
     var usedLabel = used !== null ? formatCompactCount(used) : '';
-    if (percent !== null) {
-      var prefix = result.contextConfidence === 'high' ? '' : '~';
+    if (percent !== null && shouldShowNumericPercent) {
+      var prefix = confidence === 'high' ? '' : '~';
       return usedLabel ? prefix + percent + '% ' + usedLabel : prefix + percent + '%';
     }
     if (usedLabel) {
@@ -642,11 +650,15 @@
 
   function formatContextRailWidth(result) {
     var percent = asNumber(result.contextPercentEstimate);
+    var confidence = ((result.contextConfidence || 'unknown') + '').toLowerCase();
+    var shouldDerivePercent = confidence === 'high' || confidence === 'medium';
     if (percent === null) {
       var used = asNumber(result.contextUsedEstimate);
       var windowTokens = asNumber(result.contextWindowTokens);
-      if (used !== null && windowTokens !== null && windowTokens > 0) {
+      if (shouldDerivePercent && used !== null && windowTokens !== null && windowTokens > 0) {
         percent = Math.round((used / windowTokens) * 100);
+      } else if (shouldDerivePercent && used !== null) {
+        percent = 24;
       } else if (used !== null) {
         percent = 24;
       } else {

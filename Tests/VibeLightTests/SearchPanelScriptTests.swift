@@ -23,30 +23,204 @@ struct SearchPanelScriptTests {
         #expect(!(try invokeBool("window.looksLikeNewSessionIntent('c')", in: context)))
     }
 
-    @Test("Tab key delegates to handleTab instead of accepting ghost suggestions")
-    func tabKeyDelegatesToHandleTab() throws {
-        let script = try loadPanelScript()
+    @Test("Tab keydown toggles mode through the real bridge path without mutating search")
+    func tabKeydownTogglesModeThroughRealBridgePath() throws {
+        let context = try makePanelScriptContext()
+        _ = context.evaluateScript(
+            """
+            __els.searchInput.value = 'ship';
+            __els.searchInput.selectionStart = __els.searchInput.value.length;
+            __els.ghostSuggestion.innerHTML = '';
+            var spacer = document.createElement('span');
+            spacer.className = 'ghost-suggestion__spacer';
+            spacer.textContent = 'ship';
+            var completion = document.createElement('span');
+            completion.className = 'ghost-suggestion__completion';
+            completion.textContent = '-telemetry';
+            __els.ghostSuggestion.appendChild(spacer);
+            __els.ghostSuggestion.appendChild(completion);
+            """
+        )
+        _ = context.evaluateScript("__dispatchDocumentKeydown('Tab');")
 
-        let tabCaseRange = try #require(script.range(of: "case 'Tab':"))
-        let arrowRightRange = try #require(script.range(of: "case 'ArrowRight':"))
-        let tabCaseBody = String(script[tabCaseRange.lowerBound..<arrowRightRange.lowerBound])
-
-        #expect(tabCaseBody.contains("handleTab();"))
-        #expect(!tabCaseBody.contains("acceptGhostSuggestion()"))
-        #expect(!tabCaseBody.contains("drillIntoSelectedHistory()"))
+        #expect(try invokeBool("window.__lastKeydownPrevented === true", in: context))
+        #expect(try invokeString("__els.searchInput.value", in: context) == "ship")
+        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 1)
+        #expect(try invokeString("window.__bridgeMessages[0].type", in: context) == "toggleMode")
     }
 
-    @Test("handleTab only toggles mode for active search queries")
-    func handleTabOnlyTogglesModeForActiveQueries() throws {
-        let script = try loadPanelScript()
-        let handleTabRange = try #require(script.range(of: "window.handleTab = function() {"))
-        let initRange = try #require(script.range(of: "// --- Init ---"))
-        let handleTabBody = String(script[handleTabRange.lowerBound..<initRange.lowerBound])
+    @Test("Tab keydown with empty query does not toggle mode")
+    func tabKeydownWithEmptyQueryDoesNotToggleMode() throws {
+        let context = try makePanelScriptContext()
+        _ = context.evaluateScript(
+            """
+            __els.searchInput.value = '';
+            __els.searchInput.selectionStart = 0;
+            """
+        )
+        _ = context.evaluateScript("__dispatchDocumentKeydown('Tab');")
 
-        #expect(handleTabBody.contains("if (searchInput.value.trim() && bridge)"))
-        #expect(handleTabBody.contains("bridge.postMessage({ type: 'toggleMode' });"))
-        #expect(!handleTabBody.contains("acceptGhostSuggestion"))
-        #expect(!handleTabBody.contains("drillIntoSelectedHistory"))
+        #expect(try invokeBool("window.__lastKeydownPrevented === true", in: context))
+        #expect(try invokeString("__els.searchInput.value", in: context) == "")
+        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 0)
+    }
+
+    @Test("stale preview hides when its session disappears after refresh")
+    func stalePreviewHidesWhenSessionDisappearsAfterRefresh() throws {
+        let context = try makePanelScriptContext()
+        let initialPayload = #"""
+        [{
+          "sessionId": "sess-1",
+          "tool": "claude",
+          "title": "First",
+          "project": "/tmp/first",
+          "projectName": "first",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }, {
+          "sessionId": "sess-2",
+          "tool": "codex",
+          "title": "Second",
+          "project": "/tmp/second",
+          "projectName": "second",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 2300,
+          "lastActivityAt": "2026-03-28T09:41:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "3m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let filteredPayload = #"""
+        [{
+          "sessionId": "sess-1",
+          "tool": "claude",
+          "title": "First",
+          "project": "/tmp/first",
+          "projectName": "first",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let previewPayload = #"""
+        {
+          "exchanges": [{ "role": "assistant", "text": "Preview text" }],
+          "files": []
+        }
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(initialPayload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[1], 'mouseenter');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+        _ = context.evaluateScript("window.updatePreview(\(previewPayload));")
+
+        #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
+        #expect(try invokeString("window.__bridgeMessages[window.__bridgeMessages.length - 1].type", in: context) == "previewVisible")
+        #expect(try invokeBool("window.__bridgeMessages[window.__bridgeMessages.length - 1].visible === true", in: context))
+
+        _ = context.evaluateScript("window.updateResults(\(filteredPayload));")
+
+        #expect(!(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context)))
+        #expect(try invokeString("window.__bridgeMessages[window.__bridgeMessages.length - 1].type", in: context) == "previewVisible")
+        #expect(try invokeBool("window.__bridgeMessages[window.__bridgeMessages.length - 1].visible === false", in: context))
+    }
+
+    @Test("search input debounce cancels stale queries")
+    func searchInputDebounceCancelsStaleQueries() throws {
+        let context = try makePanelScriptContext()
+        _ = context.evaluateScript(
+            """
+            __els.searchInput.value = 'c';
+            __dispatch(__els.searchInput, 'input');
+            __els.searchInput.value = 'co';
+            __dispatch(__els.searchInput, 'input');
+            __runAllTimeouts();
+            """
+        )
+
+        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 1)
+        #expect(try invokeString("window.__bridgeMessages[0].type", in: context) == "search")
+        #expect(try invokeString("window.__bridgeMessages[0].query", in: context) == "co")
+    }
+
+    @Test("filtering away a hovered row cancels its pending preview dwell")
+    func filteringAwayHoveredRowCancelsPendingPreviewDwell() throws {
+        let context = try makePanelScriptContext()
+        let initialPayload = #"""
+        [{
+          "sessionId": "sess-1",
+          "tool": "claude",
+          "title": "First",
+          "project": "/tmp/first",
+          "projectName": "first",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }, {
+          "sessionId": "sess-2",
+          "tool": "codex",
+          "title": "Second",
+          "project": "/tmp/second",
+          "projectName": "second",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 2300,
+          "lastActivityAt": "2026-03-28T09:41:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "3m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let filteredPayload = #"""
+        [{
+          "sessionId": "sess-1",
+          "tool": "claude",
+          "title": "First",
+          "project": "/tmp/first",
+          "projectName": "first",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(initialPayload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[1], 'mouseenter');")
+        _ = context.evaluateScript("window.updateResults(\(filteredPayload));")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        #expect(try invokeBool("window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-2'; })", in: context) == false)
     }
 
     @Test("result rows show full path with model context metadata")
@@ -152,6 +326,7 @@ struct SearchPanelScriptTests {
           "healthStatus": "ok",
           "healthDetail": "",
           "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
           "contextUsedEstimate": 61000,
           "contextConfidence": "unknown"
         }]
@@ -159,6 +334,65 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updateResults(\(payload));")
         #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__context-label')", in: context) == "? 61k")
+        #expect(try invokeString("__queryFirstStyle(__els.results.children[0], 'row__context-rail-fill', 'width')", in: context) == "24%")
+    }
+
+    @Test("low-confidence context samples hide numeric percent")
+    func lowConfidenceContextSamplesHideNumericPercent() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-low-confidence",
+          "tool": "claude",
+          "title": "Low confidence context",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 61000,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
+          "contextUsedEstimate": 61000,
+          "contextPercentEstimate": 31,
+          "contextConfidence": "low"
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__context-label')", in: context) == "? 61k")
+        #expect(try invokeString("__queryFirstStyle(__els.results.children[0], 'row__context-rail-fill', 'width')", in: context) == "31%")
+    }
+
+    @Test("rows without effective model show unknown model state")
+    func rowsWithoutEffectiveModelShowUnknownModelState() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-no-model",
+          "tool": "codex",
+          "title": "No model metadata",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "codex · model unknown · 2m ago")
     }
 }
 
@@ -187,8 +421,9 @@ private func makePanelScriptContext() throws -> JSContext {
     }
 
     let bootstrap = #"""
-    var window = {};
-    window.webkit = { messageHandlers: { bridge: { postMessage: function() {} } } };
+    var window = this;
+    window.__bridgeMessages = [];
+    window.webkit = { messageHandlers: { bridge: { postMessage: function(message) { window.__bridgeMessages.push(message); } } } };
     function __normalizeClassName(el) {
       var names = [];
       for (var key in el.__classes) {
@@ -325,11 +560,15 @@ private func makePanelScriptContext() throws -> JSContext {
       return el;
     }
     var document = {
+      __listeners: {},
       getElementById: function(id) {
         if (!__els[id]) __els[id] = __registerBaseClass(__makeEl('div'));
         return __els[id];
       },
-      addEventListener: function(){},
+      addEventListener: function(type, handler){
+        if (!this.__listeners[type]) this.__listeners[type] = [];
+        this.__listeners[type].push(handler);
+      },
       createElement: function(tagName){ return __registerBaseClass(__makeEl(tagName)); },
       body: { appendChild: function(){} }
     };
@@ -339,13 +578,48 @@ private func makePanelScriptContext() throws -> JSContext {
     __els.searchInput = document.getElementById('searchInput');
     __els.actionHint = document.getElementById('actionHint');
     function getComputedStyle() { return { fontFamily: 'monospace' }; }
-    function setTimeout() { return 1; }
-    function clearTimeout() {}
+    window.__timeoutCallbacks = {};
+    window.__nextTimeoutId = 1;
+    function setTimeout(cb) {
+      var id = window.__nextTimeoutId++;
+      window.__timeoutCallbacks[id] = cb;
+      return id;
+    }
+    function clearTimeout(id) {
+      delete window.__timeoutCallbacks[id];
+    }
     function requestAnimationFrame(cb) { cb(); }
+    window.__lastKeydownPrevented = false;
     function __dispatch(el, type) {
       var handlers = (el && el.__listeners && el.__listeners[type]) || [];
       for (var i = 0; i < handlers.length; i++) {
         handlers[i].call(el, { type: type, currentTarget: el, preventDefault: function(){} });
+      }
+    }
+    function __dispatchDocumentKeydown(key) {
+      window.__lastKeydownPrevented = false;
+      var handlers = (document.__listeners && document.__listeners['keydown']) || [];
+      for (var i = 0; i < handlers.length; i++) {
+        handlers[i].call(document, {
+          key: key,
+          type: 'keydown',
+          currentTarget: document,
+          preventDefault: function() {
+            window.__lastKeydownPrevented = true;
+          }
+        });
+      }
+    }
+    function __runAllTimeouts() {
+      var ids = Object.keys(window.__timeoutCallbacks)
+        .map(function(key) { return parseInt(key, 10); })
+        .sort(function(a, b) { return a - b; });
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        if (!window.__timeoutCallbacks[id]) continue;
+        var callback = window.__timeoutCallbacks[id];
+        delete window.__timeoutCallbacks[id];
+        callback();
       }
     }
     function __hasClass(el, className) {
@@ -374,4 +648,9 @@ private func invokeBool(_ script: String, in context: JSContext) throws -> Bool 
 private func invokeString(_ script: String, in context: JSContext) throws -> String {
     let value = try #require(context.evaluateScript(script))
     return try #require(value.toString())
+}
+
+private func invokeInt(_ script: String, in context: JSContext) throws -> Int {
+    let value = try #require(context.evaluateScript(script))
+    return Int(value.toInt32())
 }

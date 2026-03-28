@@ -35,17 +35,21 @@ enum SessionActivityStatus: String, Sendable {
         }
 
         // File not modified recently — check what the last entry was.
-        // Most tool activity still means work is in flight, but stale file-edit
-        // permission prompts are waiting on user input rather than active work.
+        // Tool activity (including edit/write calls) remains working unless
+        // we have an explicit assistant prompt captured separately.
         if lastJSONLEntryType == "user"
             || lastJSONLEntryType == "tool_result" {
             return .working
         }
 
+        // Defensive fallback: if upstream normalization regresses and a prompt-bearing
+        // assistant turn arrives tagged as tool_use, prefer waiting over a false working state.
+        if lastJSONLEntryType == "tool_use",
+           activityPreview?.kind == .assistant {
+            return .waiting
+        }
+
         if lastJSONLEntryType == "tool_use" {
-            if activityPreview?.kind == .fileEdit {
-                return .waiting
-            }
             return .working
         }
 
