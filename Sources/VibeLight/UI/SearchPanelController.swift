@@ -464,25 +464,25 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             )
         }
 
-        if let activityDetail = cleanedPreviewDetail(result.activityPreview?.text) {
-            if result.activityStatus == .working {
-                return PreviewData(
-                    state: .working,
-                    detail: activityDetail,
-                    exchanges: transcriptPreview.exchanges,
-                    files: transcriptPreview.files
-                )
-            }
+        if result.activityStatus == .working {
+            let detail = cleanedPreviewDetail(result.activityPreview?.text) ?? transcriptPreview.detail
+            return PreviewData(
+                state: .working,
+                detail: detail,
+                exchanges: transcriptPreview.exchanges,
+                files: transcriptPreview.files
+            )
+        }
 
-            if result.activityStatus == .waiting {
-                let state: PreviewState = activityDetail.contains("?") ? .question : .waiting
-                return PreviewData(
-                    state: state,
-                    detail: activityDetail,
-                    exchanges: transcriptPreview.exchanges,
-                    files: transcriptPreview.files
-                )
-            }
+        if result.activityStatus == .waiting {
+            let detail = cleanedPreviewDetail(result.activityPreview?.text) ?? transcriptPreview.detail
+            let state: PreviewState = detail?.contains("?") == true ? .question : .waiting
+            return PreviewData(
+                state: state,
+                detail: detail,
+                exchanges: transcriptPreview.exchanges,
+                files: transcriptPreview.files
+            )
         }
 
         return transcriptPreview

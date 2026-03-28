@@ -365,6 +365,98 @@ struct SearchPanelScriptTests {
         ))
     }
 
+    @Test("click on row triggers dwell preview request")
+    func clickOnRowTriggersDwellPreviewRequest() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-click",
+          "tool": "codex",
+          "title": "Clickable Session",
+          "project": "/tmp/clickable",
+          "projectName": "clickable",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'click');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-click'; })",
+            in: context
+        ))
+    }
+
+    @Test("schedule dwell is a no-op when selected row preview is already current and visible")
+    func scheduleDwellNoOpWhenPreviewAlreadyCurrentAndVisible() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-stable",
+          "tool": "claude",
+          "title": "Stable Session",
+          "project": "/tmp/stable",
+          "projectName": "stable",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let previewPayload = #"""
+        {
+          "state": "Task",
+          "detail": "Stable preview detail",
+          "exchanges": [{ "role": "assistant", "text": "Preview text" }],
+          "files": []
+        }
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'mouseenter');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+        _ = context.evaluateScript("window.updatePreview(\(previewPayload));")
+
+        let previewRequestCountBefore = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-stable'; }).length",
+            in: context
+        )
+        let previewHideCountBefore = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'previewVisible' && msg.visible === false; }).length",
+            in: context
+        )
+
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'click');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        let previewRequestCountAfter = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-stable'; }).length",
+            in: context
+        )
+        let previewHideCountAfter = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'previewVisible' && msg.visible === false; }).length",
+            in: context
+        )
+
+        #expect(previewRequestCountAfter == previewRequestCountBefore)
+        #expect(previewHideCountAfter == previewHideCountBefore)
+    }
+
     @Test("context label falls back to unknown percent when percent estimate is missing")
     func contextLabelFallsBackToUnknownPercent() throws {
         let context = try makePanelScriptContext()

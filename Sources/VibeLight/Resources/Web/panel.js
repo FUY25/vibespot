@@ -335,10 +335,19 @@
 
   function scheduleDwell() {
     clearTimeout(dwellTimer);
-    hidePreview();
+    dwellTimer = null;
     if (currentResults.length === 0) return;
     var result = currentResults[selectedIndex];
     if (!result || result.status === 'action') return;
+
+    var isPreviewCurrent = isPreviewShowing &&
+      previewedSessionId === result.sessionId &&
+      previewedLastActivity === result.lastActivityAt;
+    if (isPreviewCurrent) {
+      return;
+    }
+
+    hidePreview();
     dwellTimer = setTimeout(function() {
       requestPreview(result.sessionId, result.lastActivityAt);
     }, 300);
