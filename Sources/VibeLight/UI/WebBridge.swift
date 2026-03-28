@@ -8,6 +8,7 @@ protocol WebBridgeDelegate: AnyObject {
     func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String)
     func webBridgeDidRequestEscape(_ bridge: WebBridge)
     func webBridge(_ bridge: WebBridge, didRequestResize height: CGFloat)
+    func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String)
 }
 
 @MainActor
@@ -17,6 +18,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         case select(sessionId: String, status: String, tool: String)
         case escape
         case resize(height: CGFloat)
+        case preview(sessionId: String)
 
         static func parse(_ body: [String: Any]) -> Message? {
             guard let type = body["type"] as? String else { return nil }
@@ -36,6 +38,9 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
                 let height = heightNumber.doubleValue
                 guard height >= 0 else { return nil }
                 return .resize(height: CGFloat(height))
+            case "preview":
+                guard let sessionId = body["sessionId"] as? String, !sessionId.isEmpty else { return nil }
+                return .preview(sessionId: sessionId)
             default:
                 return nil
             }
@@ -61,6 +66,8 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
                 delegate?.webBridgeDidRequestEscape(self)
             case .resize(let height):
                 delegate?.webBridge(self, didRequestResize: height)
+            case .preview(let sessionId):
+                delegate?.webBridge(self, didRequestPreview: sessionId)
             }
         }
     }

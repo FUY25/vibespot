@@ -112,7 +112,38 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         panel.setFrame(frame, display: true, animate: panel.isVisible)
     }
 
+    func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String) {
+        guard let fileURL = findSessionFile(sessionId: sessionId) else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            let preview = TranscriptTailReader.read(fileURL: fileURL)
+            let json = TranscriptTailReader.previewToJSONString(preview)
+            await MainActor.run { [weak self] in
+                guard let self, self.isWebViewReady else { return }
+                let escaped = self.escapeForSingleQuotedJavaScriptString(json)
+                self.webView.evaluateJavaScript("updatePreview('\(escaped)')", completionHandler: nil)
+            }
+        }
+    }
+
     // MARK: - Private
+
+    private func findSessionFile(sessionId: String) -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let fm = FileManager.default
+
+        let claudeProjectsPath = home + "/.claude/projects"
+        if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
+            for projectDir in projectDirs {
+                let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
+                if fm.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
+            }
+        }
+
+        let codexPath = home + "/.codex/sessions/\(sessionId).jsonl"
+        if fm.fileExists(atPath: codexPath) { return URL(fileURLWithPath: codexPath) }
+
+        return nil
+    }
 
     private func refreshResults(query: String) {
         guard let sessionIndex else {
