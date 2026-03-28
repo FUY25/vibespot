@@ -201,6 +201,9 @@ Approved behavior:
 
 - title line carries the state and subject together
 - detail line carries the concrete explanation
+- the detail line must not read like a footnote
+- the detail line should be at least as visible as the user or assistant summary rows
+- the title line may be quieter than the detail line if that produces better hierarchy
 
 Examples:
 
@@ -212,6 +215,7 @@ Examples:
   - `Refining transcript hierarchy and file list emphasis in the search panel preview.`
 
 This keeps the top coherent and removes the layered feeling from the current preview.
+The actual question, error explanation, or work summary should feel like the main content of the preview top, not like subdued metadata.
 
 ### Transcript Area
 
