@@ -1179,10 +1179,15 @@ func testSmartTruncateLongText() {
 
 @Test
 func testSmartTruncatePreservesQuestion() {
-    let raw = String(repeating: "a", count: 80) + "?"
-    let expected = String(repeating: "a", count: 59) + "…?"
-    #expect(SessionIndex.smartTruncate(raw) == expected)
-    #expect(SessionIndex.smartTruncate(raw).count == 61)
+    // Use a multi-word question with a long final word so truncation must not cut mid-word.
+    // Prior behavior would include a partial "supercalifragilisticexpialidocious" fragment.
+    let raw = "How do we truncate this title without cutting supercalifragilisticexpialidocious?"
+    let expected = "How do we truncate this title without cutting…?"
+    let truncated = SessionIndex.smartTruncate(raw)
+    #expect(truncated == expected)
+    #expect(truncated.hasSuffix("…?"))
+    #expect(!truncated.contains("super"))
+    #expect(truncated.count <= 61)
 }
 
 @Test

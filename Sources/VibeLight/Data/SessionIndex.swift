@@ -724,10 +724,20 @@ final class SessionIndex: @unchecked Sendable {
     static func smartTruncate(_ text: String, maxLength: Int = 60) -> String {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard stripped.count > maxLength else { return stripped }
-        let truncated = String(stripped.prefix(maxLength))
         if stripped.last == "?" {
-            return String(stripped.prefix(maxLength - 1)) + "…?"
+            // Preserve a trailing question mark, while still preferring a word boundary.
+            // We reserve 1 character of the budget to add "…?" (2 chars) while keeping
+            // the default output length <= maxLength + 1 (60 -> 61).
+            let questionPrefix = String(stripped.prefix(maxLength - 1))
+            if let lastSpace = questionPrefix.lastIndex(of: " ") {
+                let cut = questionPrefix[..<lastSpace]
+                if !cut.isEmpty {
+                    return String(cut) + "…?"
+                }
+            }
+            return questionPrefix + "…?"
         }
+        let truncated = String(stripped.prefix(maxLength))
         if let lastSpace = truncated.lastIndex(of: " ") {
             return String(truncated[..<lastSpace]) + "…"
         }
