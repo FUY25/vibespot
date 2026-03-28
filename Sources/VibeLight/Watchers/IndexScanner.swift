@@ -239,7 +239,7 @@ struct IndexScanner {
         let parseStartMtime = IndexingHelpers.fileMtime(at: path)
 
         let url = URL(fileURLWithPath: path)
-        guard let (meta, messages) = try? CodexParser.parseSessionFile(url: url) else {
+        guard let (meta, messages, telemetry) = try? CodexParser.parseSessionFile(url: url) else {
             return
         }
         if meta?.isSubagent == true {
@@ -281,7 +281,8 @@ struct IndexScanner {
             lastFileModification: metrics.lastFileModification,
             lastEntryType: metrics.lastEntryType,
             activityPreview: metrics.activityPreview,
-            lastIndexedMtime: mtime
+            lastIndexedMtime: mtime,
+            telemetry: telemetry
         )
 
         let transcriptEntries = messages.map { message in

@@ -15,7 +15,7 @@ func testCodexSubagentSessionsAreSkipped() throws {
     """
     try jsonl.write(to: tempURL, atomically: true, encoding: .utf8)
 
-    let (meta, _) = try CodexParser.parseSessionFile(url: tempURL)
+    let (meta, _, _) = try CodexParser.parseSessionFile(url: tempURL)
     let parsedMeta = try #require(meta)
 
     #expect(parsedMeta.isSubagent == true)

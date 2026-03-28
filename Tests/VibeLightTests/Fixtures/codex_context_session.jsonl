@@ -1,0 +1,4 @@
+{"timestamp":"2026-01-14T10:06:14.970Z","type":"session_meta","payload":{"id":"codex-ctx-001","cwd":"/Users/me/project","originator":"codex_cli","cli_version":"0.78.0"}}
+{"timestamp":"2026-01-14T10:06:15.000Z","type":"turn_context","payload":{"cwd":"/Users/me/project","model":"gpt-5.2-codex","effort":"high","summary":"auto"}}
+{"timestamp":"2026-01-14T10:06:16.713Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":443420,"cached_input_tokens":399104,"output_tokens":931,"reasoning_output_tokens":64,"total_tokens":444351},"last_token_usage":{"input_tokens":42977,"cached_input_tokens":41856,"output_tokens":50,"reasoning_output_tokens":0,"total_tokens":43027},"model_context_window":258400}}}
+{"timestamp":"2026-01-14T10:06:18.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Running quick checks before final answer."}]}}

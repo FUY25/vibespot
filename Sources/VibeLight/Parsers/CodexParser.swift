@@ -30,14 +30,20 @@ enum CodexParser {
         }
     }
 
-    static func parseSessionFile(url: URL) throws -> (meta: CodexSessionMeta?, messages: [ParsedMessage]) {
+    static func parseSessionFile(url: URL) throws -> (
+        meta: CodexSessionMeta?,
+        messages: [ParsedMessage],
+        telemetry: SessionContextTelemetry?
+    ) {
         let text = try String(contentsOf: url, encoding: .utf8)
         guard !text.isEmpty else {
-            return (nil, [])
+            return (nil, [], nil)
         }
 
         var meta: CodexSessionMeta?
         var messages: [ParsedMessage] = []
+        var latestModel: String?
+        var latestTelemetry: SessionContextTelemetry?
 
         for line in text.split(whereSeparator: \.isNewline) {
             guard
@@ -64,6 +70,29 @@ enum CodexParser {
                     source: nonEmptyString(payload["source"]) ?? nonEmptyString(payload["originator"]) ?? "cli",
                     isSubagent: isSubagent
                 )
+
+            case "turn_context":
+                guard let payload = record["payload"] as? [String: Any] else {
+                    continue
+                }
+
+                if let model = nonEmptyString(payload["model"]) {
+                    latestModel = model
+                }
+
+            case "event_msg":
+                guard
+                    let payload = record["payload"] as? [String: Any],
+                    let payloadType = payload["type"] as? String,
+                    payloadType == "token_count"
+                else {
+                    continue
+                }
+
+                let info = payload["info"] as? [String: Any] ?? [:]
+                if let telemetry = telemetrySnapshot(from: info, effectiveModel: latestModel, timestamp: timestamp) {
+                    latestTelemetry = telemetry
+                }
 
             case "response_item":
                 guard
@@ -140,7 +169,7 @@ enum CodexParser {
             }
         }
 
-        return (meta, messages)
+        return (meta, messages, latestTelemetry)
     }
 
     private static func jsonObject(from line: String) -> [String: Any]? {
@@ -254,5 +283,74 @@ enum CodexParser {
 
     private static func nonEmptyString(_ value: Any?) -> String? {
         (value as? String)?.nonEmpty
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let intValue = value as? Int {
+            return intValue
+        }
+
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+
+        if let text = value as? String {
+            return Int(text)
+        }
+
+        return nil
+    }
+
+    private static func normalizedPositiveInt(_ value: Any?) -> Int? {
+        guard let intValue = intValue(value), intValue > 0 else {
+            return nil
+        }
+
+        return intValue
+    }
+
+    private static func telemetrySnapshot(
+        from info: [String: Any],
+        effectiveModel: String?,
+        timestamp: Date
+    ) -> SessionContextTelemetry? {
+        let lastTokenUsage = info["last_token_usage"] as? [String: Any] ?? [:]
+        let inputTokens = nonNegativeIntValue(lastTokenUsage["input_tokens"])
+        let cachedInputTokens = nonNegativeIntValue(lastTokenUsage["cached_input_tokens"])
+
+        guard inputTokens != nil || cachedInputTokens != nil else {
+            return nil
+        }
+
+        let usedTokens = (inputTokens ?? 0) + (cachedInputTokens ?? 0)
+        let contextWindow = normalizedPositiveInt(info["model_context_window"])
+        let contextPercent = contextPercentEstimate(usedTokens: usedTokens, contextWindow: contextWindow)
+
+        return SessionContextTelemetry(
+            effectiveModel: effectiveModel,
+            contextWindowTokens: contextWindow,
+            contextUsedEstimate: usedTokens,
+            contextPercentEstimate: contextPercent,
+            contextConfidence: (contextWindow != nil && usedTokens > 0) ? .high : .unknown,
+            contextSource: "codex:last_token_usage",
+            lastContextSampleAt: timestamp
+        )
+    }
+
+    private static func nonNegativeIntValue(_ value: Any?) -> Int? {
+        guard let intValue = intValue(value) else {
+            return nil
+        }
+
+        return max(0, intValue)
+    }
+
+    private static func contextPercentEstimate(usedTokens: Int, contextWindow: Int?) -> Int? {
+        guard let contextWindow, contextWindow > 0 else {
+            return nil
+        }
+
+        let percent = (Double(usedTokens) / Double(contextWindow)) * 100.0
+        return max(0, min(100, Int(percent)))
     }
 }

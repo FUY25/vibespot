@@ -30,7 +30,7 @@ func testParseCodexSessionFile() throws {
         Bundle.module.url(forResource: "codex_session", withExtension: "jsonl", subdirectory: "Fixtures")
     )
 
-    let (meta, messages) = try CodexParser.parseSessionFile(url: fixtureURL)
+    let (meta, messages, telemetry) = try CodexParser.parseSessionFile(url: fixtureURL)
     let parsedMeta = try #require(meta)
 
     #expect(parsedMeta.id == "codex-001")
@@ -74,4 +74,80 @@ func testParseCodexSessionFile() throws {
     #expect(messages.last?.content == "Running quick checks before final answer.")
     #expect(messages.allSatisfy { $0.sessionId == "codex-001" })
     #expect(messages.allSatisfy { $0.cwd == "/Users/me/project" })
+    #expect(telemetry == nil)
+}
+
+@Test
+func testParseCodexSessionFileExtractsLatestUsableContextTelemetry() throws {
+    let fixtureURL = try #require(
+        Bundle.module.url(forResource: "codex_context_session", withExtension: "jsonl", subdirectory: "Fixtures")
+    )
+
+    let (meta, messages, telemetry) = try CodexParser.parseSessionFile(url: fixtureURL)
+    let parsedMeta = try #require(meta)
+    let parsedTelemetry = try #require(telemetry)
+
+    #expect(parsedMeta.id == "codex-ctx-001")
+    #expect(parsedTelemetry.effectiveModel == "gpt-5.2-codex")
+    #expect(parsedTelemetry.contextWindowTokens == 258400)
+    #expect(parsedTelemetry.contextUsedEstimate == 84833)
+    #expect(parsedTelemetry.contextPercentEstimate == 32)
+    #expect(parsedTelemetry.contextConfidence == .high)
+    #expect(parsedTelemetry.contextSource == "codex:last_token_usage")
+    #expect(messages.count > 0)
+}
+
+@Test
+func testParseCodexSessionFileDoesNotRetrofitLaterModelOntoExistingTelemetrySnapshot() throws {
+    let fixtureURL = try writeTemporaryCodexSession(lines: [
+        #"{"timestamp":"2026-01-14T10:06:14.970Z","type":"session_meta","payload":{"id":"codex-ctx-002","cwd":"/Users/me/project","originator":"codex_cli","cli_version":"0.78.0"}}"#,
+        #"{"timestamp":"2026-01-14T10:06:15.000Z","type":"turn_context","payload":{"cwd":"/Users/me/project","model":"gpt-5.2-codex"}}"#,
+        #"{"timestamp":"2026-01-14T10:06:16.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":400,"cached_input_tokens":100},"model_context_window":1000}}}"#,
+        #"{"timestamp":"2026-01-14T10:06:17.000Z","type":"turn_context","payload":{"cwd":"/Users/me/project","model":"gpt-5.3-codex"}}"#,
+    ])
+
+    let (_, _, telemetry) = try CodexParser.parseSessionFile(url: fixtureURL)
+    let parsedTelemetry = try #require(telemetry)
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+    #expect(parsedTelemetry.effectiveModel == "gpt-5.2-codex")
+    #expect(parsedTelemetry.contextWindowTokens == 1000)
+    #expect(parsedTelemetry.contextUsedEstimate == 500)
+    #expect(parsedTelemetry.contextPercentEstimate == 50)
+    #expect(parsedTelemetry.contextConfidence == .high)
+    #expect(parsedTelemetry.contextSource == "codex:last_token_usage")
+    #expect(parsedTelemetry.lastContextSampleAt == formatter.date(from: "2026-01-14T10:06:16.000Z"))
+}
+
+@Test
+func testParseCodexSessionFileKeepsLatestUsableTelemetryWhenLaterTokenCountIsIncomplete() throws {
+    let fixtureURL = try writeTemporaryCodexSession(lines: [
+        #"{"timestamp":"2026-01-14T10:06:14.970Z","type":"session_meta","payload":{"id":"codex-ctx-003","cwd":"/Users/me/project","originator":"codex_cli","cli_version":"0.78.0"}}"#,
+        #"{"timestamp":"2026-01-14T10:06:15.000Z","type":"turn_context","payload":{"cwd":"/Users/me/project","model":"gpt-5.2-codex"}}"#,
+        #"{"timestamp":"2026-01-14T10:06:16.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"cached_input_tokens":50},"model_context_window":1000}}}"#,
+        #"{"timestamp":"2026-01-14T10:06:17.000Z","type":"event_msg","payload":{"type":"token_count","info":{"model_context_window":2000}}}"#,
+    ])
+
+    let (_, _, telemetry) = try CodexParser.parseSessionFile(url: fixtureURL)
+    let parsedTelemetry = try #require(telemetry)
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+    #expect(parsedTelemetry.effectiveModel == "gpt-5.2-codex")
+    #expect(parsedTelemetry.contextWindowTokens == 1000)
+    #expect(parsedTelemetry.contextUsedEstimate == 550)
+    #expect(parsedTelemetry.contextPercentEstimate == 55)
+    #expect(parsedTelemetry.contextConfidence == .high)
+    #expect(parsedTelemetry.contextSource == "codex:last_token_usage")
+    #expect(parsedTelemetry.lastContextSampleAt == formatter.date(from: "2026-01-14T10:06:16.000Z"))
+}
+
+private func writeTemporaryCodexSession(lines: [String]) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    let fixtureURL = directory.appendingPathComponent("codex-session.jsonl")
+    try lines.joined(separator: "\n").write(to: fixtureURL, atomically: true, encoding: .utf8)
+    return fixtureURL
 }
