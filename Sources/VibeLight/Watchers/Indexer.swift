@@ -624,8 +624,6 @@ final class Indexer {
 
     // MARK: - Helpers
 
-    // MARK: - Helpers
-
     private func updateLiveSessionTitle(result: SearchResult) {
         let currentTitle = result.title
         let projectName = result.projectName
