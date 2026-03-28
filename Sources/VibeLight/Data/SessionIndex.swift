@@ -686,20 +686,37 @@ final class SessionIndex: @unchecked Sendable {
             .joined(separator: " ")
     }
 
-    private func shouldUseLiteralTranscriptFallback(for query: String) -> Bool {
-        var containsPunctuation = false
+    private static let cjkRanges: [ClosedRange<UInt32>] = [
+        0x4E00...0x9FFF,    // CJK Unified Ideographs
+        0x3400...0x4DBF,    // CJK Extension A
+        0x20000...0x2A6DF,  // CJK Extension B
+        0x2A700...0x2B73F,  // CJK Extension C
+        0x2B740...0x2B81F,  // CJK Extension D
+        0x3000...0x303F,    // CJK Symbols and Punctuation
+        0x3040...0x309F,    // Hiragana
+        0x30A0...0x30FF,    // Katakana
+        0xAC00...0xD7AF,    // Hangul Syllables
+    ]
 
+    private static func isCJK(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return cjkRanges.contains { $0.contains(value) }
+    }
+
+    private func shouldUseLiteralTranscriptFallback(for query: String) -> Bool {
         for scalar in query.unicodeScalars {
             if CharacterSet.whitespacesAndNewlines.contains(scalar) {
                 continue
             }
-
+            if Self.isCJK(scalar) {
+                return true
+            }
             if !CharacterSet.alphanumerics.contains(scalar) {
-                containsPunctuation = true
+                return true
             }
         }
 
-        return containsPunctuation
+        return false
     }
 
     private static nonisolated(unsafe) let iso8601Formatter = ISO8601DateFormatter()
