@@ -8,7 +8,8 @@ struct PreviewExchange: Sendable {
 }
 
 struct PreviewData: Sendable {
-    let headline: String?
+    let state: String?
+    let detail: String?
     let exchanges: [PreviewExchange]
     let files: [String]  // full paths, most recent first
 }
@@ -47,15 +48,43 @@ enum TranscriptTailReader {
         let files: [String]
     }
 
-    private enum HeadlineSignal {
+    private enum PreviewHeader {
+        case question(String)
         case waiting(String)
         case error(String)
-        case action(String)
+        case working(String)
+        case task(String)
+
+        var state: String {
+            switch self {
+            case .question:
+                return "Question"
+            case .waiting:
+                return "Waiting"
+            case .error:
+                return "Error"
+            case .working:
+                return "Working"
+            case .task:
+                return "Task"
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .question(let detail),
+                 .waiting(let detail),
+                 .error(let detail),
+                 .working(let detail),
+                 .task(let detail):
+                return detail
+            }
+        }
     }
 
     static func read(fileURL: URL, exchangeCount: Int = 3) -> PreviewData {
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
-            return PreviewData(headline: nil, exchanges: [], files: [])
+            return PreviewData(state: nil, detail: nil, exchanges: [], files: [])
         }
         defer { try? handle.close() }
 
@@ -65,13 +94,13 @@ enum TranscriptTailReader {
         var readSize = min(fileSize, initialTailReadSize)
         var parsed = ParsedTailData(exchangesNewestFirst: [], messagesNewestFirst: [], files: [])
         var compactExchanges: [PreviewExchange] = []
-        var headline: String?
+        var previewHeader: PreviewHeader?
 
         while true {
             handle.seek(toFileOffset: fileSize - readSize)
             let data = handle.readData(ofLength: Int(readSize))
             guard let text = String(data: data, encoding: .utf8) else {
-                return PreviewData(headline: nil, exchanges: [], files: [])
+                return PreviewData(state: nil, detail: nil, exchanges: [], files: [])
             }
             parsed = parseTailText(text)
 
@@ -80,10 +109,10 @@ enum TranscriptTailReader {
                 .filter { isMeaningfulExchange(role: $0.role, text: $0.text) }
             let meaningfulCount = meaningfulExchanges.count
             compactExchanges = Array(meaningfulExchanges.suffix(safeExchangeCount))
-            headline = deriveHeadline(from: parsed.messagesNewestFirst, exchanges: compactExchanges)
+            previewHeader = derivePreviewHeader(from: parsed.messagesNewestFirst, exchanges: compactExchanges)
             let reachedBound = readSize >= fileSize || readSize >= maxTailReadSize
             let hasEnoughExchangeContext = meaningfulCount >= safeExchangeCount
-            if (hasEnoughExchangeContext && headline != nil) || reachedBound {
+            if (hasEnoughExchangeContext && previewHeader != nil) || reachedBound {
                 break
             }
 
@@ -95,7 +124,8 @@ enum TranscriptTailReader {
         }
 
         return PreviewData(
-            headline: headline,
+            state: previewHeader?.state,
+            detail: previewHeader?.detail,
             exchanges: compactExchanges,
             files: Array(parsed.files.prefix(5))
         )
@@ -146,39 +176,36 @@ enum TranscriptTailReader {
         }
 
         let dict: [String: Any] = [
-            "headline": preview.headline ?? NSNull(),
+            "state": preview.state ?? NSNull(),
+            "detail": preview.detail ?? NSNull(),
             "exchanges": exchangeArray,
             "files": preview.files,
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let string = String(data: data, encoding: .utf8) else {
-            return "{\"headline\":null,\"exchanges\":[],\"files\":[]}"
+            return "{\"state\":null,\"detail\":null,\"exchanges\":[],\"files\":[]}"
         }
         return string
     }
 
-    private static func deriveHeadline(from messagesNewestFirst: [TailMessage], exchanges: [PreviewExchange]) -> String? {
+    private static func derivePreviewHeader(from messagesNewestFirst: [TailMessage], exchanges: [PreviewExchange]) -> PreviewHeader? {
         if let signal = latestStateSignal(in: messagesNewestFirst) {
-            switch signal {
-            case .waiting(let prompt):
-                return "Waiting: \(prompt)"
-            case .error(let summary):
-                return "Error: \(summary)"
-            case .action(let action):
-                return action
-            }
+            return signal
         }
         if let latestUserAsk = latestMeaningfulUserAsk(in: messagesNewestFirst, exchanges: exchanges) {
-            return "Current task: \(latestUserAsk)"
+            return .task(latestUserAsk)
         }
         return nil
     }
 
-    private static func latestStateSignal(in messagesNewestFirst: [TailMessage]) -> HeadlineSignal? {
+    private static func latestStateSignal(in messagesNewestFirst: [TailMessage]) -> PreviewHeader? {
         for message in messagesNewestFirst {
             if message.role == "assistant",
                let prompt = waitingPromptCandidate(from: message.text) {
+                if prompt.contains("?") {
+                    return .question(prompt)
+                }
                 return .waiting(prompt)
             }
 
@@ -191,7 +218,7 @@ enum TranscriptTailReader {
                 if isAssistantActionUpdate(text),
                    waitingPromptCandidate(from: text) == nil,
                    !isAssistantStatusChatter(text) {
-                    return .action(conciseSnippet(from: text, maxLength: 160))
+                    return .working(conciseSnippet(from: text, maxLength: 160))
                 }
             }
 
