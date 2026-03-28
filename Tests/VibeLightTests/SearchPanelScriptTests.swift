@@ -223,15 +223,16 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-2'; })", in: context) == false)
     }
 
-    @Test("preview renders headline rounds and files in adaptive sections")
-    func previewRendersHeadlineRoundsAndFilesInAdaptiveSections() throws {
+    @Test("preview renders state detail rounds and files in adaptive sections")
+    func previewRendersStateDetailRoundsAndFilesInAdaptiveSections() throws {
         let context = try makePanelScriptContext()
         let payload = #"""
         {
-          "headline": "Waiting: Which layout do you prefer?",
+          "state": "Question",
+          "detail": "Which layout do you prefer?",
           "exchanges": [
-            { "role": "user", "text": "Please make the preview headline clearer.", "isError": false },
-            { "role": "assistant", "text": "I grouped the preview into headline, rounds, and files.", "isError": false }
+            { "role": "user", "text": "Please make the preview state clearer.", "isError": false },
+            { "role": "assistant", "text": "I grouped the preview into state, detail, rounds, and files.", "isError": false }
           ],
           "files": [
             "/tmp/Sources/VibeLight/Resources/Web/panel.js"
@@ -241,7 +242,8 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updatePreview(\(payload));")
 
-        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__headline')", in: context) == "Waiting: Which layout do you prefer?")
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__state')", in: context) == "Question")
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Which layout do you prefer?")
         #expect(try invokeInt("__queryByClass(__els.previewCard, 'preview__round', false).length", in: context) == 2)
         #expect(try invokeString("__queryByClass(__els.previewCard, 'preview__round-role', false)[0].textContent", in: context) == "You")
         #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__section-label')", in: context) == "Files")
@@ -329,6 +331,38 @@ struct SearchPanelScriptTests {
 
         #expect(!(try invokeBool("__hasClass(__els.results.children[0], 'row--selected')", in: context)))
         #expect(try invokeBool("__hasClass(__els.results.children[1], 'row--selected')", in: context))
+    }
+
+    @Test("mouseenter on already selected finished row still schedules preview dwell")
+    func mouseEnterOnAlreadySelectedFinishedRowStillSchedulesPreviewDwell() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-finished",
+          "tool": "codex",
+          "title": "Finished Session",
+          "project": "/tmp/finished",
+          "projectName": "finished",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 2300,
+          "lastActivityAt": "2026-03-28T09:41:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "3m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'mouseenter');")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-finished'; })",
+            in: context
+        ))
     }
 
     @Test("context label falls back to unknown percent when percent estimate is missing")
@@ -424,8 +458,10 @@ struct SearchPanelScriptTests {
     func panelScriptIncludesAdaptivePreviewSectionHooks() throws {
         let script = try loadPanelScript()
 
-        #expect(script.contains("data.headline"))
-        #expect(script.contains("preview__headline"))
+        #expect(script.contains("data.state"))
+        #expect(script.contains("data.detail"))
+        #expect(script.contains("preview__state"))
+        #expect(script.contains("preview__detail"))
         #expect(script.contains("preview__rounds"))
         #expect(script.contains("preview__files"))
     }

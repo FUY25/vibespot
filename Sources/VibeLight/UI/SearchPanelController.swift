@@ -33,7 +33,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var iconBaseURL: String?
 
     private let panelWidth: CGFloat = 720
-    private let previewExtraWidth: CGFloat = 330
+    private let previewExtraWidth: CGFloat = 470
     private let minPanelHeight: CGFloat = 104
     private var isPreviewVisible = false
     private var isLiveOnlyMode = false
@@ -141,9 +141,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String) {
         guard let fileURL = findSessionFile(sessionId: sessionId) else { return }
+        let liveResult = results.first(where: { $0.sessionId == sessionId })
         Task.detached(priority: .utility) { [weak self] in
-            let preview = TranscriptTailReader.read(fileURL: fileURL)
-            let json = TranscriptTailReader.previewToJSONString(preview)
+            let transcriptPreview = TranscriptTailReader.read(fileURL: fileURL)
+            let mergedPreview = Self.mergePreviewState(transcriptPreview: transcriptPreview, with: liveResult)
+            let json = TranscriptTailReader.previewToJSONString(mergedPreview)
             await MainActor.run { [weak self] in
                 guard let self, self.isWebViewReady else { return }
                 let escaped = self.escapeForSingleQuotedJavaScriptString(json)
@@ -443,6 +445,64 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
         return trimmed
     }
+
+    nonisolated static func mergePreviewState(
+        transcriptPreview: PreviewData,
+        with result: SearchResult?
+    ) -> PreviewData {
+        guard let result else {
+            return transcriptPreview
+        }
+
+        if result.healthStatus.lowercased() == "error" {
+            let detail = cleanedPreviewDetail(result.healthDetail) ?? transcriptPreview.detail
+            return PreviewData(
+                state: .error,
+                detail: detail,
+                exchanges: transcriptPreview.exchanges,
+                files: transcriptPreview.files
+            )
+        }
+
+        if let activityDetail = cleanedPreviewDetail(result.activityPreview?.text) {
+            if result.activityStatus == .working {
+                return PreviewData(
+                    state: .working,
+                    detail: activityDetail,
+                    exchanges: transcriptPreview.exchanges,
+                    files: transcriptPreview.files
+                )
+            }
+
+            if result.activityStatus == .waiting {
+                let state: PreviewState = activityDetail.contains("?") ? .question : .waiting
+                return PreviewData(
+                    state: state,
+                    detail: activityDetail,
+                    exchanges: transcriptPreview.exchanges,
+                    files: transcriptPreview.files
+                )
+            }
+        }
+
+        return transcriptPreview
+    }
+
+    nonisolated private static func cleanedPreviewDetail(_ rawText: String?) -> String? {
+        guard var cleaned = rawText?.trimmingCharacters(in: .whitespacesAndNewlines), !cleaned.isEmpty else {
+            return nil
+        }
+
+        while let firstScalar = cleaned.unicodeScalars.first,
+              leadingPreviewSymbols.contains(firstScalar) {
+            cleaned.removeFirst()
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    nonisolated private static let leadingPreviewSymbols = CharacterSet(charactersIn: "▶▸▹✎•●◦▪▫")
 
     private func pushTheme() {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

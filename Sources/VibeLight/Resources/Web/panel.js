@@ -531,6 +531,7 @@
       selectedIndex = index;
       updateSelection();
       updateActionHint();
+      scheduleDwell();
     });
 
     row.addEventListener('dblclick', function() {
@@ -539,10 +540,11 @@
     });
 
     row.addEventListener('mouseenter', function() {
-      if (selectedIndex === index) return;
-      selectedIndex = index;
-      updateSelection();
-      updateActionHint();
+      if (selectedIndex !== index) {
+        selectedIndex = index;
+        updateSelection();
+        updateActionHint();
+      }
       scheduleDwell();
     });
 
@@ -827,11 +829,18 @@
 
     previewCard.innerHTML = '';
 
-    if (data.headline) {
-      var headline = document.createElement('div');
-      headline.className = 'preview__headline';
-      headline.textContent = stripMarkdown(stripANSI(data.headline));
-      previewCard.appendChild(headline);
+    if (data.state) {
+      var stateLine = document.createElement('div');
+      stateLine.className = 'preview__state';
+      stateLine.textContent = stripMarkdown(stripANSI(data.state));
+      previewCard.appendChild(stateLine);
+    }
+
+    if (data.detail) {
+      var detailLine = document.createElement('div');
+      detailLine.className = 'preview__detail';
+      detailLine.textContent = stripMarkdown(stripANSI(data.detail));
+      previewCard.appendChild(detailLine);
     }
 
     var exchanges = (data.exchanges || []).slice(-2);
