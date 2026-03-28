@@ -10,6 +10,9 @@ final class Indexer {
     private var startupScanTask: Task<Void, Never>?
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
+    private var sessionFileURLCache: [String: URL] = [:]
+    private var sessionFileLookupMissAt: [String: Date] = [:]
+    private var lastTailReadMtimeBySessionId: [String: Date] = [:]
 
     init(
         sessionIndex: SessionIndex,
@@ -369,6 +372,7 @@ final class Indexer {
     }
 
     private func refreshLiveSessions() {
+        let now = Date()
         let liveSessions = LiveSessionRegistry.scan()
         let aliveSessionsByID = Dictionary(
             liveSessions
@@ -396,10 +400,61 @@ final class Indexer {
         }
 
         // Dedup: when multiple live sessions share a PID, close all but the newest
-        deduplicateSharedPIDSessions(aliveSessionsByID: aliveSessionsByID)
+        let staleByPID = deduplicateSharedPIDSessions(aliveSessionsByID: aliveSessionsByID)
+        let aliveAfterDedup = aliveSessionIDs.subtracting(staleByPID)
+
+        // Health detection rides the existing refresh and is intentionally bounded to
+        // the existing live-session query surface (capped at 50).
+        let liveResults = (try? sessionIndex.search(query: "", liveOnly: true)) ?? []
+        let eligibleResults = liveResults.filter { aliveAfterDedup.contains($0.sessionId) }
+        let eligibleIDs = Set(eligibleResults.map(\.sessionId))
+        sessionFileURLCache = sessionFileURLCache.filter { eligibleIDs.contains($0.key) }
+        sessionFileLookupMissAt = sessionFileLookupMissAt.filter { eligibleIDs.contains($0.key) }
+        lastTailReadMtimeBySessionId = lastTailReadMtimeBySessionId.filter { eligibleIDs.contains($0.key) }
+
+        var toolBySessionId: [String: String] = [:]
+        toolBySessionId.reserveCapacity(eligibleResults.count)
+        for r in eligibleResults {
+            toolBySessionId[r.sessionId] = r.tool
+        }
+
+        primeSessionFileCache(sessionIDs: eligibleIDs, toolBySessionId: toolBySessionId)
+
+        for result in eligibleResults {
+            let staleHealth = HealthDetector.detectStale(
+                activityStatus: result.activityStatus,
+                lastActivityAt: result.lastActivityAt,
+                now: now
+            )
+            var health = result.healthStatus == "error"
+                ? HealthDetector.Result(status: result.healthStatus, detail: result.healthDetail)
+                : staleHealth
+
+            if let fileURL = findSessionFile(sessionId: result.sessionId),
+               let currentMtime = fileMtime(at: fileURL.path) {
+                // Only tail-read when the session file has new content.
+                if lastTailReadMtimeBySessionId[result.sessionId] != currentMtime {
+                    lastTailReadMtimeBySessionId[result.sessionId] = currentMtime
+                    let tailHealth = HealthDetector.detectFromTail(fileURL: fileURL)
+                    if tailHealth.status == "error" {
+                        health = tailHealth
+                    } else {
+                        health = staleHealth
+                    }
+                }
+            }
+
+            if health.status != result.healthStatus || health.detail != result.healthDetail {
+                try? sessionIndex.updateHealthStatus(
+                    sessionId: result.sessionId,
+                    healthStatus: health.status,
+                    healthDetail: health.detail
+                )
+            }
+        }
     }
 
-    private func deduplicateSharedPIDSessions(aliveSessionsByID: [String: LiveSession]) {
+    private func deduplicateSharedPIDSessions(aliveSessionsByID: [String: LiveSession]) -> Set<String> {
         let aliveSessionIDs = Set(aliveSessionsByID.keys)
         let startedAtBySessionID = (try? sessionIndex.startedAtBySessionID(aliveSessionIDs)) ?? [:]
         let tuples = Self.dedupTuplesFromAliveSessions(
@@ -411,6 +466,7 @@ final class Indexer {
         for sessionId in staleIDs {
             try? sessionIndex.updateRuntimeState(sessionId: sessionId, status: "closed", pid: nil)
         }
+        return Set(staleIDs)
     }
 
     // MARK: - Change handling
@@ -537,6 +593,73 @@ final class Indexer {
 
     private func fileMtime(at path: String) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+    }
+
+    private func primeSessionFileCache(
+        sessionIDs: Set<String>,
+        toolBySessionId: [String: String],
+        now: Date = Date()
+    ) {
+        let lookupCooldown: TimeInterval = 30
+        let fileManager = FileManager.default
+
+        let missingClaudeIDs = sessionIDs.filter {
+            toolBySessionId[$0] == "claude"
+                && sessionFileURLCache[$0] == nil
+                && now.timeIntervalSince(sessionFileLookupMissAt[$0] ?? .distantPast) >= lookupCooldown
+        }
+        if !missingClaudeIDs.isEmpty {
+            let projectsPath = homeDirectoryPath + "/.claude/projects"
+            if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
+                for encodedProjectPath in projectDirectories {
+                    let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
+                    for sessionID in missingClaudeIDs where sessionFileURLCache[sessionID] == nil {
+                        let candidatePath = (directoryPath as NSString)
+                            .appendingPathComponent(sessionID)
+                            .appending(".jsonl")
+                        if fileManager.fileExists(atPath: candidatePath) {
+                            sessionFileURLCache[sessionID] = URL(fileURLWithPath: candidatePath)
+                            sessionFileLookupMissAt.removeValue(forKey: sessionID)
+                        }
+                    }
+                }
+            }
+            for sessionID in missingClaudeIDs where sessionFileURLCache[sessionID] == nil {
+                sessionFileLookupMissAt[sessionID] = now
+            }
+        }
+
+        let missingCodexIDs = sessionIDs.filter {
+            toolBySessionId[$0] == "codex"
+                && sessionFileURLCache[$0] == nil
+                && now.timeIntervalSince(sessionFileLookupMissAt[$0] ?? .distantPast) >= lookupCooldown
+        }
+        if !missingCodexIDs.isEmpty {
+            let missingSet = Set(missingCodexIDs)
+            let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+            if let enumerator = fileManager.enumerator(
+                at: codexRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for case let fileURL as URL in enumerator {
+                    guard fileURL.pathExtension == "jsonl" else { continue }
+                    let fileNameID = fileURL.deletingPathExtension().lastPathComponent
+                    let candidateIDs = [fileNameID, codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
+                    for sessionID in candidateIDs where missingSet.contains(sessionID) {
+                        sessionFileURLCache[sessionID] = fileURL
+                        sessionFileLookupMissAt.removeValue(forKey: sessionID)
+                    }
+                }
+            }
+            for sessionID in missingCodexIDs where sessionFileURLCache[sessionID] == nil {
+                sessionFileLookupMissAt[sessionID] = now
+            }
+        }
+    }
+
+    private func findSessionFile(sessionId: String) -> URL? {
+        sessionFileURLCache[sessionId]
     }
 
     private func shouldSkipFile(path: String, sessionId: String) -> Bool {
