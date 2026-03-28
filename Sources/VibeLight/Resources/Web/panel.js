@@ -571,10 +571,10 @@
   function formatTrustedTokenCount(result) {
     if (!isTokenConfidenceTrustworthy(result)) return '';
 
-    var usedEstimate = asNumber(result.contextUsedEstimate);
+    var usedEstimate = asPositiveNumber(result.contextUsedEstimate);
     if (usedEstimate !== null) return formatCompactCount(usedEstimate);
 
-    var tokenCount = asNumber(result.tokenCount);
+    var tokenCount = asPositiveNumber(result.tokenCount);
     if (tokenCount !== null) return formatCompactCount(tokenCount);
     return '';
   }
@@ -604,6 +604,11 @@
 
   function asNumber(value) {
     return typeof value === 'number' && isFinite(value) ? value : null;
+  }
+
+  function asPositiveNumber(value) {
+    var numeric = asNumber(value);
+    return numeric !== null && numeric > 0 ? numeric : null;
   }
 
   function formatRunningTime(startedAtISO) {

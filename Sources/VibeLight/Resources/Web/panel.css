@@ -444,6 +444,12 @@ body {
   background: var(--stale-tint);
 }
 
+/* Keep selection fill visible for selected rows with semantic tints */
+.row--selected.row--error,
+.row--selected.row--stale {
+  background: var(--selection);
+}
+
 /* Keyboard hints footer */
 .keyboard-hints {
   display: flex;

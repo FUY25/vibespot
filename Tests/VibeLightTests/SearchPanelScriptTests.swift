@@ -608,6 +608,67 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 2m ago")
     }
 
+    @Test("high-confidence rows fall back to token count when used estimate is missing")
+    func highConfidenceRowsFallbackToTokenCountWhenUsedEstimateMissing() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-token-fallback",
+          "tool": "claude",
+          "title": "Token fallback context",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
+          "contextPercentEstimate": 31,
+          "contextConfidence": "high"
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 1.2k · 2m ago")
+    }
+
+    @Test("high-confidence rows omit zero token placeholders")
+    func highConfidenceRowsOmitZeroTokenPlaceholders() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-zero-token",
+          "tool": "claude",
+          "title": "Zero token context",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "effectiveModel": "claude-sonnet-4",
+          "contextWindowTokens": 200000,
+          "contextUsedEstimate": 0,
+          "contextPercentEstimate": 31,
+          "contextConfidence": "high"
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 2m ago")
+    }
+
     @Test("rows never render typing dots or status dots ornaments")
     func rowsNeverRenderTypingDotsOrStatusDotsOrnaments() throws {
         let context = try makePanelScriptContext()
