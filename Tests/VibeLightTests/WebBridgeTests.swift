@@ -67,4 +67,33 @@ struct WebBridgeTests {
         let message = WebBridge.Message.parse(body)
         #expect(message == nil)
     }
+
+    @MainActor
+    @Test("resultToJSON includes health fields and startedAt")
+    func resultToJSONIncludesHealthAndStartedAt() {
+        let startedAt = Date(timeIntervalSince1970: 1_711_600_000)
+        let result = SearchResult(
+            sessionId: "h-1",
+            tool: "claude",
+            title: "test",
+            project: "/tmp",
+            projectName: "test",
+            gitBranch: "",
+            status: "live",
+            startedAt: startedAt,
+            pid: 1,
+            tokenCount: 100,
+            lastActivityAt: Date(timeIntervalSince1970: 1_711_600_100),
+            activityPreview: nil,
+            activityStatus: .working,
+            snippet: nil,
+            healthStatus: "error",
+            healthDetail: "API 400"
+        )
+
+        let json = WebBridge.resultToJSON(result)
+        #expect(json["healthStatus"] as? String == "error")
+        #expect(json["healthDetail"] as? String == "API 400")
+        #expect(json["startedAt"] as? String == ISO8601DateFormatter().string(from: startedAt))
+    }
 }

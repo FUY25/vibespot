@@ -74,9 +74,12 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             "projectName": result.projectName,
             "gitBranch": result.gitBranch,
             "status": result.status,
+            "startedAt": ISO8601DateFormatter().string(from: result.startedAt),
             "tokenCount": result.tokenCount,
             "activityStatus": result.activityStatus.rawValue,
             "relativeTime": RelativeTimeFormatter.string(from: result.lastActivityAt),
+            "healthStatus": result.healthStatus,
+            "healthDetail": result.healthDetail,
         ]
         if let preview = result.activityPreview {
             dict["activityPreview"] = preview.text
