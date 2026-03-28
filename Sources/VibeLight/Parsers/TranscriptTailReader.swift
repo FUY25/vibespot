@@ -116,8 +116,7 @@ enum TranscriptTailReader {
     }
 
     private static func jsonObject(from line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        ParserUtilities.jsonObject(from: line)
     }
 
     private static func extractText(from content: Any?) -> String {

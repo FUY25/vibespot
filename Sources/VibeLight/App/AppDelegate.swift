@@ -174,7 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             count = 0
         }
 
-        statusItem?.button?.title = makeStatusItemTitle(count: count)
+        let newTitle = makeStatusItemTitle(count: count)
+        guard statusItem?.button?.title != newTitle else { return }
+        statusItem?.button?.title = newTitle
     }
 
     private func makeStatusItemTitle(count: Int) -> String {

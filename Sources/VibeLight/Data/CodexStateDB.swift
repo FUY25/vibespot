@@ -69,7 +69,7 @@ final class CodexStateDB {
             }
             defer { sqlite3_finalize(statement) }
 
-            guard sqlite3_bind_text(statement, 1, (cwd as NSString).utf8String, -1, Self.transientDestructor) == SQLITE_OK else {
+            guard sqlite3_bind_text(statement, 1, (cwd as NSString).utf8String, -1, sqliteTransientDestructor) == SQLITE_OK else {
                 logSQLiteError(db, context: "bind sessionIdByCwd")
                 return nil
             }
@@ -144,11 +144,6 @@ final class CodexStateDB {
     }
 
     private func withReadOnlyDatabase<T>(_ operation: (OpaquePointer) -> T?) -> T? {
-        guard FileManager.default.fileExists(atPath: path) else {
-            recordFailure()
-            return nil
-        }
-
         // Use immutable URI mode to read WAL databases locked by Codex.
         // SQLITE_OPEN_READONLY fails on WAL databases held by another process.
         let uri = "file://\(path)?immutable=1"
@@ -214,6 +209,4 @@ final class CodexStateDB {
         return shouldLog
     }
 
-    // Equivalent to SQLITE_TRANSIENT for sqlite3_bind_text.
-    private static let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 }

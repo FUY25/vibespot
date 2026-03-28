@@ -337,22 +337,31 @@
     return true;
   }
 
+  function getStateClasses(result) {
+    var classes = [];
+    if (result.status === 'action') {
+      classes.push('row--action');
+    } else if (result.activityStatus === 'working') {
+      classes.push('row--working');
+    } else if (result.activityStatus === 'waiting') {
+      classes.push('row--waiting');
+    } else if (result.activityStatus === 'closed' || result.status !== 'live') {
+      classes.push('row--closed');
+    }
+    if (result.healthStatus === 'error') {
+      classes.push('row--error');
+    } else if (result.healthStatus === 'stale') {
+      classes.push('row--stale');
+    }
+    return classes;
+  }
+
   function updateRowContent(row, result, index) {
     // Update state classes
     row.className = 'row';
-    if (result.status === 'action') {
-      row.classList.add('row--action');
-    } else if (result.activityStatus === 'working') {
-      row.classList.add('row--working');
-    } else if (result.activityStatus === 'waiting') {
-      row.classList.add('row--waiting');
-    } else if (result.activityStatus === 'closed' || result.status !== 'live') {
-      row.classList.add('row--closed');
-    }
-    if (result.healthStatus === 'error') {
-      row.classList.add('row--error');
-    } else if (result.healthStatus === 'stale') {
-      row.classList.add('row--stale');
+    var stateClasses = getStateClasses(result);
+    for (var i = 0; i < stateClasses.length; i++) {
+      row.classList.add(stateClasses[i]);
     }
     if (index === selectedIndex) {
       row.classList.add('row--selected');
@@ -382,19 +391,9 @@
     row.dataset.index = index;
 
     // State classes
-    if (result.status === 'action') {
-      row.classList.add('row--action');
-    } else if (result.activityStatus === 'working') {
-      row.classList.add('row--working');
-    } else if (result.activityStatus === 'waiting') {
-      row.classList.add('row--waiting');
-    } else if (result.activityStatus === 'closed' || result.status !== 'live') {
-      row.classList.add('row--closed');
-    }
-    if (result.healthStatus === 'error') {
-      row.classList.add('row--error');
-    } else if (result.healthStatus === 'stale') {
-      row.classList.add('row--stale');
+    var stateClasses = getStateClasses(result);
+    for (var i = 0; i < stateClasses.length; i++) {
+      row.classList.add(stateClasses[i]);
     }
 
     if (index === selectedIndex) {
@@ -573,7 +572,6 @@
     blockCursor.style.left = cursorMeasure.offsetWidth + 'px';
   }
 
-  searchInput.addEventListener('input', updateBlockCursor);
   searchInput.addEventListener('click', updateBlockCursor);
   searchInput.addEventListener('keyup', updateBlockCursor);
   searchInput.addEventListener('focus', function() {

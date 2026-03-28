@@ -1,6 +1,14 @@
 import Foundation
 
 enum RelativeTimeFormatter {
+    private static let absoluteDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+
     static func string(from date: Date, relativeTo now: Date = Date()) -> String {
         let interval = now.timeIntervalSince(date)
 
@@ -18,11 +26,7 @@ enum RelativeTimeFormatter {
             let days = Int(interval / 86_400)
             return "\(days)d ago"
         } else {
-            let formatter = DateFormatter()
-            formatter.locale = .autoupdatingCurrent
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            return formatter.string(from: date)
+            return absoluteDateFormatter.string(from: date)
         }
     }
 }

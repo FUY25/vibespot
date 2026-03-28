@@ -1,6 +1,9 @@
 import Foundation
 import SQLite3
 
+// Equivalent to SQLITE_TRANSIENT for sqlite3_bind_text.
+let sqliteTransientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
 final class Database: @unchecked Sendable {
     // One lock protects the handle and every statement lifecycle transition.
     private let lock = NSRecursiveLock()
@@ -153,7 +156,7 @@ final class Database: @unchecked Sendable {
                     index,
                     (text as NSString).utf8String,
                     -1,
-                    unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+                    sqliteTransientDestructor
                 )
             }
 

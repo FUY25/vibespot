@@ -14,6 +14,8 @@ protocol WebBridgeDelegate: AnyObject {
 
 @MainActor
 final class WebBridge: NSObject, WKScriptMessageHandler {
+    private static let iso8601Formatter = ISO8601DateFormatter()
+
     enum Message: Equatable {
         case search(query: String)
         case select(sessionId: String, status: String, tool: String)
@@ -88,14 +90,14 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             "projectName": result.projectName,
             "gitBranch": result.gitBranch,
             "status": result.status,
-            "startedAt": ISO8601DateFormatter().string(from: result.startedAt),
+            "startedAt": iso8601Formatter.string(from: result.startedAt),
             "tokenCount": result.tokenCount,
             "activityStatus": result.activityStatus.rawValue,
             "relativeTime": RelativeTimeFormatter.string(from: result.lastActivityAt),
             "healthStatus": result.healthStatus,
             "healthDetail": result.healthDetail,
         ]
-        dict["lastActivityAt"] = ISO8601DateFormatter().string(from: result.lastActivityAt)
+        dict["lastActivityAt"] = iso8601Formatter.string(from: result.lastActivityAt)
         if let preview = result.activityPreview {
             dict["activityPreview"] = preview.text
             dict["activityPreviewKind"] = preview.kind.rawValue

@@ -255,11 +255,7 @@ enum ClaudeParser {
     }
 
     private static func jsonObject(from line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8) else {
-            return nil
-        }
-
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        ParserUtilities.jsonObject(from: line)
     }
 
     private static func flattenUserContent(_ rawContent: Any?) -> String {
@@ -367,19 +363,7 @@ enum ClaudeParser {
     }
 
     private static func parseDate(_ rawValue: Any?) -> Date? {
-        guard let value = rawValue as? String else {
-            return nil
-        }
-
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractionalFormatter.date(from: value) {
-            return date
-        }
-
-        let internetFormatter = ISO8601DateFormatter()
-        internetFormatter.formatOptions = [.withInternetDateTime]
-        return internetFormatter.date(from: value)
+        ParserUtilities.parseISO8601Date(rawValue)
     }
 
     private static func parseMillisecondsDate(_ rawValue: Any?) -> Date? {
@@ -453,11 +437,4 @@ enum ClaudeParser {
 
 enum ClaudeParserError: Error {
     case invalidPidFile
-}
-
-private extension String {
-    var nonEmpty: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }

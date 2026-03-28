@@ -678,9 +678,10 @@ final class SessionIndex: @unchecked Sendable {
         return containsPunctuation
     }
 
+    private static nonisolated(unsafe) let iso8601Formatter = ISO8601DateFormatter()
+
     private func makeTimestampString(from timestamp: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        return formatter.string(from: timestamp)
+        Self.iso8601Formatter.string(from: timestamp)
     }
 
     private func mapRow(_ statement: OpaquePointer) -> SearchResult {
