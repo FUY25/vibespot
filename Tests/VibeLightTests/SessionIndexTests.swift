@@ -546,6 +546,58 @@ func testUpdateRuntimeStatePersistsPIDForLiveResults() throws {
 }
 
 @Test
+func testHealthStatusDefaultsToOk() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try index.upsertSession(
+        id: "s-health-default",
+        tool: "claude",
+        title: "test health default",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: Date(),
+        pid: 77
+    )
+
+    let results = try index.search(query: "test", includeHistory: true)
+    #expect(results.count == 1)
+    #expect(results[0].healthStatus == "ok")
+    #expect(results[0].healthDetail == "")
+}
+
+@Test
+func testUpdateHealthStatus() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try index.upsertSession(
+        id: "s-health-update",
+        tool: "claude",
+        title: "test health update",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: Date(),
+        pid: 88
+    )
+
+    try index.updateHealthStatus(
+        sessionId: "s-health-update",
+        healthStatus: "error",
+        healthDetail: "API 400: model unavailable"
+    )
+
+    let results = try index.search(query: "test", includeHistory: true)
+    #expect(results.count == 1)
+    #expect(results[0].healthStatus == "error")
+    #expect(results[0].healthDetail == "API 400: model unavailable")
+}
+
+@Test
 func testTranscriptMatchesFromClosedSessionsAreExcludedWhenHistoryDisabled() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

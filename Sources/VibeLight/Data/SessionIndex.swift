@@ -16,6 +16,44 @@ struct SearchResult: Sendable {
     let activityPreview: ActivityPreview?
     let activityStatus: SessionActivityStatus
     let snippet: String?
+    let healthStatus: String
+    let healthDetail: String
+
+    init(
+        sessionId: String,
+        tool: String,
+        title: String,
+        project: String,
+        projectName: String,
+        gitBranch: String,
+        status: String,
+        startedAt: Date,
+        pid: Int?,
+        tokenCount: Int,
+        lastActivityAt: Date,
+        activityPreview: ActivityPreview?,
+        activityStatus: SessionActivityStatus,
+        snippet: String? = nil,
+        healthStatus: String = "ok",
+        healthDetail: String = ""
+    ) {
+        self.sessionId = sessionId
+        self.tool = tool
+        self.title = title
+        self.project = project
+        self.projectName = projectName
+        self.gitBranch = gitBranch
+        self.status = status
+        self.startedAt = startedAt
+        self.pid = pid
+        self.tokenCount = tokenCount
+        self.lastActivityAt = lastActivityAt
+        self.activityPreview = activityPreview
+        self.activityStatus = activityStatus
+        self.snippet = snippet
+        self.healthStatus = healthStatus
+        self.healthDetail = healthDetail
+    }
 }
 
 final class SessionIndex: @unchecked Sendable {
@@ -55,6 +93,8 @@ final class SessionIndex: @unchecked Sendable {
         try ensureSessionColumnExists(name: "activity_preview", definition: "TEXT")
         try ensureSessionColumnExists(name: "activity_preview_kind", definition: "TEXT")
         try ensureSessionColumnExists(name: "last_indexed_mtime", definition: "REAL")
+        try ensureSessionColumnExists(name: "health_status", definition: "TEXT NOT NULL DEFAULT 'ok'")
+        try ensureSessionColumnExists(name: "health_detail", definition: "TEXT NOT NULL DEFAULT ''")
 
         try db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
@@ -202,7 +242,7 @@ final class SessionIndex: @unchecked Sendable {
             SELECT
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, NULL AS snippet
+                activity_preview_kind, NULL AS snippet, health_status, health_detail
             FROM sessions
             WHERE (
                 title LIKE ?1 ESCAPE '\\' OR
@@ -278,7 +318,9 @@ final class SessionIndex: @unchecked Sendable {
                 s.last_entry_type,
                 s.activity_preview,
                 s.activity_preview_kind,
-                snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet
+                snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet,
+                s.health_status,
+                s.health_detail
             FROM deduplicated_matches
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
             JOIN sessions s ON s.id = deduplicated_matches.session_id
@@ -309,6 +351,8 @@ final class SessionIndex: @unchecked Sendable {
                     s.last_entry_type,
                     s.activity_preview,
                     s.activity_preview_kind,
+                    s.health_status,
+                    s.health_detail,
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id
                         ORDER BY transcripts.timestamp_str DESC, transcripts.rowid DESC
@@ -334,7 +378,9 @@ final class SessionIndex: @unchecked Sendable {
                 last_entry_type,
                 activity_preview,
                 activity_preview_kind,
-                NULL AS snippet
+                NULL AS snippet,
+                health_status,
+                health_detail
             FROM session_matches
             WHERE match_row_number = 1
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -483,12 +529,23 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func updateHealthStatus(sessionId: String, healthStatus: String, healthDetail: String) throws {
+        try runStatement(
+            "UPDATE sessions SET health_status = ?1, health_detail = ?2, updated_at = ?3 WHERE id = ?4"
+        ) { statement in
+            try statement.bind(index: 1, text: healthStatus)
+            try statement.bind(index: 2, text: healthDetail)
+            try statement.bind(index: 3, double: Date().timeIntervalSince1970)
+            try statement.bind(index: 4, text: sessionId)
+        }
+    }
+
     private func listSessions(liveOnly: Bool) throws -> [SearchResult] {
         let sql = """
             SELECT
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, NULL AS snippet
+                activity_preview_kind, NULL AS snippet, health_status, health_detail
             FROM sessions
             \(liveOnly ? "WHERE status = 'live'" : "")
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -589,6 +646,9 @@ final class SessionIndex: @unchecked Sendable {
             : Date(timeIntervalSince1970: sqlite3_column_double(statement, 11))
         let activityPreview = previewColumn(statement, textIndex: 13, kindIndex: 14)
         let status = textColumn(statement, index: 6)
+        let snippet = optionalTextColumn(statement, index: 15)
+        let healthStatus = optionalTextColumn(statement, index: 16) ?? "ok"
+        let healthDetail = optionalTextColumn(statement, index: 17) ?? ""
         return SearchResult(
             sessionId: textColumn(statement, index: 0),
             tool: textColumn(statement, index: 1),
@@ -607,7 +667,9 @@ final class SessionIndex: @unchecked Sendable {
                 lastFileModification: lastFileModification,
                 lastJSONLEntryType: optionalTextColumn(statement, index: 12)
             ),
-            snippet: optionalTextColumn(statement, index: 15)
+            snippet: snippet,
+            healthStatus: healthStatus,
+            healthDetail: healthDetail
         )
     }
 
