@@ -108,6 +108,25 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             dict["activityPreview"] = preview.text
             dict["activityPreviewKind"] = preview.kind.rawValue
         }
+        if let effectiveModel = result.effectiveModel {
+            dict["effectiveModel"] = effectiveModel
+        }
+        if let contextWindowTokens = result.contextWindowTokens {
+            dict["contextWindowTokens"] = contextWindowTokens
+        }
+        if let contextUsedEstimate = result.contextUsedEstimate {
+            dict["contextUsedEstimate"] = contextUsedEstimate
+        }
+        if let contextPercentEstimate = result.contextPercentEstimate {
+            dict["contextPercentEstimate"] = contextPercentEstimate
+        }
+        dict["contextConfidence"] = result.contextConfidence.rawValue
+        if let contextSource = result.contextSource {
+            dict["contextSource"] = contextSource
+        }
+        if let lastContextSampleAt = result.lastContextSampleAt {
+            dict["lastContextSampleAt"] = iso8601Formatter.string(from: lastContextSampleAt)
+        }
         return dict
     }
 

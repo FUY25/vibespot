@@ -118,4 +118,44 @@ struct WebBridgeTests {
         #expect(json["healthDetail"] as? String == "API 400")
         #expect(json["startedAt"] as? String == ISO8601DateFormatter().string(from: startedAt))
     }
+
+    @MainActor
+    @Test("resultToJSON includes model and context telemetry fields")
+    func resultToJSONIncludesModelAndContextTelemetry() {
+        let lastContextSampleAt = Date(timeIntervalSince1970: 1_711_600_200)
+        let result = SearchResult(
+            sessionId: "ctx-1",
+            tool: "claude",
+            title: "test",
+            project: "/tmp/project",
+            projectName: "project",
+            gitBranch: "main",
+            status: "live",
+            startedAt: Date(timeIntervalSince1970: 1_711_600_000),
+            pid: 1,
+            tokenCount: 100,
+            lastActivityAt: Date(timeIntervalSince1970: 1_711_600_100),
+            activityPreview: nil,
+            activityStatus: .working,
+            snippet: nil,
+            healthStatus: "ok",
+            healthDetail: "",
+            effectiveModel: "claude-sonnet-4",
+            contextWindowTokens: 200_000,
+            contextUsedEstimate: 84_800,
+            contextPercentEstimate: 18,
+            contextConfidence: .medium,
+            contextSource: "transcript",
+            lastContextSampleAt: lastContextSampleAt
+        )
+
+        let json = WebBridge.resultToJSON(result)
+        #expect(json["effectiveModel"] as? String == "claude-sonnet-4")
+        #expect(json["contextWindowTokens"] as? Int == 200_000)
+        #expect(json["contextUsedEstimate"] as? Int == 84_800)
+        #expect(json["contextPercentEstimate"] as? Int == 18)
+        #expect(json["contextConfidence"] as? String == "medium")
+        #expect(json["contextSource"] as? String == "transcript")
+        #expect(json["lastContextSampleAt"] as? String == ISO8601DateFormatter().string(from: lastContextSampleAt))
+    }
 }

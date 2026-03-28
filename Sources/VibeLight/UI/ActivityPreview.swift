@@ -20,6 +20,7 @@ enum SessionActivityStatus: String, Sendable {
         sessionStatus: String,
         lastFileModification: Date,
         lastJSONLEntryType: String?,
+        activityPreview: ActivityPreview? = nil,
         now: Date = Date()
     ) -> SessionActivityStatus {
         guard sessionStatus == "live" else {
@@ -33,14 +34,18 @@ enum SessionActivityStatus: String, Sendable {
             return .working
         }
 
-        // File not modified recently — check what the last entry was
-        // "user" → model is thinking (hasn't responded yet)
-        // "tool_use" → tool is executing
-        // "tool_result" → model is processing tool output
-        // All three mean the model's turn isn't done yet.
+        // File not modified recently — check what the last entry was.
+        // Most tool activity still means work is in flight, but stale file-edit
+        // permission prompts are waiting on user input rather than active work.
         if lastJSONLEntryType == "user"
-            || lastJSONLEntryType == "tool_use"
             || lastJSONLEntryType == "tool_result" {
+            return .working
+        }
+
+        if lastJSONLEntryType == "tool_use" {
+            if activityPreview?.kind == .fileEdit {
+                return .waiting
+            }
             return .working
         }
 

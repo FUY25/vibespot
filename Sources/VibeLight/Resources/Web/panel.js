@@ -421,20 +421,31 @@
     }
     row.dataset.index = index;
 
-    // Update title
     var titleEl = row.querySelector('.row__title');
     var cleanTitle = stripANSI(result.title);
     if (titleEl && titleEl.textContent !== cleanTitle) {
       titleEl.textContent = cleanTitle;
     }
 
-    // Update metadata
-    var metaEl = row.querySelector('.row__meta');
-    if (metaEl) {
-      var newMeta = formatMetadata(result);
-      if (metaEl.textContent !== newMeta) {
-        metaEl.textContent = newMeta;
-      }
+    var pathEl = row.querySelector('.row__path');
+    var newPath = formatSessionPath(result);
+    if (pathEl && pathEl.textContent !== newPath) {
+      pathEl.textContent = newPath;
+    }
+
+    var modelMetaEl = row.querySelector('.row__model-meta');
+    var newModelMeta = formatModelMeta(result);
+    if (modelMetaEl && modelMetaEl.textContent !== newModelMeta) {
+      modelMetaEl.textContent = newModelMeta;
+    }
+
+    updateContextBlock(row, result);
+
+    var statusSlot = row.querySelector('.row__status-slot');
+    if (statusSlot) {
+      statusSlot.innerHTML = '';
+      var status = createStatusElement(result);
+      if (status) statusSlot.appendChild(status);
     }
   }
 
@@ -472,25 +483,39 @@
     var body = document.createElement('div');
     body.className = 'row__body';
 
-    // Header (title + status)
-    var header = document.createElement('div');
-    header.className = 'row__header';
+    var top = document.createElement('div');
+    top.className = 'row__top';
 
+    var titleGroup = document.createElement('div');
+    titleGroup.className = 'row__title-group';
     var title = document.createElement('span');
     title.className = 'row__title';
     title.textContent = stripANSI(result.title);
-    header.appendChild(title);
+    titleGroup.appendChild(title);
 
+    var statusSlot = document.createElement('span');
+    statusSlot.className = 'row__status-slot';
     var status = createStatusElement(result);
-    if (status) header.appendChild(status);
+    if (status) statusSlot.appendChild(status);
+    titleGroup.appendChild(statusSlot);
+    top.appendChild(titleGroup);
 
-    body.appendChild(header);
+    var path = document.createElement('span');
+    path.className = 'row__path';
+    path.textContent = formatSessionPath(result);
+    top.appendChild(path);
+    body.appendChild(top);
 
-    // Metadata
-    var meta = document.createElement('span');
-    meta.className = 'row__meta';
-    meta.textContent = formatMetadata(result);
-    body.appendChild(meta);
+    var bottom = document.createElement('div');
+    bottom.className = 'row__bottom';
+
+    var modelMeta = document.createElement('span');
+    modelMeta.className = 'row__model-meta';
+    modelMeta.textContent = formatModelMeta(result);
+    bottom.appendChild(modelMeta);
+
+    bottom.appendChild(createContextBlock(result));
+    body.appendChild(bottom);
 
     row.appendChild(body);
 
@@ -504,6 +529,14 @@
     row.addEventListener('dblclick', function() {
       selectedIndex = index;
       activateSelected();
+    });
+
+    row.addEventListener('mouseenter', function() {
+      if (selectedIndex === index) return;
+      selectedIndex = index;
+      updateSelection();
+      updateActionHint();
+      scheduleDwell();
     });
 
     return row;
@@ -521,25 +554,128 @@
       return dots;
     }
 
+    if (result.activityStatus === 'waiting') {
+      var waitingDot = document.createElement('span');
+      waitingDot.className = 'status-dot status-dot--amber';
+      return waitingDot;
+    }
+
     return null;
   }
 
-  function formatMetadata(result) {
+  function formatSessionPath(result) {
+    return (result.project || '').trim();
+  }
+
+  function formatModelMeta(result) {
     var parts = [];
-    if (result.status === 'live' && result.activityStatus === 'working' && result.startedAt) {
-        parts.push(formatRunningTime(result.startedAt));
-    } else if (result.relativeTime) {
-        parts.push(result.relativeTime);
+    var model = ((result.effectiveModel || result.tool || '') + '').trim();
+    if (model) {
+      parts.push(model);
     }
-    var projectName = result.projectName || lastPathComponent(result.project);
-    if (projectName) {
-        var branch = (result.gitBranch || '').trim();
-        parts.push(branch ? projectName + ' / ' + branch : projectName);
+    if (result.relativeTime) {
+      parts.push(result.relativeTime);
     }
-    if (result.tokenCount > 0) {
-        parts.push(formatTokens(result.tokenCount));
+    if (!parts.length) {
+      var fallbackPath = result.projectName || lastPathComponent(result.project);
+      if (fallbackPath) parts.push(fallbackPath);
     }
     return parts.join(' \u00B7 ');
+  }
+
+  function createContextBlock(result) {
+    var context = document.createElement('div');
+    context.className = 'row__context';
+
+    var rail = document.createElement('div');
+    rail.className = 'row__context-rail';
+    var railFill = document.createElement('div');
+    railFill.className = 'row__context-rail-fill';
+    rail.appendChild(railFill);
+    context.appendChild(rail);
+
+    var label = document.createElement('span');
+    label.className = 'row__context-label';
+    context.appendChild(label);
+
+    applyContextPresentation(context, result);
+    return context;
+  }
+
+  function updateContextBlock(row, result) {
+    var context = row.querySelector('.row__context');
+    if (!context) return;
+    applyContextPresentation(context, result);
+  }
+
+  function applyContextPresentation(context, result) {
+    var label = context.querySelector('.row__context-label');
+    var railFill = context.querySelector('.row__context-rail-fill');
+    var labelText = formatContextLabel(result);
+    var width = formatContextRailWidth(result);
+    if (label) {
+      label.textContent = labelText;
+    }
+    if (railFill) {
+      railFill.style.width = width;
+    }
+    if (labelText === '?' || labelText.indexOf('? ') === 0) {
+      context.classList.add('row__context--unknown');
+    } else {
+      context.classList.remove('row__context--unknown');
+    }
+  }
+
+  function formatContextLabel(result) {
+    var used = asNumber(result.contextUsedEstimate);
+    var percent = asNumber(result.contextPercentEstimate);
+    var usedLabel = used !== null ? formatCompactCount(used) : '';
+    if (percent !== null) {
+      var prefix = result.contextConfidence === 'high' ? '' : '~';
+      return usedLabel ? prefix + percent + '% ' + usedLabel : prefix + percent + '%';
+    }
+    if (usedLabel) {
+      return '? ' + usedLabel;
+    }
+    return '?';
+  }
+
+  function formatContextRailWidth(result) {
+    var percent = asNumber(result.contextPercentEstimate);
+    if (percent === null) {
+      var used = asNumber(result.contextUsedEstimate);
+      var windowTokens = asNumber(result.contextWindowTokens);
+      if (used !== null && windowTokens !== null && windowTokens > 0) {
+        percent = Math.round((used / windowTokens) * 100);
+      } else if (used !== null) {
+        percent = 24;
+      } else {
+        percent = 10;
+      }
+    }
+    percent = Math.max(0, Math.min(100, percent));
+    if (percent > 0) {
+      percent = Math.max(10, percent);
+    }
+    return percent + '%';
+  }
+
+  function formatCompactCount(count) {
+    if (count >= 1000000) {
+      return trimTrailingZero((count / 1000000).toFixed(1)) + 'm';
+    }
+    if (count >= 1000) {
+      return trimTrailingZero((count / 1000).toFixed(1)) + 'k';
+    }
+    return String(count);
+  }
+
+  function trimTrailingZero(value) {
+    return value.replace(/\.0$/, '');
+  }
+
+  function asNumber(value) {
+    return typeof value === 'number' && isFinite(value) ? value : null;
   }
 
   function formatRunningTime(startedAtISO) {
