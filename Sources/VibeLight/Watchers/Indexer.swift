@@ -659,7 +659,53 @@ final class Indexer {
     }
 
     private func findSessionFile(sessionId: String) -> URL? {
-        sessionFileURLCache[sessionId]
+        if let cached = sessionFileURLCache[sessionId] {
+            return cached
+        }
+
+        let now = Date()
+        let lookupCooldown: TimeInterval = 30
+        if now.timeIntervalSince(sessionFileLookupMissAt[sessionId] ?? .distantPast) < lookupCooldown {
+            return nil
+        }
+
+        let fileManager = FileManager.default
+        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
+            for encodedProjectPath in projectDirectories {
+                let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
+                let candidatePath = (directoryPath as NSString)
+                    .appendingPathComponent(sessionId)
+                    .appending(".jsonl")
+                if fileManager.fileExists(atPath: candidatePath) {
+                    let url = URL(fileURLWithPath: candidatePath)
+                    sessionFileURLCache[sessionId] = url
+                    sessionFileLookupMissAt.removeValue(forKey: sessionId)
+                    return url
+                }
+            }
+        }
+
+        let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+        if let enumerator = fileManager.enumerator(
+            at: codexRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let fileURL as URL in enumerator {
+                guard fileURL.pathExtension == "jsonl" else { continue }
+                let fileNameID = fileURL.deletingPathExtension().lastPathComponent
+                let candidateIDs = [fileNameID, codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
+                if candidateIDs.contains(sessionId) {
+                    sessionFileURLCache[sessionId] = fileURL
+                    sessionFileLookupMissAt.removeValue(forKey: sessionId)
+                    return fileURL
+                }
+            }
+        }
+
+        sessionFileLookupMissAt[sessionId] = now
+        return nil
     }
 
     private func shouldSkipFile(path: String, sessionId: String) -> Bool {
