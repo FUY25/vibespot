@@ -42,6 +42,33 @@ struct CodexSessionMeta: Sendable {
     let isSubagent: Bool
 }
 
+enum ContextConfidence: String, Sendable {
+    case high
+    case medium
+    case low
+    case unknown
+}
+
+struct SessionContextTelemetry: Sendable {
+    let effectiveModel: String?
+    let contextWindowTokens: Int?
+    let contextUsedEstimate: Int?
+    let contextPercentEstimate: Int?
+    let contextConfidence: ContextConfidence
+    let contextSource: String?
+    let lastContextSampleAt: Date?
+
+    static let empty = SessionContextTelemetry(
+        effectiveModel: nil,
+        contextWindowTokens: nil,
+        contextUsedEstimate: nil,
+        contextPercentEstimate: nil,
+        contextConfidence: .unknown,
+        contextSource: nil,
+        lastContextSampleAt: nil
+    )
+}
+
 enum SessionTitleNormalizer {
     private static let xmlTagPattern = try? NSRegularExpression(pattern: "<[^>]+>")
     private static let structuredContextPrefixes = [

@@ -572,12 +572,35 @@ func testMigrationAddsHealthFieldsForLegacySchema() throws {
     #expect(metadataResults[0].sessionId == "legacy-session")
     #expect(metadataResults[0].healthStatus == "ok")
     #expect(metadataResults[0].healthDetail == "")
+    #expect(metadataResults[0].effectiveModel == nil)
+    #expect(metadataResults[0].contextWindowTokens == nil)
+    #expect(metadataResults[0].contextUsedEstimate == nil)
+    #expect(metadataResults[0].contextPercentEstimate == nil)
+    #expect(metadataResults[0].contextConfidence == .unknown)
+    #expect(metadataResults[0].contextSource == nil)
+    #expect(metadataResults[0].lastContextSampleAt == nil)
 
     let listResults = try index.search(query: "", includeHistory: true)
     #expect(listResults.count == 1)
     #expect(listResults[0].sessionId == "legacy-session")
     #expect(listResults[0].healthStatus == "ok")
     #expect(listResults[0].healthDetail == "")
+    #expect(listResults[0].effectiveModel == nil)
+    #expect(listResults[0].contextWindowTokens == nil)
+    #expect(listResults[0].contextUsedEstimate == nil)
+    #expect(listResults[0].contextPercentEstimate == nil)
+    #expect(listResults[0].contextConfidence == .unknown)
+    #expect(listResults[0].contextSource == nil)
+    #expect(listResults[0].lastContextSampleAt == nil)
+
+    let columns = try sessionTableColumnNames(dbPath: dbPath)
+    #expect(columns.contains("effective_model"))
+    #expect(columns.contains("context_window_tokens"))
+    #expect(columns.contains("context_used_estimate"))
+    #expect(columns.contains("context_percent_estimate"))
+    #expect(columns.contains("context_confidence"))
+    #expect(columns.contains("context_source"))
+    #expect(columns.contains("last_context_sample_at"))
 }
 
 @Test
@@ -601,6 +624,58 @@ func testHealthStatusDefaultsToOk() throws {
     #expect(results.count == 1)
     #expect(results[0].healthStatus == "ok")
     #expect(results[0].healthDetail == "")
+}
+
+@Test
+func testTranscriptSearchReturnsEffectiveModelAndContextTelemetry() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+
+    try index.upsertSession(
+        id: "ctx-1",
+        tool: "codex",
+        title: "context telemetry test",
+        project: "/Users/me/project",
+        projectName: "project",
+        gitBranch: "feat/ctx",
+        status: "live",
+        startedAt: now,
+        pid: 123,
+        tokenCount: 41000,
+        lastActivityAt: now,
+        telemetry: SessionContextTelemetry(
+            effectiveModel: "gpt-5.2-codex",
+            contextWindowTokens: 258400,
+            contextUsedEstimate: 43027,
+            contextPercentEstimate: 16,
+            contextConfidence: .high,
+            contextSource: "codex:last_token_usage",
+            lastContextSampleAt: now
+        )
+    )
+
+    try index.insertTranscript(
+        sessionId: "ctx-1",
+        role: "assistant",
+        content: "transcript-only needle for telemetry search coverage",
+        timestamp: now
+    )
+
+    let results = try index.search(query: "transcript-only needle", includeHistory: true)
+    let result = try #require(results.first)
+
+    #expect(result.effectiveModel == "gpt-5.2-codex")
+    #expect(result.contextWindowTokens == 258400)
+    #expect(result.contextUsedEstimate == 43027)
+    #expect(result.contextPercentEstimate == 16)
+    #expect(result.contextConfidence == .high)
+    #expect(result.contextSource == "codex:last_token_usage")
+    let lastContextSampleAt = try #require(result.lastContextSampleAt)
+    #expect(abs(lastContextSampleAt.timeIntervalSince1970 - now.timeIntervalSince1970) < 0.001)
 }
 
 @Test
@@ -1154,6 +1229,117 @@ func testUpsertSessionPreservesLastIndexedMtimeWhenArgumentOmitted() throws {
 }
 
 @Test
+func testUpsertSessionPreservesTelemetryWhenArgumentsAreOmitted() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try index.upsertSession(
+        id: "s-telemetry",
+        tool: "codex",
+        title: "telemetry baseline",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now,
+        pid: 1,
+        telemetry: SessionContextTelemetry(
+            effectiveModel: "gpt-5.2-codex",
+            contextWindowTokens: 200_000,
+            contextUsedEstimate: 12_345,
+            contextPercentEstimate: 6,
+            contextConfidence: .high,
+            contextSource: "codex:last_token_usage",
+            lastContextSampleAt: now
+        )
+    )
+
+    try index.upsertSession(
+        id: "s-telemetry",
+        tool: "codex",
+        title: "telemetry baseline updated title",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: now.addingTimeInterval(30),
+        pid: 2
+    )
+
+    let result = try #require(try index.search(query: "baseline updated", includeHistory: true).first)
+    #expect(result.effectiveModel == "gpt-5.2-codex")
+    #expect(result.contextWindowTokens == 200_000)
+    #expect(result.contextUsedEstimate == 12_345)
+    #expect(result.contextPercentEstimate == 6)
+    #expect(result.contextConfidence == .high)
+    #expect(result.contextSource == "codex:last_token_usage")
+    let lastContextSampleAt = try #require(result.lastContextSampleAt)
+    #expect(abs(lastContextSampleAt.timeIntervalSince1970 - now.timeIntervalSince1970) < 0.001)
+}
+
+@Test
+func testUpsertSessionTreatsTelemetryAsSingleSnapshot() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let originalSampleAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let updatedSampleAt = originalSampleAt.addingTimeInterval(60)
+
+    try index.upsertSession(
+        id: "s-snapshot",
+        tool: "codex",
+        title: "telemetry snapshot",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: originalSampleAt,
+        pid: 1,
+        telemetry: SessionContextTelemetry(
+            effectiveModel: "gpt-5.2-codex",
+            contextWindowTokens: 200_000,
+            contextUsedEstimate: 12_345,
+            contextPercentEstimate: 6,
+            contextConfidence: .high,
+            contextSource: "codex:last_token_usage",
+            lastContextSampleAt: originalSampleAt
+        )
+    )
+
+    try index.upsertSession(
+        id: "s-snapshot",
+        tool: "codex",
+        title: "telemetry snapshot",
+        project: "/p",
+        projectName: "proj",
+        gitBranch: "main",
+        status: "live",
+        startedAt: updatedSampleAt,
+        pid: 2,
+        telemetry: SessionContextTelemetry(
+            effectiveModel: "gpt-5.2-mini",
+            contextWindowTokens: nil,
+            contextUsedEstimate: 54_321,
+            contextPercentEstimate: nil,
+            contextConfidence: .low,
+            contextSource: nil,
+            lastContextSampleAt: updatedSampleAt
+        )
+    )
+
+    let result = try #require(try index.search(query: "telemetry snapshot", includeHistory: true).first)
+    #expect(result.effectiveModel == "gpt-5.2-mini")
+    #expect(result.contextWindowTokens == nil)
+    #expect(result.contextUsedEstimate == 54_321)
+    #expect(result.contextPercentEstimate == nil)
+    #expect(result.contextConfidence == .low)
+    #expect(result.contextSource == nil)
+    let lastContextSampleAt = try #require(result.lastContextSampleAt)
+    #expect(abs(lastContextSampleAt.timeIntervalSince1970 - updatedSampleAt.timeIntervalSince1970) < 0.001)
+}
+
+@Test
 func testStripANSI() {
     let raw = "\u{001b}[1;31mHello\u{001b}[0m world"
     #expect(SessionIndex.stripANSI(raw) == "Hello world")
@@ -1366,6 +1552,33 @@ private func insertLegacySessionRow(
     guard sqlite3_step(statement) == SQLITE_DONE else {
         throw TestDatabaseError.stepFailed
     }
+}
+
+private func sessionTableColumnNames(dbPath: String) throws -> Set<String> {
+    var connection: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        defer { sqlite3_close(connection) }
+        throw TestDatabaseError.openFailed
+    }
+    defer { sqlite3_close(connection) }
+
+    let sql = "PRAGMA table_info(sessions)"
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK else {
+        sqlite3_finalize(statement)
+        throw TestDatabaseError.prepareFailed
+    }
+    defer { sqlite3_finalize(statement) }
+
+    var columns: Set<String> = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+        guard let namePointer = sqlite3_column_text(statement, 1) else {
+            continue
+        }
+        columns.insert(String(cString: namePointer))
+    }
+
+    return columns
 }
 
 private func transcriptRowCount(dbPath: String, sessionId: String) throws -> Int {

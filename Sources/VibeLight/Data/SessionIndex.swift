@@ -18,6 +18,13 @@ struct SearchResult: Sendable {
     let snippet: String?
     let healthStatus: String
     let healthDetail: String
+    let effectiveModel: String?
+    let contextWindowTokens: Int?
+    let contextUsedEstimate: Int?
+    let contextPercentEstimate: Int?
+    let contextConfidence: ContextConfidence
+    let contextSource: String?
+    let lastContextSampleAt: Date?
 
     init(
         sessionId: String,
@@ -35,7 +42,14 @@ struct SearchResult: Sendable {
         activityStatus: SessionActivityStatus,
         snippet: String? = nil,
         healthStatus: String = "ok",
-        healthDetail: String = ""
+        healthDetail: String = "",
+        effectiveModel: String? = nil,
+        contextWindowTokens: Int? = nil,
+        contextUsedEstimate: Int? = nil,
+        contextPercentEstimate: Int? = nil,
+        contextConfidence: ContextConfidence = .unknown,
+        contextSource: String? = nil,
+        lastContextSampleAt: Date? = nil
     ) {
         self.sessionId = sessionId
         self.tool = tool
@@ -53,6 +67,13 @@ struct SearchResult: Sendable {
         self.snippet = snippet
         self.healthStatus = healthStatus
         self.healthDetail = healthDetail
+        self.effectiveModel = effectiveModel
+        self.contextWindowTokens = contextWindowTokens
+        self.contextUsedEstimate = contextUsedEstimate
+        self.contextPercentEstimate = contextPercentEstimate
+        self.contextConfidence = contextConfidence
+        self.contextSource = contextSource
+        self.lastContextSampleAt = lastContextSampleAt
     }
 }
 
@@ -82,6 +103,13 @@ final class SessionIndex: @unchecked Sendable {
                 last_entry_type TEXT,
                 activity_preview TEXT,
                 activity_preview_kind TEXT,
+                effective_model TEXT,
+                context_window_tokens INTEGER,
+                context_used_estimate INTEGER,
+                context_percent_estimate INTEGER,
+                context_confidence TEXT NOT NULL DEFAULT 'unknown',
+                context_source TEXT,
+                last_context_sample_at REAL,
                 updated_at REAL NOT NULL DEFAULT 0
             )
         """)
@@ -95,6 +123,13 @@ final class SessionIndex: @unchecked Sendable {
         try ensureSessionColumnExists(name: "last_indexed_mtime", definition: "REAL")
         try ensureSessionColumnExists(name: "health_status", definition: "TEXT NOT NULL DEFAULT 'ok'")
         try ensureSessionColumnExists(name: "health_detail", definition: "TEXT NOT NULL DEFAULT ''")
+        try ensureSessionColumnExists(name: "effective_model", definition: "TEXT")
+        try ensureSessionColumnExists(name: "context_window_tokens", definition: "INTEGER")
+        try ensureSessionColumnExists(name: "context_used_estimate", definition: "INTEGER")
+        try ensureSessionColumnExists(name: "context_percent_estimate", definition: "INTEGER")
+        try ensureSessionColumnExists(name: "context_confidence", definition: "TEXT NOT NULL DEFAULT 'unknown'")
+        try ensureSessionColumnExists(name: "context_source", definition: "TEXT")
+        try ensureSessionColumnExists(name: "last_context_sample_at", definition: "REAL")
 
         try db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
@@ -125,18 +160,23 @@ final class SessionIndex: @unchecked Sendable {
         lastFileModification: Date? = nil,
         lastEntryType: String? = nil,
         activityPreview: ActivityPreview? = nil,
-        lastIndexedMtime: Date? = nil
+        lastIndexedMtime: Date? = nil,
+        telemetry: SessionContextTelemetry?
     ) throws {
         // Storage invariant: session titles in SQLite are always ANSI-free and reasonably sized.
         // Call sites may pre-clean, but `upsertSession` is the source of truth.
         let cleanedTitle = Self.cleanTitle(title)
+        let telemetryWasProvided = telemetry != nil
         let sql = """
             INSERT INTO sessions (
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, updated_at, last_indexed_mtime
+                activity_preview_kind, updated_at, last_indexed_mtime, effective_model,
+                context_window_tokens, context_used_estimate, context_percent_estimate,
+                context_confidence, context_source, last_context_sample_at
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                ?18, ?19, ?20, ?21, COALESCE(?22, 'unknown'), ?23, ?24
             )
             ON CONFLICT(id) DO UPDATE SET
                 tool = excluded.tool,
@@ -154,7 +194,14 @@ final class SessionIndex: @unchecked Sendable {
                 activity_preview = excluded.activity_preview,
                 activity_preview_kind = excluded.activity_preview_kind,
                 updated_at = excluded.updated_at,
-                last_indexed_mtime = COALESCE(excluded.last_indexed_mtime, sessions.last_indexed_mtime)
+                last_indexed_mtime = COALESCE(excluded.last_indexed_mtime, sessions.last_indexed_mtime),
+                effective_model = CASE WHEN ?25 = 1 THEN excluded.effective_model ELSE sessions.effective_model END,
+                context_window_tokens = CASE WHEN ?25 = 1 THEN excluded.context_window_tokens ELSE sessions.context_window_tokens END,
+                context_used_estimate = CASE WHEN ?25 = 1 THEN excluded.context_used_estimate ELSE sessions.context_used_estimate END,
+                context_percent_estimate = CASE WHEN ?25 = 1 THEN excluded.context_percent_estimate ELSE sessions.context_percent_estimate END,
+                context_confidence = CASE WHEN ?25 = 1 THEN excluded.context_confidence ELSE sessions.context_confidence END,
+                context_source = CASE WHEN ?25 = 1 THEN excluded.context_source ELSE sessions.context_source END,
+                last_context_sample_at = CASE WHEN ?25 = 1 THEN excluded.last_context_sample_at ELSE sessions.last_context_sample_at END
         """
 
         try runStatement(sql) { statement in
@@ -200,7 +247,108 @@ final class SessionIndex: @unchecked Sendable {
             } else {
                 try statement.bindNull(index: 17)
             }
+            if let effectiveModel = telemetry?.effectiveModel {
+                try statement.bind(index: 18, text: effectiveModel)
+            } else {
+                try statement.bindNull(index: 18)
+            }
+            if let contextWindowTokens = telemetry?.contextWindowTokens {
+                try statement.bind(index: 19, int: Int64(contextWindowTokens))
+            } else {
+                try statement.bindNull(index: 19)
+            }
+            if let contextUsedEstimate = telemetry?.contextUsedEstimate {
+                try statement.bind(index: 20, int: Int64(contextUsedEstimate))
+            } else {
+                try statement.bindNull(index: 20)
+            }
+            if let contextPercentEstimate = telemetry?.contextPercentEstimate {
+                try statement.bind(index: 21, int: Int64(contextPercentEstimate))
+            } else {
+                try statement.bindNull(index: 21)
+            }
+            if let contextConfidence = telemetry?.contextConfidence {
+                try statement.bind(index: 22, text: contextConfidence.rawValue)
+            } else {
+                try statement.bindNull(index: 22)
+            }
+            if let contextSource = telemetry?.contextSource {
+                try statement.bind(index: 23, text: contextSource)
+            } else {
+                try statement.bindNull(index: 23)
+            }
+            if let lastContextSampleAt = telemetry?.lastContextSampleAt {
+                try statement.bind(index: 24, double: lastContextSampleAt.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 24)
+            }
+            try statement.bind(index: 25, int: telemetryWasProvided ? 1 : 0)
         }
+    }
+
+    func upsertSession(
+        id: String,
+        tool: String,
+        title: String,
+        project: String,
+        projectName: String,
+        gitBranch: String,
+        status: String,
+        startedAt: Date,
+        pid: Int?,
+        tokenCount: Int = 0,
+        lastActivityAt: Date? = nil,
+        lastFileModification: Date? = nil,
+        lastEntryType: String? = nil,
+        activityPreview: ActivityPreview? = nil,
+        lastIndexedMtime: Date? = nil,
+        effectiveModel: String? = nil,
+        contextWindowTokens: Int? = nil,
+        contextUsedEstimate: Int? = nil,
+        contextPercentEstimate: Int? = nil,
+        contextConfidence: ContextConfidence? = nil,
+        contextSource: String? = nil,
+        lastContextSampleAt: Date? = nil
+    ) throws {
+        let telemetryWasProvided =
+            effectiveModel != nil ||
+            contextWindowTokens != nil ||
+            contextUsedEstimate != nil ||
+            contextPercentEstimate != nil ||
+            contextConfidence != nil ||
+            contextSource != nil ||
+            lastContextSampleAt != nil
+
+        let telemetry = telemetryWasProvided
+            ? SessionContextTelemetry(
+                effectiveModel: effectiveModel,
+                contextWindowTokens: contextWindowTokens,
+                contextUsedEstimate: contextUsedEstimate,
+                contextPercentEstimate: contextPercentEstimate,
+                contextConfidence: contextConfidence ?? .unknown,
+                contextSource: contextSource,
+                lastContextSampleAt: lastContextSampleAt
+            )
+            : nil
+
+        try upsertSession(
+            id: id,
+            tool: tool,
+            title: title,
+            project: project,
+            projectName: projectName,
+            gitBranch: gitBranch,
+            status: status,
+            startedAt: startedAt,
+            pid: pid,
+            tokenCount: tokenCount,
+            lastActivityAt: lastActivityAt,
+            lastFileModification: lastFileModification,
+            lastEntryType: lastEntryType,
+            activityPreview: activityPreview,
+            lastIndexedMtime: lastIndexedMtime,
+            telemetry: telemetry
+        )
     }
 
     func insertTranscript(sessionId: String, role: String, content: String, timestamp: Date) throws {
@@ -245,7 +393,9 @@ final class SessionIndex: @unchecked Sendable {
             SELECT
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, NULL AS snippet, health_status, health_detail
+                activity_preview_kind, NULL AS snippet, health_status, health_detail,
+                effective_model, context_window_tokens, context_used_estimate, context_percent_estimate,
+                context_confidence, context_source, last_context_sample_at
             FROM sessions
             WHERE (
                 title LIKE ?1 ESCAPE '\\' OR
@@ -323,7 +473,14 @@ final class SessionIndex: @unchecked Sendable {
                 s.activity_preview_kind,
                 snippet(transcripts, 2, '>>>', '<<<', '...', 16) AS snippet,
                 s.health_status,
-                s.health_detail
+                s.health_detail,
+                s.effective_model,
+                s.context_window_tokens,
+                s.context_used_estimate,
+                s.context_percent_estimate,
+                s.context_confidence,
+                s.context_source,
+                s.last_context_sample_at
             FROM deduplicated_matches
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
             JOIN sessions s ON s.id = deduplicated_matches.session_id
@@ -356,6 +513,13 @@ final class SessionIndex: @unchecked Sendable {
                     s.activity_preview_kind,
                     s.health_status,
                     s.health_detail,
+                    s.effective_model,
+                    s.context_window_tokens,
+                    s.context_used_estimate,
+                    s.context_percent_estimate,
+                    s.context_confidence,
+                    s.context_source,
+                    s.last_context_sample_at,
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id
                         ORDER BY transcripts.timestamp_str DESC, transcripts.rowid DESC
@@ -383,7 +547,14 @@ final class SessionIndex: @unchecked Sendable {
                 activity_preview_kind,
                 NULL AS snippet,
                 health_status,
-                health_detail
+                health_detail,
+                effective_model,
+                context_window_tokens,
+                context_used_estimate,
+                context_percent_estimate,
+                context_confidence,
+                context_source,
+                last_context_sample_at
             FROM session_matches
             WHERE match_row_number = 1
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -642,7 +813,9 @@ final class SessionIndex: @unchecked Sendable {
             SELECT
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
-                activity_preview_kind, NULL AS snippet, health_status, health_detail
+                activity_preview_kind, NULL AS snippet, health_status, health_detail,
+                effective_model, context_window_tokens, context_used_estimate, context_percent_estimate,
+                context_confidence, context_source, last_context_sample_at
             FROM sessions
             \(liveOnly ? "WHERE status = 'live'" : "")
             ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
@@ -764,6 +937,12 @@ final class SessionIndex: @unchecked Sendable {
         let snippet = optionalTextColumn(statement, index: 15)
         let healthStatus = optionalTextColumn(statement, index: 16) ?? "ok"
         let healthDetail = optionalTextColumn(statement, index: 17) ?? ""
+        let contextConfidence = ContextConfidence(
+            rawValue: optionalTextColumn(statement, index: 22) ?? ContextConfidence.unknown.rawValue
+        ) ?? .unknown
+        let lastContextSampleAt = sqlite3_column_type(statement, 24) == SQLITE_NULL
+            ? nil
+            : Date(timeIntervalSince1970: sqlite3_column_double(statement, 24))
         return SearchResult(
             sessionId: textColumn(statement, index: 0),
             tool: textColumn(statement, index: 1),
@@ -784,7 +963,20 @@ final class SessionIndex: @unchecked Sendable {
             ),
             snippet: snippet,
             healthStatus: healthStatus,
-            healthDetail: healthDetail
+            healthDetail: healthDetail,
+            effectiveModel: optionalTextColumn(statement, index: 18),
+            contextWindowTokens: sqlite3_column_type(statement, 19) == SQLITE_NULL
+                ? nil
+                : Int(sqlite3_column_int64(statement, 19)),
+            contextUsedEstimate: sqlite3_column_type(statement, 20) == SQLITE_NULL
+                ? nil
+                : Int(sqlite3_column_int64(statement, 20)),
+            contextPercentEstimate: sqlite3_column_type(statement, 21) == SQLITE_NULL
+                ? nil
+                : Int(sqlite3_column_int64(statement, 21)),
+            contextConfidence: contextConfidence,
+            contextSource: optionalTextColumn(statement, index: 23),
+            lastContextSampleAt: lastContextSampleAt
         )
     }
 
