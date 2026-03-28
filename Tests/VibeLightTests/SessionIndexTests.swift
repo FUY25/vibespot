@@ -1200,6 +1200,34 @@ func testCleanTitleCombined() {
     #expect(cleaned.count <= 61)
 }
 
+@Test
+func testUpsertSessionCleansTitleBeforeStorage() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let raw =
+        "\u{001b}[1;31mHow do we truncate this title without cutting supercalifragilisticexpialidocious?\u{001b}[0m"
+    let expected = "How do we truncate this title without cutting…?"
+
+    try index.upsertSession(
+        id: "t1",
+        tool: "codex",
+        title: raw,
+        project: "/p",
+        projectName: "p",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(),
+        pid: nil
+    )
+
+    let results = try index.search(query: "", includeHistory: true)
+    #expect(results.count == 1)
+    #expect(results[0].title == expected)
+    #expect(!results[0].title.contains("\u{001b}"))
+    #expect(results[0].title.count <= 61)
+}
+
 private func makeTestIndex() throws -> (SessionIndex, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path

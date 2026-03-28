@@ -127,6 +127,9 @@ final class SessionIndex: @unchecked Sendable {
         activityPreview: ActivityPreview? = nil,
         lastIndexedMtime: Date? = nil
     ) throws {
+        // Storage invariant: session titles in SQLite are always ANSI-free and reasonably sized.
+        // Call sites may pre-clean, but `upsertSession` is the source of truth.
+        let cleanedTitle = Self.cleanTitle(title)
         let sql = """
             INSERT INTO sessions (
                 id, tool, title, project, project_name, git_branch, status, started_at, pid,
@@ -157,7 +160,7 @@ final class SessionIndex: @unchecked Sendable {
         try runStatement(sql) { statement in
             try statement.bind(index: 1, text: id)
             try statement.bind(index: 2, text: tool)
-            try statement.bind(index: 3, text: title)
+            try statement.bind(index: 3, text: cleanedTitle)
             try statement.bind(index: 4, text: project)
             try statement.bind(index: 5, text: projectName)
             try statement.bind(index: 6, text: gitBranch)
