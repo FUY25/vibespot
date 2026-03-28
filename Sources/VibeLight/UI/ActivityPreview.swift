@@ -34,12 +34,17 @@ enum SessionActivityStatus: String, Sendable {
         }
 
         // File not modified recently — check what the last entry was
-        // tool_use means the model is mid-execution (waiting for tool result)
-        if lastJSONLEntryType == "tool_use" {
+        // "user" → model is thinking (hasn't responded yet)
+        // "tool_use" → tool is executing
+        // "tool_result" → model is processing tool output
+        // All three mean the model's turn isn't done yet.
+        if lastJSONLEntryType == "user"
+            || lastJSONLEntryType == "tool_use"
+            || lastJSONLEntryType == "tool_result" {
             return .working
         }
 
-        // "user" or "assistant" or anything else with no recent file activity = waiting
+        // "assistant" or anything else with no recent file activity = waiting for user
         return .waiting
     }
 }
