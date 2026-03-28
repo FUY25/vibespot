@@ -223,6 +223,31 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-2'; })", in: context) == false)
     }
 
+    @Test("preview renders headline rounds and files in adaptive sections")
+    func previewRendersHeadlineRoundsAndFilesInAdaptiveSections() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        {
+          "headline": "Waiting: Which layout do you prefer?",
+          "exchanges": [
+            { "role": "user", "text": "Please make the preview headline clearer.", "isError": false },
+            { "role": "assistant", "text": "I grouped the preview into headline, rounds, and files.", "isError": false }
+          ],
+          "files": [
+            "/tmp/Sources/VibeLight/Resources/Web/panel.js"
+          ]
+        }
+        """#
+
+        _ = context.evaluateScript("window.updatePreview(\(payload));")
+
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__headline')", in: context) == "Waiting: Which layout do you prefer?")
+        #expect(try invokeInt("__queryByClass(__els.previewCard, 'preview__round', false).length", in: context) == 2)
+        #expect(try invokeString("__queryByClass(__els.previewCard, 'preview__round-role', false)[0].textContent", in: context) == "You")
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__section-label')", in: context) == "Files")
+        #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
+    }
+
     @Test("result rows show full path with model context metadata")
     func resultRowsShowFullPathWithModelContextMetadata() throws {
         let context = try makePanelScriptContext()
@@ -393,6 +418,16 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updateResults(\(payload));")
         #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "codex · model unknown · 2m ago")
+    }
+
+    @Test("panel script includes adaptive preview section hooks")
+    func panelScriptIncludesAdaptivePreviewSectionHooks() throws {
+        let script = try loadPanelScript()
+
+        #expect(script.contains("data.headline"))
+        #expect(script.contains("preview__headline"))
+        #expect(script.contains("preview__rounds"))
+        #expect(script.contains("preview__files"))
     }
 }
 

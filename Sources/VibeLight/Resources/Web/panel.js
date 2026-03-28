@@ -827,28 +827,57 @@
 
     previewCard.innerHTML = '';
 
-    // Exchanges
-    var exchanges = data.exchanges || [];
-    for (var i = 0; i < exchanges.length; i++) {
-      var ex = exchanges[i];
-      var div = document.createElement('div');
-      div.className = 'preview__exchange';
-      if (ex.isError) {
-        div.classList.add('preview__exchange--error');
-      } else if (ex.role === 'user') {
-        div.classList.add('preview__exchange--user');
-      } else {
-        div.classList.add('preview__exchange--assistant');
-      }
-      div.textContent = stripMarkdown(stripANSI(ex.text));
-      previewCard.appendChild(div);
+    if (data.headline) {
+      var headline = document.createElement('div');
+      headline.className = 'preview__headline';
+      headline.textContent = stripMarkdown(stripANSI(data.headline));
+      previewCard.appendChild(headline);
     }
 
-    // Files
+    var exchanges = (data.exchanges || []).slice(-2);
+    if (exchanges.length > 0) {
+      var rounds = document.createElement('div');
+      rounds.className = 'preview__rounds';
+
+      for (var i = 0; i < exchanges.length; i++) {
+        var ex = exchanges[i];
+        var round = document.createElement('div');
+        round.className = 'preview__round';
+        if (ex.isError) {
+          round.classList.add('preview__round--error');
+        } else if (ex.role === 'user') {
+          round.classList.add('preview__round--user');
+        } else {
+          round.classList.add('preview__round--assistant');
+        }
+
+        var role = document.createElement('div');
+        role.className = 'preview__round-role';
+        role.textContent = ex.isError ? 'Error' : (ex.role === 'user' ? 'You' : 'Assistant');
+        round.appendChild(role);
+
+        var body = document.createElement('div');
+        body.className = 'preview__round-text';
+        body.textContent = stripMarkdown(stripANSI(ex.text));
+        round.appendChild(body);
+
+        rounds.appendChild(round);
+      }
+      previewCard.appendChild(rounds);
+    }
+
     var files = data.files || [];
     if (files.length > 0) {
       var filesSection = document.createElement('div');
       filesSection.className = 'preview__files';
+
+      var filesLabel = document.createElement('div');
+      filesLabel.className = 'preview__section-label';
+      filesLabel.textContent = 'Files';
+      filesSection.appendChild(filesLabel);
+
+      var fileList = document.createElement('div');
+      fileList.className = 'preview__file-list';
       for (var j = 0; j < files.length; j++) {
         var filePath = files[j];
         var parts = filePath.split('/');
@@ -861,11 +890,12 @@
         if (dir) {
           var dirSpan = document.createElement('span');
           dirSpan.className = 'preview__file-dir';
-          dirSpan.textContent = dir + '/';
+          dirSpan.textContent = dir;
           fileDiv.appendChild(dirSpan);
         }
-        filesSection.appendChild(fileDiv);
+        fileList.appendChild(fileDiv);
       }
+      filesSection.appendChild(fileList);
       previewCard.appendChild(filesSection);
     }
 
