@@ -171,10 +171,17 @@ struct IndexScanner {
         let mtime = IndexingHelpers.fileMtime(at: path)
 
         let url = URL(fileURLWithPath: path)
-        guard let messages = try? ClaudeParser.parseSessionFile(url: url) else {
+        guard let (messages, telemetry) = try? ClaudeParser.parseSessionFile(url: url) else {
             return
         }
         if fileMtimeDidChange(at: path, expected: mtime) {
+            return
+        }
+
+        if messages.isEmpty {
+            if let telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
             return
         }
 
@@ -204,7 +211,8 @@ struct IndexScanner {
             lastFileModification: metrics.lastFileModification,
             lastEntryType: metrics.lastEntryType,
             activityPreview: metrics.activityPreview,
-            lastIndexedMtime: mtime
+            lastIndexedMtime: mtime,
+            telemetry: telemetry
         )
 
         let transcriptEntries = messages.map { message in

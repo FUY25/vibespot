@@ -3,13 +3,17 @@ import Foundation
 // Adapted from Poirot (MIT License, Copyright 2026 Leonardo Cardoso)
 // Flattened for transcript indexing instead of in-memory UI rendering.
 enum ClaudeParser {
-    static func parseSessionFile(url: URL) throws -> [ParsedMessage] {
+    static func parseSessionFile(url: URL) throws -> (
+        messages: [ParsedMessage],
+        telemetry: SessionContextTelemetry?
+    ) {
         let text = try String(contentsOf: url, encoding: .utf8)
         guard !text.isEmpty else {
-            return []
+            return ([], nil)
         }
 
         var messages: [ParsedMessage] = []
+        var latestTelemetry: SessionContextTelemetry?
         for line in text.split(whereSeparator: \.isNewline) {
             guard let record = jsonObject(from: String(line)) else {
                 continue
@@ -39,10 +43,15 @@ enum ClaudeParser {
 
             switch type {
             case "user":
+                if let pendingTelemetry = modelSwitchTelemetry(from: message["content"], timestamp: timestamp) {
+                    latestTelemetry = pendingTelemetry
+                }
+
                 let content = flattenUserContent(message["content"])
                 guard !content.isEmpty else {
                     continue
                 }
+
                 messages.append(
                     ParsedMessage(
                         role: "user",
@@ -55,10 +64,15 @@ enum ClaudeParser {
                     )
                 )
             case "assistant":
+                if let telemetry = telemetrySnapshot(from: message, timestamp: timestamp) {
+                    latestTelemetry = telemetry
+                }
+
                 let parsedContent = flattenAssistantContent(message["content"])
                 guard !parsedContent.text.isEmpty || !parsedContent.toolCalls.isEmpty else {
                     continue
                 }
+
                 messages.append(
                     ParsedMessage(
                         role: "assistant",
@@ -75,7 +89,7 @@ enum ClaudeParser {
             }
         }
 
-        return messages
+        return (messages, latestTelemetry)
     }
 
     static func parseSessionsIndex(url: URL) throws -> [ParsedSessionMeta] {
@@ -368,6 +382,200 @@ enum ClaudeParser {
         ParserUtilities.parseISO8601Date(rawValue)
     }
 
+    private static func telemetrySnapshot(
+        from message: [String: Any],
+        timestamp: Date
+    ) -> SessionContextTelemetry? {
+        let effectiveModel = (message["model"] as? String)?.nonEmpty
+        let usage = message["usage"] as? [String: Any] ?? [:]
+
+        let inputTokens = nonNegativeIntValue(usage["input_tokens"])
+        let cacheReadInputTokens = nonNegativeIntValue(usage["cache_read_input_tokens"])
+        let cacheCreationInputTokens = nonNegativeIntValue(usage["cache_creation_input_tokens"])
+        let hasUsage =
+            inputTokens != nil ||
+            cacheReadInputTokens != nil ||
+            cacheCreationInputTokens != nil
+
+        guard effectiveModel != nil || hasUsage else {
+            return nil
+        }
+
+        let usedTokens = hasUsage
+            ? (inputTokens ?? 0) + (cacheReadInputTokens ?? 0) + (cacheCreationInputTokens ?? 0)
+            : nil
+        let contextInference = inferContextWindow(model: effectiveModel, usedTokens: usedTokens)
+        let percentEstimate: Int?
+        if let usedTokens {
+            percentEstimate = contextPercentEstimate(
+                usedTokens: usedTokens,
+                contextWindow: contextInference.windowTokens
+            )
+        } else {
+            percentEstimate = nil
+        }
+
+        return SessionContextTelemetry(
+            effectiveModel: effectiveModel,
+            contextWindowTokens: contextInference.windowTokens,
+            contextUsedEstimate: usedTokens,
+            contextPercentEstimate: percentEstimate,
+            contextConfidence: contextInference.confidence,
+            contextSource: "claude:assistant_usage",
+            lastContextSampleAt: timestamp
+        )
+    }
+
+    private static func modelSwitchTelemetry(from rawContent: Any?, timestamp: Date) -> SessionContextTelemetry? {
+        guard
+            let commandOutput = extractLocalCommandStdout(from: rawContent),
+            let effectiveModel = switchedClaudeModel(from: commandOutput)
+        else {
+            return nil
+        }
+
+        return SessionContextTelemetry(
+            effectiveModel: effectiveModel,
+            contextWindowTokens: nil,
+            contextUsedEstimate: nil,
+            contextPercentEstimate: nil,
+            contextConfidence: .unknown,
+            contextSource: "claude:model_switch_command",
+            lastContextSampleAt: timestamp
+        )
+    }
+
+    private static func switchedClaudeModel(from content: String) -> String? {
+        for line in content.split(whereSeparator: \.isNewline) {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedLine.isEmpty else {
+                continue
+            }
+
+            let lowercased = trimmedLine.lowercased()
+            let prefixes = ["set model to ", "switched model to "]
+            guard let matchedPrefix = prefixes.first(where: { lowercased.hasPrefix($0) }) else {
+                continue
+            }
+
+            let target = trimmedLine.dropFirst(matchedPrefix.count)
+            if let normalized = normalizeClaudeModelSwitchTarget(String(target)) {
+                return normalized
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractLocalCommandStdout(from rawContent: Any?) -> String? {
+        if let text = rawContent as? String {
+            return extractLocalCommandStdoutCandidate(fromText: text)
+        }
+
+        guard let blocks = rawContent as? [[String: Any]] else {
+            return nil
+        }
+
+        for block in blocks {
+            switch block["type"] as? String {
+            case "text":
+                if let text = block["text"] as? String,
+                   let candidate = extractLocalCommandStdoutCandidate(fromText: text) {
+                    return candidate
+                }
+            case "tool_result":
+                let text = flattenToolResult(block["content"])
+                if let candidate = extractLocalCommandStdoutCandidate(fromText: text) {
+                    return candidate
+                }
+            default:
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractLocalCommandStdoutCandidate(fromText text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let fullRange = trimmed.startIndex..<trimmed.endIndex
+        if
+            let start = trimmed.range(of: "<local-command-stdout>", options: .caseInsensitive, range: fullRange),
+            start.lowerBound == trimmed.startIndex,
+            let end = trimmed.range(
+                of: "</local-command-stdout>",
+                options: .caseInsensitive,
+                range: start.upperBound..<trimmed.endIndex
+            ),
+            end.upperBound == trimmed.endIndex
+        {
+            let stdout = trimmed[start.upperBound..<end.lowerBound]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return stdout.isEmpty ? nil : stdout
+        }
+
+        let prefixes = ["local command stdout:", "local-command-stdout:"]
+        for prefix in prefixes {
+            if let range = trimmed.range(of: prefix, options: .caseInsensitive, range: fullRange),
+               range.lowerBound == trimmed.startIndex {
+                let stdout = trimmed[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                return stdout.isEmpty ? nil : stdout
+            }
+        }
+
+        return nil
+    }
+
+    private static func normalizeClaudeModelSwitchTarget(_ rawValue: String) -> String? {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+
+        guard !normalized.isEmpty else {
+            return nil
+        }
+
+        if normalized.hasPrefix("claude-") {
+            return normalized
+        }
+
+        if normalized.contains("haiku-4-5") {
+            return "claude-haiku-4-5"
+        }
+
+        if normalized.contains("sonnet-4-6") {
+            return "claude-sonnet-4-6"
+        }
+
+        if normalized.contains("opus-4-6") {
+            return "claude-opus-4-6"
+        }
+
+        if normalized.contains("sonnet-4-5") {
+            return "claude-sonnet-4-5"
+        }
+
+        return nil
+    }
+
+    private static func inferContextWindow(model: String?, usedTokens: Int?) -> (windowTokens: Int?, confidence: ContextConfidence) {
+        if let model, model.hasPrefix("claude-haiku-4-5") {
+            return (200_000, .medium)
+        }
+
+        if let usedTokens, usedTokens > 200_000 {
+            return (1_000_000, .low)
+        }
+
+        return (nil, .unknown)
+    }
+
     private static func parseMillisecondsDate(_ rawValue: Any?) -> Date? {
         guard let milliseconds = doubleValue(rawValue) else {
             return nil
@@ -418,6 +626,23 @@ enum ClaudeParser {
         }
 
         return nil
+    }
+
+    private static func nonNegativeIntValue(_ rawValue: Any?) -> Int? {
+        guard let value = intValue(rawValue) else {
+            return nil
+        }
+
+        return max(0, value)
+    }
+
+    private static func contextPercentEstimate(usedTokens: Int, contextWindow: Int?) -> Int? {
+        guard let contextWindow, contextWindow > 0 else {
+            return nil
+        }
+
+        let percent = (Double(usedTokens) / Double(contextWindow)) * 100.0
+        return max(0, min(100, Int(percent)))
     }
 
     private static func firstString(_ values: Any?...) -> String? {

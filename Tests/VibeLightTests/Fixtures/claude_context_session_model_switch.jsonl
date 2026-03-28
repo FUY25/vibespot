@@ -1,0 +1,1 @@
+{"parentUuid":null,"isSidechain":false,"promptId":"prompt-ctx-002","type":"user","message":{"role":"user","content":[{"type":"text","text":"<local-command-stdout>Set model to Opus 4.6</local-command-stdout>"}]},"uuid":"msg-ctx-101","timestamp":"2026-03-26T10:00:00.000Z","cwd":"/Users/me/project","sessionId":"session-ctx-002","version":"2.1.81","gitBranch":"feat/context"}

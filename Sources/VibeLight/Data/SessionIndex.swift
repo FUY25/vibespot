@@ -758,6 +758,63 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func updateTelemetry(sessionId: String, telemetry: SessionContextTelemetry, lastIndexedMtime: Date?) throws {
+        let sql = """
+            UPDATE sessions
+            SET effective_model = ?1,
+                context_window_tokens = ?2,
+                context_used_estimate = ?3,
+                context_percent_estimate = ?4,
+                context_confidence = ?5,
+                context_source = ?6,
+                last_context_sample_at = ?7,
+                last_indexed_mtime = COALESCE(?8, last_indexed_mtime),
+                updated_at = ?9
+            WHERE id = ?10
+        """
+
+        try runStatement(sql) { statement in
+            if let effectiveModel = telemetry.effectiveModel {
+                try statement.bind(index: 1, text: effectiveModel)
+            } else {
+                try statement.bindNull(index: 1)
+            }
+            if let contextWindowTokens = telemetry.contextWindowTokens {
+                try statement.bind(index: 2, int: Int64(contextWindowTokens))
+            } else {
+                try statement.bindNull(index: 2)
+            }
+            if let contextUsedEstimate = telemetry.contextUsedEstimate {
+                try statement.bind(index: 3, int: Int64(contextUsedEstimate))
+            } else {
+                try statement.bindNull(index: 3)
+            }
+            if let contextPercentEstimate = telemetry.contextPercentEstimate {
+                try statement.bind(index: 4, int: Int64(contextPercentEstimate))
+            } else {
+                try statement.bindNull(index: 4)
+            }
+            try statement.bind(index: 5, text: telemetry.contextConfidence.rawValue)
+            if let contextSource = telemetry.contextSource {
+                try statement.bind(index: 6, text: contextSource)
+            } else {
+                try statement.bindNull(index: 6)
+            }
+            if let lastContextSampleAt = telemetry.lastContextSampleAt {
+                try statement.bind(index: 7, double: lastContextSampleAt.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 7)
+            }
+            if let lastIndexedMtime {
+                try statement.bind(index: 8, double: lastIndexedMtime.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 8)
+            }
+            try statement.bind(index: 9, double: Date().timeIntervalSince1970)
+            try statement.bind(index: 10, text: sessionId)
+        }
+    }
+
     func updateTitle(sessionId: String, title: String) throws {
         let cleaned = Self.cleanTitle(title)
         try runStatement(

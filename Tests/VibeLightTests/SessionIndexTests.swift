@@ -1340,6 +1340,59 @@ func testUpsertSessionTreatsTelemetryAsSingleSnapshot() throws {
 }
 
 @Test
+func testUpdateTelemetryPreservesSessionMetadata() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let sampledAt = startedAt.addingTimeInterval(60)
+    let indexedMtime = startedAt.addingTimeInterval(120)
+
+    try index.upsertSession(
+        id: "s-telemetry-only",
+        tool: "claude",
+        title: "Existing title",
+        project: "/Users/me/project",
+        projectName: "project",
+        gitBranch: "feat/ctx",
+        status: "closed",
+        startedAt: startedAt,
+        pid: nil,
+        lastActivityAt: startedAt
+    )
+
+    try index.updateTelemetry(
+        sessionId: "s-telemetry-only",
+        telemetry: SessionContextTelemetry(
+            effectiveModel: "claude-opus-4-6",
+            contextWindowTokens: 1_000_000,
+            contextUsedEstimate: 240_000,
+            contextPercentEstimate: 24,
+            contextConfidence: .low,
+            contextSource: "claude:assistant_usage",
+            lastContextSampleAt: sampledAt
+        ),
+        lastIndexedMtime: indexedMtime
+    )
+
+    let result = try #require(try index.search(query: "Existing title", includeHistory: true).first)
+    #expect(result.title == "Existing title")
+    #expect(result.project == "/Users/me/project")
+    #expect(result.projectName == "project")
+    #expect(result.gitBranch == "feat/ctx")
+    #expect(result.startedAt == startedAt)
+    #expect(result.effectiveModel == "claude-opus-4-6")
+    #expect(result.contextWindowTokens == 1_000_000)
+    #expect(result.contextUsedEstimate == 240_000)
+    #expect(result.contextPercentEstimate == 24)
+    #expect(result.contextConfidence == .low)
+    #expect(result.contextSource == "claude:assistant_usage")
+    let lastContextSampleAt = try #require(result.lastContextSampleAt)
+    #expect(abs(lastContextSampleAt.timeIntervalSince1970 - sampledAt.timeIntervalSince1970) < 0.001)
+    #expect(try index.lastIndexedMtime(sessionId: "s-telemetry-only") == indexedMtime)
+}
+
+@Test
 func testStripANSI() {
     let raw = "\u{001b}[1;31mHello\u{001b}[0m world"
     #expect(SessionIndex.stripANSI(raw) == "Hello world")
