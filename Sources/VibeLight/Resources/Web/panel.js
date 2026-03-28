@@ -592,7 +592,9 @@
       var total = currentResults.filter(function(r) { return r.status !== 'action'; }).length;
       sessionCountEl.textContent = total > 0 ? total + ' sessions' : '';
     } else {
-      sessionCountEl.textContent = currentResults.length + ' matches';
+      var text = currentResults.length + ' matches';
+      if (currentMode === 'live') text += ' · live only';
+      sessionCountEl.textContent = text;
     }
   }
 
@@ -602,16 +604,12 @@
 
   window.setMode = function(mode) {
     currentMode = mode;
-    if (sessionCountEl) {
-      var label = mode === 'live' ? 'live' : 'all';
-      // Append mode indicator after session count
-      var countText = sessionCountEl.textContent.replace(/ ·.*$/, '');
-      sessionCountEl.textContent = countText + ' · ' + label;
-    }
+    updateSessionCount();
   };
   window.handleTab = function() {
-    if (!acceptGhostSuggestion()) {
-      if (bridge) bridge.postMessage({ type: 'toggleMode' });
+    // Tab toggles live/all mode only when a search query is active
+    if (searchInput.value.trim() && bridge) {
+      bridge.postMessage({ type: 'toggleMode' });
     }
   };
 
