@@ -18,6 +18,9 @@
   --activity-cyan: #7DD8C0;
   --claude: #D97757;
   --codex: #10A37F;
+  --error-red: #FF6B6B;
+  --error-tint: rgba(255,107,107,0.06);
+  --stale-tint: rgba(255,201,101,0.06);
 
   /* Labels */
   --label: #DEE4E1;
@@ -78,6 +81,9 @@
   --kicker: #006B54;
   --panel-bg: #F0F3F2;
   --panel-shadow: 0 32px 80px rgba(0,0,0,0.12);
+  --error-red: #E54545;
+  --error-tint: rgba(229,69,69,0.04);
+  --stale-tint: rgba(255,201,101,0.04);
 }
 
 /* Reset */
@@ -372,7 +378,7 @@ body {
 
 .row__activity {
   font-family: var(--font-activity);
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -385,9 +391,9 @@ body {
 
 .row__activity--assistant {
   font-family: var(--font-ui);
-  font-style: italic;
+  font-style: normal;
   color: var(--label-secondary);
-  opacity: 0.55;
+  opacity: 0.7;
 }
 
 /* Status dot */
@@ -469,6 +475,16 @@ body {
   text-shadow: 0 0 12px var(--neon-glow);
 }
 
+/* Error — subtle red wash */
+.row--error {
+  background: var(--error-tint);
+}
+
+/* Stale — subtle amber wash */
+.row--stale {
+  background: var(--stale-tint);
+}
+
 /* Keyboard hints footer */
 .keyboard-hints {
   display: flex;
@@ -493,6 +509,66 @@ body {
   font-size: 10px;
   color: var(--label-secondary);
   font-weight: 500;
+}
+
+/* Dwell preview card */
+.preview {
+  position: absolute;
+  top: 0;
+  right: -328px;
+  width: 320px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--ghost);
+  border-radius: 0 var(--panel-radius) var(--panel-radius) 0;
+  padding: 12px 14px;
+  font-family: var(--font-activity);
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.preview--visible {
+  opacity: 1;
+}
+
+.preview__exchange {
+  margin-bottom: 6px;
+}
+
+.preview__exchange--user {
+  color: var(--label-secondary);
+}
+
+.preview__exchange--user::before {
+  content: '> ';
+}
+
+.preview__exchange--assistant {
+  color: var(--label);
+}
+
+.preview__exchange--error {
+  color: var(--error-red);
+}
+
+.preview__files {
+  border-top: 1px solid var(--ghost);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.preview__file {
+  color: var(--label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview__file-dir {
+  color: var(--label-tertiary);
+  margin-left: 4px;
 }
 
 /* Keyframes */
