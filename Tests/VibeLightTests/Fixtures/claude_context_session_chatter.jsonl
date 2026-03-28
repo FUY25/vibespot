@@ -1,0 +1,5 @@
+{"type":"user","timestamp":"2026-03-28T11:00:00Z","message":{"role":"user","content":[{"type":"text","text":"Please make search results keyboard navigable."}]}}
+{"type":"assistant","timestamp":"2026-03-28T11:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"I added arrow-key navigation and Enter-to-open behavior."}]}}
+{"type":"assistant","timestamp":"2026-03-28T11:00:07Z","message":{"role":"assistant","content":[{"type":"text","text":"Running quick checks."}]}}
+{"type":"assistant","timestamp":"2026-03-28T11:00:10Z","message":{"role":"assistant","content":[{"type":"text","text":"Reading nearby files for context."}]}}
+{"type":"assistant","timestamp":"2026-03-28T11:00:14Z","message":{"role":"assistant","content":[{"type":"text","text":"Updating summary formatting."}]}}
