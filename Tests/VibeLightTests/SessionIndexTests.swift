@@ -546,6 +546,41 @@ func testUpdateRuntimeStatePersistsPIDForLiveResults() throws {
 }
 
 @Test
+func testMigrationAddsHealthFieldsForLegacySchema() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_legacy_health.sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try createLegacySessionsTable(at: dbPath)
+    try insertLegacySessionRow(
+        dbPath: dbPath,
+        id: "legacy-session",
+        tool: "claude",
+        title: "legacy schema session",
+        project: "/legacy/project",
+        projectName: "legacy",
+        gitBranch: "main",
+        status: "live",
+        startedAt: Date(),
+        pid: nil
+    )
+
+    let index = try SessionIndex(dbPath: dbPath)
+
+    let metadataResults = try index.search(query: "legacy schema", includeHistory: true)
+    #expect(metadataResults.count == 1)
+    #expect(metadataResults[0].sessionId == "legacy-session")
+    #expect(metadataResults[0].healthStatus == "ok")
+    #expect(metadataResults[0].healthDetail == "")
+
+    let listResults = try index.search(query: "", includeHistory: true)
+    #expect(listResults.count == 1)
+    #expect(listResults[0].sessionId == "legacy-session")
+    #expect(listResults[0].healthStatus == "ok")
+    #expect(listResults[0].healthDetail == "")
+}
+
+@Test
 func testHealthStatusDefaultsToOk() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
@@ -1122,6 +1157,140 @@ private func makeTestIndex() throws -> (SessionIndex, String) {
     let tmpDir = FileManager.default.temporaryDirectory
     let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
     return (try SessionIndex(dbPath: dbPath), dbPath)
+}
+
+private func createLegacySessionsTable(at dbPath: String) throws {
+    var connection: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
+        defer { sqlite3_close(connection) }
+        throw TestDatabaseError.openFailed
+    }
+    defer { sqlite3_close(connection) }
+
+    let sql = """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            tool TEXT NOT NULL,
+            title TEXT NOT NULL,
+            project TEXT NOT NULL,
+            project_name TEXT NOT NULL,
+            git_branch TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'closed',
+            started_at REAL NOT NULL,
+            pid INTEGER,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            last_activity_at REAL,
+            last_file_mod REAL,
+            last_entry_type TEXT,
+            activity_preview TEXT,
+            activity_preview_kind TEXT,
+            updated_at REAL NOT NULL DEFAULT 0,
+            last_indexed_mtime REAL
+        )
+        """
+
+    guard sqlite3_exec(connection, sql, nil, nil, nil) == SQLITE_OK else {
+        throw TestDatabaseError.stepFailed
+    }
+}
+
+private func insertLegacySessionRow(
+    dbPath: String,
+    id: String,
+    tool: String,
+    title: String,
+    project: String,
+    projectName: String,
+    gitBranch: String,
+    status: String,
+    startedAt: Date,
+    pid: Int?
+) throws {
+    var connection: OpaquePointer?
+    guard sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
+        defer { sqlite3_close(connection) }
+        throw TestDatabaseError.openFailed
+    }
+    defer { sqlite3_close(connection) }
+
+    let sql = """
+        INSERT INTO sessions (
+            id, tool, title, project, project_name, git_branch, status, started_at, pid,
+            token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
+            activity_preview_kind, updated_at, last_indexed_mtime
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+        )
+        """
+
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK else {
+        defer { sqlite3_finalize(statement) }
+        throw TestDatabaseError.prepareFailed
+    }
+    defer { sqlite3_finalize(statement) }
+
+    guard sqlite3_bind_text(statement, 1, id, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 2, tool, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 3, title, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 4, project, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 5, projectName, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 6, gitBranch, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_text(statement, 7, status, -1, transientDestructor) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_double(statement, 8, startedAt.timeIntervalSince1970) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    if let pid {
+        guard sqlite3_bind_int64(statement, 9, Int64(pid)) == SQLITE_OK else {
+            throw TestDatabaseError.bindFailed
+        }
+    } else {
+        guard sqlite3_bind_null(statement, 9) == SQLITE_OK else {
+            throw TestDatabaseError.bindFailed
+        }
+    }
+    guard sqlite3_bind_int64(statement, 10, 0) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_double(statement, 11, startedAt.timeIntervalSince1970) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_null(statement, 12) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_null(statement, 13) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_null(statement, 14) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_null(statement, 15) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_double(statement, 16, startedAt.timeIntervalSince1970) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+    guard sqlite3_bind_null(statement, 17) == SQLITE_OK else {
+        throw TestDatabaseError.bindFailed
+    }
+
+    guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw TestDatabaseError.stepFailed
+    }
 }
 
 private func transcriptRowCount(dbPath: String, sessionId: String) throws -> Int {
