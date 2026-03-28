@@ -198,7 +198,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         do {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = try sessionIndex.search(query: trimmed, liveOnly: isLiveOnlyMode)
+            let effectiveLiveOnly = trimmed.isEmpty ? true : isLiveOnlyMode
+            let matches = try sessionIndex.search(query: trimmed, liveOnly: effectiveLiveOnly)
             if trimmed.lowercased().hasPrefix("new") {
                 let actionRows = makeNewSessionActionRows()
                 pushResults(actionRows + matches)

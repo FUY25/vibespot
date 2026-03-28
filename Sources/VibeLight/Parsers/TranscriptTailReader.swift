@@ -116,7 +116,7 @@ enum TranscriptTailReader {
             // Claude format: type == "user"
             if type == "user" {
                 let message = record["message"] as? [String: Any] ?? [:]
-                let content = extractText(from: message["content"])
+                let content = extractUserOnlyText(from: message["content"])
                 if let title = SessionTitleNormalizer.displayTitleCandidate(from: content) {
                     return title
                 }
@@ -170,6 +170,17 @@ enum TranscriptTailReader {
             let t = block["type"] as? String
             if t == "text" || t == "input_text" || t == "output_text" { return block["text"] as? String }
             return nil
+        }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Extract only actual user-typed text from Claude message content,
+    /// excluding tool_result blocks that are sent back as "user" messages.
+    private static func extractUserOnlyText(from content: Any?) -> String {
+        if let text = content as? String { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard let blocks = content as? [[String: Any]] else { return "" }
+        return blocks.compactMap { block -> String? in
+            guard block["type"] as? String == "text" else { return nil }
+            return block["text"] as? String
         }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

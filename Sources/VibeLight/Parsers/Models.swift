@@ -91,6 +91,10 @@ enum SessionTitleNormalizer {
         "error:",
         "fatal:",
         "exception:",
+        "(bash completed",
+        "api error:",
+        "task #",
+        "set model to",
     ]
 
     static func titleCandidate(from rawContent: String) -> String? {
@@ -276,6 +280,15 @@ enum SessionTitleNormalizer {
 
         if lowercasedLine.hasPrefix("#"), let firstCharacter = lowercasedLine.dropFirst().first, firstCharacter.wholeNumberValue != nil {
             return true
+        }
+
+        // Line-numbered file content (e.g. "1→", "  42→")
+        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+        if let arrowIndex = trimmedLine.firstIndex(of: "→") {
+            let beforeArrow = trimmedLine[trimmedLine.startIndex..<arrowIndex]
+            if !beforeArrow.isEmpty && beforeArrow.allSatisfy(\.isWholeNumber) {
+                return true
+            }
         }
 
         return false
