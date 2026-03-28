@@ -128,9 +128,7 @@
         break;
       case 'Tab':
         e.preventDefault();
-        if (!acceptGhostSuggestion()) {
-          drillIntoSelectedHistory();
-        }
+        handleTab();
         break;
       case 'ArrowRight':
         if (searchInput.selectionStart === searchInput.value.length) {
