@@ -51,6 +51,7 @@ final class CodexStateDB {
     }
 
     func sessionIdByCwd(_ cwd: String) -> String? {
+        guard !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         guard shouldAttemptOpen() else { return nil }
 
         return withReadOnlyDatabase { db in
@@ -86,6 +87,58 @@ final class CodexStateDB {
             }
 
             return String(cString: id)
+        }
+    }
+
+    func sessionIdByRolloutPath(_ rolloutPath: String) -> String? {
+        let normalizedPath = rolloutPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedPath.isEmpty else { return nil }
+        guard shouldAttemptOpen() else { return nil }
+
+        return withReadOnlyDatabase { db in
+            let sql = """
+            SELECT id
+            FROM threads
+            WHERE rollout_path = ?1
+            LIMIT 2
+            """
+
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                logSQLiteError(db, context: "prepare sessionIdByRolloutPath")
+                return nil
+            }
+            defer { sqlite3_finalize(statement) }
+
+            guard sqlite3_bind_text(statement, 1, (normalizedPath as NSString).utf8String, -1, sqliteTransientDestructor)
+                == SQLITE_OK
+            else {
+                logSQLiteError(db, context: "bind sessionIdByRolloutPath")
+                return nil
+            }
+
+            let firstRC = sqlite3_step(statement)
+            guard firstRC == SQLITE_ROW else {
+                if firstRC != SQLITE_DONE {
+                    logSQLiteError(db, context: "step sessionIdByRolloutPath", code: firstRC)
+                }
+                return nil
+            }
+            guard let id = sqlite3_column_text(statement, 0) else {
+                return nil
+            }
+            let firstID = String(cString: id)
+
+            let secondRC = sqlite3_step(statement)
+            if secondRC == SQLITE_ROW {
+                return nil
+            }
+            if secondRC != SQLITE_DONE {
+                logSQLiteError(db, context: "step sessionIdByRolloutPath second row", code: secondRC)
+                return nil
+            }
+
+            return firstID
         }
     }
 

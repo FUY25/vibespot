@@ -22,6 +22,15 @@ struct CodexStateDBThrottleTests {
         #expect(result2 == nil)
     }
 
+    @Test("sessionIdByRolloutPath returns nil without spamming when DB missing")
+    func missingDBReturnsNilForRolloutPathLookup() {
+        let db = CodexStateDB(path: missingDBPath())
+        let result1 = db.sessionIdByRolloutPath("/Users/me/.codex/sessions/2026/03/28/one.jsonl")
+        let result2 = db.sessionIdByRolloutPath("/Users/me/.codex/sessions/2026/03/28/two.jsonl")
+        #expect(result1 == nil)
+        #expect(result2 == nil)
+    }
+
     @Test("gitBranchMap returns empty without spamming when DB missing")
     func missingDBReturnsEmpty() {
         let db = CodexStateDB(path: missingDBPath())

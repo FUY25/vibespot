@@ -14,9 +14,14 @@ enum LiveSessionRegistry {
     }()
     private static let commandTimeout: DispatchTimeInterval = .seconds(2)
 
-    /// Cache: PID → CWD. A running process's CWD doesn't change, so we only
-    /// need to call lsof once per PID lifetime.
-    nonisolated(unsafe) private static var cwdCache: [Int: String] = [:]
+    private struct CodexProcessFileInfo {
+        let cwd: String
+        let rolloutPath: String
+    }
+
+    /// Cache: PID → Codex file identity. A running process keeps the same cwd and
+    /// rollout file, so once both are discovered we can reuse them for its lifetime.
+    nonisolated(unsafe) private static var codexProcessFileInfoCache: [Int: CodexProcessFileInfo] = [:]
 
     static func scan() -> [LiveSession] {
         scanClaudeSessions() + scanCodexSessions()
@@ -84,21 +89,26 @@ enum LiveSessionRegistry {
 
         // Evict dead PIDs from cache
         let aliveSet = Set(alivePids)
-        cwdCache = cwdCache.filter { aliveSet.contains($0.key) }
+        codexProcessFileInfoCache = codexProcessFileInfoCache.filter { aliveSet.contains($0.key) }
 
-        // Find PIDs that need lsof (not yet cached)
-        let uncachedPids = alivePids.filter { cwdCache[$0] == nil }
+        // Find PIDs that need lsof (not yet resolved to a unique rollout path).
+        let uncachedPids = alivePids.filter { codexProcessFileInfoCache[$0] == nil }
 
         // Single batched lsof call for all uncached PIDs
         if !uncachedPids.isEmpty {
             let pidArgs = uncachedPids.map(String.init).joined(separator: ",")
             if let lsofOutput = runCommand(
                 executablePath: "/usr/sbin/lsof",
-                arguments: ["-a", "-d", "cwd", "-Fn", "-p", pidArgs]
+                arguments: ["-a", "-Fn", "-p", pidArgs]
             ) {
                 for pid in uncachedPids {
-                    if let cwd = parseCwd(from: lsofOutput, pid: pid) {
-                        cwdCache[pid] = cwd
+                    if let processFileInfo = parseCodexProcessFileInfo(from: lsofOutput, pid: pid),
+                       let rolloutPath = processFileInfo.rolloutPath
+                    {
+                        codexProcessFileInfoCache[pid] = CodexProcessFileInfo(
+                            cwd: processFileInfo.cwd ?? "",
+                            rolloutPath: rolloutPath
+                        )
                     }
                 }
             }
@@ -107,9 +117,15 @@ enum LiveSessionRegistry {
         let stateDB = CodexStateDB()
 
         return alivePids.compactMap { pid in
-            guard let cwd = cwdCache[pid] else { return nil }
-            guard let sessionId = stateDB.sessionIdByCwd(cwd) else { return nil }
-            return LiveSession(pid: pid, sessionId: sessionId, cwd: cwd, tool: "codex", isAlive: true)
+            guard let processFileInfo = codexProcessFileInfoCache[pid] else { return nil }
+            guard let sessionId = stateDB.sessionIdByRolloutPath(processFileInfo.rolloutPath) else { return nil }
+            return LiveSession(
+                pid: pid,
+                sessionId: sessionId,
+                cwd: processFileInfo.cwd,
+                tool: "codex",
+                isAlive: true
+            )
         }
     }
 
@@ -131,33 +147,11 @@ enum LiveSessionRegistry {
     }
 
     static func parseCwd(from output: String, pid: Int) -> String? {
-        var foundTargetProcess = false
-        var sawCwdField = false
+        parseCodexProcessFileInfo(from: output, pid: pid)?.cwd
+    }
 
-        for rawLine in output.split(whereSeparator: \.isNewline) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-
-            // Process ID lines start with 'p' followed by a number.
-            if line.hasPrefix("p"), let linePid = Int(line.dropFirst()) {
-                foundTargetProcess = linePid == pid
-                sawCwdField = false
-                continue
-            }
-
-            guard foundTargetProcess else { continue }
-
-            if line == "fcwd" {
-                sawCwdField = true
-                continue
-            }
-
-            guard sawCwdField, line.hasPrefix("n") else { continue }
-            let cwd = String(line.dropFirst())
-            return cwd.isEmpty ? nil : cwd
-        }
-
-        return nil
+    static func parseRolloutPath(from output: String, pid: Int) -> String? {
+        parseCodexProcessFileInfo(from: output, pid: pid)?.rolloutPath
     }
 
     private static func isProcessAlive(pid: Int) -> Bool {
@@ -231,5 +225,56 @@ enum LiveSessionRegistry {
 
         _ = stderrData
         return String(data: stdoutData, encoding: .utf8)
+    }
+
+    private static func parseCodexProcessFileInfo(from output: String, pid: Int) -> (cwd: String?, rolloutPath: String?)? {
+        var foundTargetProcess = false
+        var currentField: String?
+        var cwd: String?
+        var rolloutCandidates = Set<String>()
+
+        for rawLine in output.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            if line.hasPrefix("p"), let linePid = Int(line.dropFirst()) {
+                foundTargetProcess = linePid == pid
+                currentField = nil
+                continue
+            }
+
+            guard foundTargetProcess else { continue }
+
+            if line.hasPrefix("f") {
+                currentField = String(line.dropFirst())
+                continue
+            }
+
+            guard line.hasPrefix("n") else { continue }
+            let path = String(line.dropFirst())
+            guard !path.isEmpty else { continue }
+
+            if currentField == "cwd" {
+                cwd = path
+            }
+
+            if isCodexRolloutPath(path) {
+                rolloutCandidates.insert(path)
+            }
+        }
+
+        guard cwd != nil || !rolloutCandidates.isEmpty else {
+            return nil
+        }
+
+        let rolloutPath = rolloutCandidates.count == 1 ? rolloutCandidates.first : nil
+        return (cwd, rolloutPath)
+    }
+
+    private static func isCodexRolloutPath(_ path: String) -> Bool {
+        guard path.contains("/.codex/sessions/"), path.hasSuffix(".jsonl") else {
+            return false
+        }
+        return (path as NSString).lastPathComponent.hasPrefix("rollout-")
     }
 }

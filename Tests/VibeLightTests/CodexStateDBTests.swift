@@ -40,7 +40,8 @@ private func createThreadsTable(on db: OpaquePointer) throws {
             id TEXT PRIMARY KEY,
             cwd TEXT NOT NULL,
             updated_at INTEGER NOT NULL,
-            git_branch TEXT
+            git_branch TEXT,
+            rollout_path TEXT NOT NULL DEFAULT ''
         );
         """,
         on: db
@@ -89,6 +90,83 @@ func unknownCwdReturnsNil() throws {
 
     let stateDB = CodexStateDB(path: dbPath)
     #expect(stateDB.sessionIdByCwd("/tmp/does-not-exist") == nil)
+}
+
+@Test
+func sessionIdByRolloutPathReturnsMatchingSession() throws {
+    let dbPath = makeTempDBPath()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try withWritableSQLiteDB(at: dbPath) { db in
+        try createThreadsTable(on: db)
+        try exec(
+            """
+            INSERT INTO threads (id, cwd, updated_at, git_branch, rollout_path)
+            VALUES ('thread-1', '/tmp/project-a', 100, 'main', '/Users/me/.codex/sessions/2026/03/28/rollout-a.jsonl')
+            """,
+            on: db
+        )
+        try exec(
+            """
+            INSERT INTO threads (id, cwd, updated_at, git_branch, rollout_path)
+            VALUES ('thread-2', '/tmp/project-a', 200, 'feature', '/Users/me/.codex/sessions/2026/03/28/rollout-b.jsonl')
+            """,
+            on: db
+        )
+    }
+
+    let stateDB = CodexStateDB(path: dbPath)
+    #expect(
+        stateDB.sessionIdByRolloutPath("/Users/me/.codex/sessions/2026/03/28/rollout-a.jsonl")
+            == "thread-1"
+    )
+}
+
+@Test
+func unknownRolloutPathReturnsNil() throws {
+    let dbPath = makeTempDBPath()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try withWritableSQLiteDB(at: dbPath) { db in
+        try createThreadsTable(on: db)
+        try exec(
+            """
+            INSERT INTO threads (id, cwd, updated_at, git_branch, rollout_path)
+            VALUES ('thread-1', '/tmp/project-a', 100, 'main', '/Users/me/.codex/sessions/2026/03/28/rollout-a.jsonl')
+            """,
+            on: db
+        )
+    }
+
+    let stateDB = CodexStateDB(path: dbPath)
+    #expect(stateDB.sessionIdByRolloutPath("/Users/me/.codex/sessions/2026/03/28/missing.jsonl") == nil)
+}
+
+@Test
+func duplicateRolloutPathReturnsNilToAvoidAmbiguousLiveIdentity() throws {
+    let dbPath = makeTempDBPath()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    try withWritableSQLiteDB(at: dbPath) { db in
+        try createThreadsTable(on: db)
+        try exec(
+            """
+            INSERT INTO threads (id, cwd, updated_at, git_branch, rollout_path)
+            VALUES ('thread-1', '/tmp/project-a', 100, 'main', '/Users/me/.codex/sessions/2026/03/28/rollout-shared.jsonl')
+            """,
+            on: db
+        )
+        try exec(
+            """
+            INSERT INTO threads (id, cwd, updated_at, git_branch, rollout_path)
+            VALUES ('thread-2', '/tmp/project-b', 200, 'feature', '/Users/me/.codex/sessions/2026/03/28/rollout-shared.jsonl')
+            """,
+            on: db
+        )
+    }
+
+    let stateDB = CodexStateDB(path: dbPath)
+    #expect(stateDB.sessionIdByRolloutPath("/Users/me/.codex/sessions/2026/03/28/rollout-shared.jsonl") == nil)
 }
 
 @Test

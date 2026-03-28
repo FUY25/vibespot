@@ -80,3 +80,56 @@ func parseCwdReturnsNilWhenTargetPidNotFound() {
 
     #expect(LiveSessionRegistry.parseCwd(from: lsofOutput, pid: 99999) == nil)
 }
+
+@Test
+func parseRolloutPathExtractsCodexSessionJSONLFromBatchedLsofOutput() {
+    let lsofOutput = """
+    p172
+    fcwd
+    n/Users/me/other-project
+    f11
+    n/Users/me/.codex/sessions/2026/03/28/rollout-other.jsonl
+    p12345
+    fcwd
+    n/Users/me/project
+    f21
+    n/Users/me/.codex/sessions/2026/03/28/rollout-target.jsonl
+    f22
+    n/Users/me/project/README.md
+    """
+
+    #expect(
+        LiveSessionRegistry.parseRolloutPath(from: lsofOutput, pid: 12345)
+            == "/Users/me/.codex/sessions/2026/03/28/rollout-target.jsonl"
+    )
+}
+
+@Test
+func parseRolloutPathReturnsNilWhenTargetPidHasNoCodexSessionJSONL() {
+    let lsofOutput = """
+    p12345
+    fcwd
+    n/Users/me/project
+    f21
+    n/Users/me/project/README.md
+    f22
+    n/Users/me/.codex/sessions/2026/03/28/not-a-rollout.jsonl
+    """
+
+    #expect(LiveSessionRegistry.parseRolloutPath(from: lsofOutput, pid: 12345) == nil)
+}
+
+@Test
+func parseRolloutPathReturnsNilWhenMultipleCodexSessionJSONLCandidatesExist() {
+    let lsofOutput = """
+    p12345
+    fcwd
+    n/Users/me/project
+    f21
+    n/Users/me/.codex/sessions/2026/03/28/rollout-first.jsonl
+    f22
+    n/Users/me/.codex/sessions/2026/03/28/rollout-second.jsonl
+    """
+
+    #expect(LiveSessionRegistry.parseRolloutPath(from: lsofOutput, pid: 12345) == nil)
+}
