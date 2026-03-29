@@ -223,7 +223,13 @@
     if (currentResults.length === 0) return;
     const result = currentResults[selectedIndex];
     if (result && bridge) {
-      bridge.postMessage({ type: 'select', sessionId: result.sessionId, status: result.status, tool: result.tool });
+      bridge.postMessage({
+        type: 'select',
+        sessionId: result.sessionId,
+        status: result.status,
+        tool: result.tool,
+        query: searchInput.value
+      });
     }
   }
 
@@ -833,6 +839,17 @@
       previewCard.appendChild(filesSection);
     }
 
+    // Keep the preview inside the visible panel height so long content scrolls
+    // within the card instead of extending past the WebView viewport.
+    var panelHeight = panel.offsetHeight || 0;
+    if (!panelHeight && typeof panel.getBoundingClientRect === 'function') {
+      panelHeight = panel.getBoundingClientRect().height || 0;
+    }
+    var clampedMaxHeight = Math.max(180, panelHeight - 16);
+    if (clampedMaxHeight > 0) {
+      previewCard.style.maxHeight = clampedMaxHeight + 'px';
+    }
+
     // Position relative to selected row.
     // If the row is in the lower half of the panel, anchor the card bottom to the
     // row bottom so it grows upward — avoiding clipping by the WebView edge.
@@ -842,8 +859,8 @@
       var panelRect = panel.getBoundingClientRect();
       var rowTop = rowRect.top - panelRect.top;
       var rowBottom = rowRect.bottom - panelRect.top;
-      var panelHeight = panelRect.height;
-      var cardMaxH = previewCard.scrollHeight || 392; // fallback to CSS max-height
+      panelHeight = panelRect.height;
+      var cardMaxH = Math.min(previewCard.scrollHeight || clampedMaxHeight, clampedMaxHeight);
       previewCard.style.top = '';
       previewCard.style.bottom = '';
       if (rowTop + cardMaxH > panelHeight && rowBottom > panelHeight / 2) {

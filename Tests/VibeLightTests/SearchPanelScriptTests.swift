@@ -399,6 +399,37 @@ struct SearchPanelScriptTests {
         ))
     }
 
+    @Test("activate selected includes the live search input in the select bridge message")
+    func activateSelectedIncludesCurrentSearchInputInSelectMessage() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "new-codex",
+          "tool": "codex",
+          "title": "New Codex session",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "action",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__els.searchInput.value = 'new codex session';")
+        _ = context.evaluateScript("window.activateSelected();")
+
+        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 2)
+        #expect(try invokeString("window.__bridgeMessages[1].type", in: context) == "select")
+        #expect(try invokeString("window.__bridgeMessages[1].query", in: context) == "new codex session")
+    }
+
     @Test("schedule dwell is a no-op when selected row preview is already current and visible")
     func scheduleDwellNoOpWhenPreviewAlreadyCurrentAndVisible() throws {
         let context = try makePanelScriptContext()
@@ -575,6 +606,42 @@ struct SearchPanelScriptTests {
         _ = context.evaluateScript("window.updatePreview(\(freshPayload));")
         #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
         #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Fresh preview")
+    }
+
+    @Test("preview clamps max height to the visible panel height so long content can scroll")
+    func previewClampsMaxHeightToVisiblePanelHeight() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        {
+          "state": "Working",
+          "detail": "Long preview detail that should remain fully accessible inside the card.",
+          "exchanges": [
+            { "role": "assistant", "text": "Long preview line 0", "isError": false },
+            { "role": "assistant", "text": "Long preview line 1", "isError": false },
+            { "role": "assistant", "text": "Long preview line 2", "isError": false },
+            { "role": "assistant", "text": "Long preview line 3", "isError": false },
+            { "role": "assistant", "text": "Long preview line 4", "isError": false },
+            { "role": "assistant", "text": "Long preview line 5", "isError": false },
+            { "role": "assistant", "text": "Long preview line 6", "isError": false },
+            { "role": "assistant", "text": "Long preview line 7", "isError": false }
+          ],
+          "files": [
+            "/tmp/project/file0.swift",
+            "/tmp/project/file1.swift",
+            "/tmp/project/file2.swift",
+            "/tmp/project/file3.swift",
+            "/tmp/project/file4.swift",
+            "/tmp/project/file5.swift"
+          ]
+        }
+        """#
+
+        _ = context.evaluateScript("__els.panel.offsetHeight = 280;")
+        _ = context.evaluateScript("__els.panel.getBoundingClientRect = function(){ return { top: 0, bottom: 280, height: 280 }; };")
+        _ = context.evaluateScript("__els.results.getBoundingClientRect = function(){ return { top: 0, bottom: 224, height: 224 }; };")
+        _ = context.evaluateScript("window.updatePreview(\(payload));")
+
+        #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "264px")
     }
 
     @Test("low-confidence rows omit token count from model metadata")

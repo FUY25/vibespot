@@ -5,7 +5,7 @@ import WebKit
 @MainActor
 protocol WebBridgeDelegate: AnyObject {
     func webBridge(_ bridge: WebBridge, didReceiveSearch query: String)
-    func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String)
+    func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String, query: String?)
     func webBridgeDidRequestEscape(_ bridge: WebBridge)
     func webBridge(_ bridge: WebBridge, didRequestResize height: CGFloat)
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String)
@@ -19,7 +19,7 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
 
     enum Message: Equatable {
         case search(query: String)
-        case select(sessionId: String, status: String, tool: String)
+        case select(sessionId: String, status: String, tool: String, query: String?)
         case escape
         case resize(height: CGFloat)
         case preview(sessionId: String)
@@ -36,7 +36,8 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
                 guard let sessionId = body["sessionId"] as? String, !sessionId.isEmpty else { return nil }
                 guard let status = body["status"] as? String else { return nil }
                 guard let tool = body["tool"] as? String else { return nil }
-                return .select(sessionId: sessionId, status: status, tool: tool)
+                let query = body["query"] as? String
+                return .select(sessionId: sessionId, status: status, tool: tool, query: query)
             case "escape":
                 return .escape
             case "resize":
@@ -71,8 +72,8 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
             switch parsed {
             case .search(let query):
                 delegate?.webBridge(self, didReceiveSearch: query)
-            case .select(let sessionId, let status, let tool):
-                delegate?.webBridge(self, didSelectSession: sessionId, status: status, tool: tool)
+            case .select(let sessionId, let status, let tool, let query):
+                delegate?.webBridge(self, didSelectSession: sessionId, status: status, tool: tool, query: query)
             case .escape:
                 delegate?.webBridgeDidRequestEscape(self)
             case .resize(let height):

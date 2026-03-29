@@ -107,12 +107,12 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         refreshResults(query: query)
     }
 
-    func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String) {
+    func webBridge(_ bridge: WebBridge, didSelectSession sessionId: String, status: String, tool: String, query: String?) {
         guard let result = results.first(where: { $0.sessionId == sessionId }) else { return }
         hide()
         if result.status == "action" {
-            let query = lastSearchQuery ?? ""
-            let command = Self.newSessionLaunchCommand(selectedTool: result.tool, query: query)
+            let liveQuery = query ?? lastSearchQuery ?? ""
+            let command = Self.newSessionLaunchCommand(selectedTool: result.tool, query: liveQuery)
             let directory = Self.normalizedLaunchDirectory(from: result.project)
             if let onLaunchAction {
                 onLaunchAction(command, directory)
@@ -308,6 +308,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private static let claudeFlags: Set<String> = ["--help"]
     private static let codexAliases: Set<String> = ["codex", "code", "cod", "co"]
     private static let claudeAliases: Set<String> = ["claude", "clau", "cl", "cla"]
+    private static let sessionFillerTokens: Set<String> = ["session"]
 
     static func looksLikeNewSessionIntent(_ query: String) -> Bool {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -376,6 +377,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         var flags: [String] = []
         var promptTokens: [String] = []
         var index = nextIndex
+
+        if index < tokens.count, sessionFillerTokens.contains(lowerTokens[index]) {
+            index += 1
+        }
 
         while index < tokens.count {
             let lowered = lowerTokens[index]

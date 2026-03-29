@@ -118,7 +118,14 @@ enum LiveSessionRegistry {
 
         return alivePids.compactMap { pid in
             guard let processFileInfo = codexProcessFileInfoCache[pid] else { return nil }
-            guard let sessionId = stateDB.sessionIdByRolloutPath(processFileInfo.rolloutPath) else { return nil }
+            guard let sessionId = resolveCodexSessionID(
+                rolloutPath: processFileInfo.rolloutPath,
+                cwd: processFileInfo.cwd,
+                sessionIdByRolloutPath: { stateDB.sessionIdByRolloutPath($0) },
+                sessionIdByCwd: { stateDB.sessionIdByCwd($0) }
+            ) else {
+                return nil
+            }
             return LiveSession(
                 pid: pid,
                 sessionId: sessionId,
@@ -152,6 +159,24 @@ enum LiveSessionRegistry {
 
     static func parseRolloutPath(from output: String, pid: Int) -> String? {
         parseCodexProcessFileInfo(from: output, pid: pid)?.rolloutPath
+    }
+
+    static func resolveCodexSessionID(
+        rolloutPath: String,
+        cwd: String,
+        sessionIdByRolloutPath: (String) -> String?,
+        sessionIdByCwd: (String) -> String?
+    ) -> String? {
+        if let sessionId = sessionIdByRolloutPath(rolloutPath) {
+            return sessionId
+        }
+        if let sessionId = IndexingHelpers.codexSessionIDFromPath(rolloutPath) {
+            return sessionId
+        }
+
+        let trimmedCwd = cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCwd.isEmpty else { return nil }
+        return sessionIdByCwd(trimmedCwd)
     }
 
     private static func isProcessAlive(pid: Int) -> Bool {

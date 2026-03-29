@@ -189,6 +189,18 @@ func newSessionCommandParserKeepsFlagsAndPrompt() {
     let codex = SearchPanelController.parseNewSessionCommand(from: "new codex --yolo fix auth bug")
     #expect(codex == NewSessionCommand(tool: "codex", flags: ["--yolo"], prompt: "fix auth bug"))
 
+    let codexWithSessionFiller = SearchPanelController.parseNewSessionCommand(from: "new codex session")
+    #expect(codexWithSessionFiller == NewSessionCommand(tool: "codex", flags: [], prompt: ""))
+
+    let claudeWithSessionFillerAndPrompt = SearchPanelController.parseNewSessionCommand(
+        from: "new claude session summarize this thread"
+    )
+    #expect(claudeWithSessionFillerAndPrompt == NewSessionCommand(
+        tool: "claude",
+        flags: [],
+        prompt: "summarize this thread"
+    ))
+
     let codexStopAtUnknownFlag = SearchPanelController.parseNewSessionCommand(
         from: "codex --help --verbose draft release notes"
     )
@@ -269,10 +281,61 @@ func controllerActionSelectionUsesStoredQueryAndLaunchHook() throws {
 
     let bridge = WebBridge()
     controller.webBridge(bridge, didReceiveSearch: "new codex --yolo fix auth bug")
-    controller.webBridge(bridge, didSelectSession: "new-codex", status: "action", tool: "codex")
+    controller.webBridge(
+        bridge,
+        didSelectSession: "new-codex",
+        status: "action",
+        tool: "codex",
+        query: "new codex --yolo fix auth bug"
+    )
 
     #expect(launched.count == 1)
     #expect(launched[0].command == "codex --yolo 'fix auth bug'")
     #expect(launched[0].directory == "/tmp/controller-launch")
     #expect(selected.isEmpty)
+}
+
+@MainActor
+@Test("controller action selection prefers explicit select query over stale debounced search state")
+func controllerActionSelectionPrefersExplicitSelectQuery() throws {
+    let dbPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vibelight-controller-action-stale-\(UUID().uuidString).sqlite3")
+        .path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+    try index.upsertSession(
+        id: "seed-session",
+        tool: "codex",
+        title: "Seed",
+        project: "/tmp/controller-launch",
+        projectName: "controller-launch",
+        gitBranch: "",
+        status: "closed",
+        startedAt: now,
+        pid: nil
+    )
+
+    let controller = SearchPanelController()
+    controller.sessionIndex = index
+
+    var launched: [(command: String, directory: String)] = []
+    controller.onLaunchAction = { command, directory in
+        launched.append((command, directory))
+    }
+
+    let bridge = WebBridge()
+    controller.webBridge(bridge, didReceiveSearch: "new")
+    controller.webBridge(
+        bridge,
+        didSelectSession: "new-codex",
+        status: "action",
+        tool: "codex",
+        query: "new codex session"
+    )
+
+    #expect(launched.count == 1)
+    #expect(launched[0].command == "codex")
+    #expect(launched[0].directory == "/tmp/controller-launch")
 }

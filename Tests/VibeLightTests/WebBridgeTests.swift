@@ -14,9 +14,20 @@ struct WebBridgeTests {
 
     @Test("parses select message")
     func parseSelectMessage() {
-        let body: [String: Any] = ["type": "select", "sessionId": "abc-123", "status": "live", "tool": "claude"]
+        let body: [String: Any] = [
+            "type": "select",
+            "sessionId": "abc-123",
+            "status": "live",
+            "tool": "claude",
+            "query": "new claude summarize this",
+        ]
         let message = WebBridge.Message.parse(body)
-        #expect(message == .select(sessionId: "abc-123", status: "live", tool: "claude"))
+        #expect(message == WebBridge.Message.select(
+            sessionId: "abc-123",
+            status: "live",
+            tool: "claude",
+            query: "new claude summarize this"
+        ))
     }
 
     @Test("parses escape message")

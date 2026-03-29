@@ -133,3 +133,39 @@ func parseRolloutPathReturnsNilWhenMultipleCodexSessionJSONLCandidatesExist() {
 
     #expect(LiveSessionRegistry.parseRolloutPath(from: lsofOutput, pid: 12345) == nil)
 }
+
+@Test
+func resolveCodexSessionIDPrefersRolloutPathDBMapping() {
+    let sessionId = LiveSessionRegistry.resolveCodexSessionID(
+        rolloutPath: "/Users/me/.codex/sessions/2026/03/28/rollout-abc-11111111-2222-3333-4444-555555555555.jsonl",
+        cwd: "/Users/me/project",
+        sessionIdByRolloutPath: { _ in "db-rollout-id" },
+        sessionIdByCwd: { _ in "db-cwd-id" }
+    )
+
+    #expect(sessionId == "db-rollout-id")
+}
+
+@Test
+func resolveCodexSessionIDFallsBackToUUIDEmbeddedInRolloutPath() {
+    let sessionId = LiveSessionRegistry.resolveCodexSessionID(
+        rolloutPath: "/Users/me/.codex/sessions/2026/03/28/rollout-abc-11111111-2222-3333-4444-555555555555.jsonl",
+        cwd: "/Users/me/project",
+        sessionIdByRolloutPath: { _ in nil as String? },
+        sessionIdByCwd: { _ in "db-cwd-id" }
+    )
+
+    #expect(sessionId == "11111111-2222-3333-4444-555555555555")
+}
+
+@Test
+func resolveCodexSessionIDFallsBackToCwdWhenRolloutPathCannotResolve() {
+    let sessionId = LiveSessionRegistry.resolveCodexSessionID(
+        rolloutPath: "/Users/me/.codex/sessions/2026/03/28/rollout-no-uuid.jsonl",
+        cwd: "/Users/me/project",
+        sessionIdByRolloutPath: { _ in nil as String? },
+        sessionIdByCwd: { _ in "db-cwd-id" }
+    )
+
+    #expect(sessionId == "db-cwd-id")
+}
