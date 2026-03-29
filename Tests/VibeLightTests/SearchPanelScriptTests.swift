@@ -132,14 +132,18 @@ struct SearchPanelScriptTests {
         _ = context.evaluateScript("window.updatePreview(\(previewPayload));")
 
         #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
-        #expect(try invokeString("window.__bridgeMessages[window.__bridgeMessages.length - 1].type", in: context) == "previewVisible")
-        #expect(try invokeBool("window.__bridgeMessages[window.__bridgeMessages.length - 1].visible === true", in: context))
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'previewVisible' && msg.visible === true; })",
+            in: context
+        ))
 
         _ = context.evaluateScript("window.updateResults(\(filteredPayload));")
 
         #expect(!(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context)))
-        #expect(try invokeString("window.__bridgeMessages[window.__bridgeMessages.length - 1].type", in: context) == "previewVisible")
-        #expect(try invokeBool("window.__bridgeMessages[window.__bridgeMessages.length - 1].visible === false", in: context))
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'previewVisible' && msg.visible === false; })",
+            in: context
+        ))
     }
 
     @Test("search input debounce cancels stale queries")
@@ -425,9 +429,10 @@ struct SearchPanelScriptTests {
         _ = context.evaluateScript("__els.searchInput.value = 'new codex session';")
         _ = context.evaluateScript("window.activateSelected();")
 
-        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 2)
-        #expect(try invokeString("window.__bridgeMessages[1].type", in: context) == "select")
-        #expect(try invokeString("window.__bridgeMessages[1].query", in: context) == "new codex session")
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'select' && msg.query === 'new codex session'; })",
+            in: context
+        ))
     }
 
     @Test("schedule dwell is a no-op when selected row preview is already current and visible")
@@ -608,8 +613,8 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Fresh preview")
     }
 
-    @Test("preview clamps max height to the visible panel height so long content can scroll")
-    func previewClampsMaxHeightToVisiblePanelHeight() throws {
+    @Test("preview requests panel growth for long content instead of scrolling inside the card")
+    func previewRequestsPanelGrowthForLongContent() throws {
         let context = try makePanelScriptContext()
         let payload = #"""
         {
@@ -636,12 +641,27 @@ struct SearchPanelScriptTests {
         }
         """#
 
-        _ = context.evaluateScript("__els.panel.offsetHeight = 280;")
-        _ = context.evaluateScript("__els.panel.getBoundingClientRect = function(){ return { top: 0, bottom: 280, height: 280 }; };")
-        _ = context.evaluateScript("__els.results.getBoundingClientRect = function(){ return { top: 0, bottom: 224, height: 224 }; };")
+        _ = context.evaluateScript("__els.panel.offsetHeight = 180;")
+        _ = context.evaluateScript("__els.panel.getBoundingClientRect = function(){ return { top: 0, bottom: 180, height: 180 }; };")
+        _ = context.evaluateScript("__els.results.getBoundingClientRect = function(){ return { top: 0, bottom: 124, height: 124 }; };")
+        let resizeCountBefore = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).length",
+            in: context
+        )
         _ = context.evaluateScript("window.updatePreview(\(payload));")
 
-        #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "264px")
+        let resizeCountAfter = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).length",
+            in: context
+        )
+        let latestResizeHeight = try invokeInt(
+            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).slice(-1)[0].height",
+            in: context
+        )
+
+        #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "")
+        #expect(resizeCountAfter == resizeCountBefore + 1)
+        #expect(latestResizeHeight > 180)
     }
 
     @Test("low-confidence rows omit token count from model metadata")

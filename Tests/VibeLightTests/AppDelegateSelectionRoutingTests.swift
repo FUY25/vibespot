@@ -242,7 +242,29 @@ func newSessionLaunchCommandFallsBackToSelectedTool() {
         selectedTool: "claude",
         query: "new codex --yolo fix auth bug"
     )
-    #expect(command == "claude 'new codex --yolo fix auth bug'")
+    #expect(command == "claude '--yolo fix auth bug'")
+}
+
+@MainActor
+@Test("new-session launch command does not send launcher control words as prompt")
+func newSessionLaunchCommandDoesNotSendLauncherControlWordsAsPrompt() {
+    let bareNew = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "claude",
+        query: "new"
+    )
+    #expect(bareNew == "claude")
+
+    let newClaude = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "claude",
+        query: "New claude"
+    )
+    #expect(newClaude == "claude")
+
+    let newCodex = SearchPanelController.newSessionLaunchCommand(
+        selectedTool: "codex",
+        query: "new codex"
+    )
+    #expect(newCodex == "codex")
 }
 
 @MainActor

@@ -502,7 +502,7 @@ final class Indexer {
     // MARK: - Change handling
 
     private func handleChanges(_ paths: [String]) {
-        var needsLiveRefresh = false
+        var needsLiveRefresh = Self.shouldRefreshLiveSessions(forChangedPaths: paths)
         var needsCodexReindex = false
         var claudeSessionsIndexPaths: [String] = []
         var claudeSessionPaths: [String] = []
@@ -563,6 +563,21 @@ final class Indexer {
                 )
             }
         }
+    }
+
+    nonisolated static func shouldRefreshLiveSessions(forChangedPaths paths: [String]) -> Bool {
+        for path in paths {
+            if path.contains("/.claude/sessions/"), path.hasSuffix(".json") {
+                return true
+            }
+            if path.contains("/.claude/projects/"), path.hasSuffix(".jsonl") {
+                return true
+            }
+            if path.contains("/.codex/sessions/"), path.hasSuffix(".jsonl") {
+                return true
+            }
+        }
+        return false
     }
 
     private func reindexClaudeSessionsIndex(at path: String) {

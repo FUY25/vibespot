@@ -381,6 +381,7 @@
       isPreviewShowing = false;
       if (bridge) bridge.postMessage({ type: 'previewVisible', visible: false });
     }
+    notifyResize();
   }
 
   // --- Result Rendering (diff-based) ---
@@ -681,6 +682,12 @@
   function notifyResize() {
     requestAnimationFrame(function() {
       var height = panel.offsetHeight;
+      if (isPreviewShowing && previewCard.classList.contains('preview--visible')) {
+        var previewTop = parseFloat(previewCard.style.top || '0');
+        if (!isFinite(previewTop)) previewTop = 0;
+        var previewHeight = previewCard.scrollHeight || previewCard.offsetHeight || 0;
+        height = Math.max(height, Math.ceil(previewTop + previewHeight + 16));
+      }
       if (bridge) {
         bridge.postMessage({ type: 'resize', height: height });
       }
@@ -839,36 +846,19 @@
       previewCard.appendChild(filesSection);
     }
 
-    // Keep the preview inside the visible panel height so long content scrolls
-    // within the card instead of extending past the WebView viewport.
-    var panelHeight = panel.offsetHeight || 0;
-    if (!panelHeight && typeof panel.getBoundingClientRect === 'function') {
-      panelHeight = panel.getBoundingClientRect().height || 0;
-    }
-    var clampedMaxHeight = Math.max(180, panelHeight - 16);
-    if (clampedMaxHeight > 0) {
-      previewCard.style.maxHeight = clampedMaxHeight + 'px';
-    }
+    previewCard.style.maxHeight = '';
 
     // Position relative to selected row.
-    // If the row is in the lower half of the panel, anchor the card bottom to the
-    // row bottom so it grows upward — avoiding clipping by the WebView edge.
+    // The native panel is resized from preview content, so the card can remain
+    // fully visible without its own internal scrollbar.
     var rows = resultsContainer.querySelectorAll('.row');
     if (rows[selectedIndex]) {
       var rowRect = rows[selectedIndex].getBoundingClientRect();
       var panelRect = panel.getBoundingClientRect();
       var rowTop = rowRect.top - panelRect.top;
-      var rowBottom = rowRect.bottom - panelRect.top;
-      panelHeight = panelRect.height;
-      var cardMaxH = Math.min(previewCard.scrollHeight || clampedMaxHeight, clampedMaxHeight);
       previewCard.style.top = '';
       previewCard.style.bottom = '';
-      if (rowTop + cardMaxH > panelHeight && rowBottom > panelHeight / 2) {
-        // Anchor to row bottom and grow upward
-        previewCard.style.bottom = (panelHeight - rowBottom) + 'px';
-      } else {
-        previewCard.style.top = rowTop + 'px';
-      }
+      previewCard.style.top = rowTop + 'px';
     }
 
     previewCard.classList.add('preview--visible');
@@ -876,5 +866,6 @@
       isPreviewShowing = true;
       if (bridge) bridge.postMessage({ type: 'previewVisible', visible: true });
     }
+    notifyResize();
   };
 })();

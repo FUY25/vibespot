@@ -19,6 +19,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private let webView: WKWebView
     private let webBridge = WebBridge()
     private let searchDebouncer = Debouncer(delay: 0.08)
+    private var visibleRefreshTimer: Timer?
 
     private var results: [SearchResult] = []
     private var deactivationObserver: NSObjectProtocol?
@@ -92,10 +93,13 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         pushTheme()
         pushMode()
         refreshResults(query: "")
+        startVisibleRefreshTimer()
     }
 
     func hide() {
         searchDebouncer.cancel()
+        visibleRefreshTimer?.invalidate()
+        visibleRefreshTimer = nil
         isPreviewVisible = false
         panel.orderOut(nil)
     }
@@ -407,10 +411,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             return commandString(from: parsed)
         }
 
-        if defaultTool == "codex" {
-            return commandString(from: NewSessionCommand(tool: "codex", flags: [], prompt: query))
-        }
-        return commandString(from: NewSessionCommand(tool: "claude", flags: [], prompt: query))
+        return commandString(from: NewSessionCommand(
+            tool: defaultTool,
+            flags: [],
+            prompt: strippedLauncherPrompt(from: query)
+        ))
     }
 
     private static func matchesLaunchIntentToken(in query: String, aliases: Set<String>) -> Bool {
@@ -432,6 +437,34 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             return true
         }
         return false
+    }
+
+    private static func strippedLauncherPrompt(from query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !tokens.isEmpty else { return "" }
+        let lowerTokens = tokens.map { $0.lowercased() }
+        var index = 0
+
+        if lowerTokens[index] == "new" {
+            index += 1
+        }
+
+        if index < lowerTokens.count,
+           matchesLaunchIntentToken(in: lowerTokens[index], aliases: codexAliases)
+            || matchesLaunchIntentToken(in: lowerTokens[index], aliases: claudeAliases)
+        {
+            index += 1
+        }
+
+        if index < lowerTokens.count, sessionFillerTokens.contains(lowerTokens[index]) {
+            index += 1
+        }
+
+        guard index < tokens.count else { return "" }
+        return Array(tokens[index...]).joined(separator: " ")
     }
 
     private static func commandString(from command: NewSessionCommand) -> String {
@@ -706,6 +739,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     @MainActor
     deinit {
+        visibleRefreshTimer?.invalidate()
         if let observer = deactivationObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -731,6 +765,38 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private func activeScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         return NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
+    }
+
+    private func startVisibleRefreshTimer() {
+        visibleRefreshTimer?.invalidate()
+        visibleRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshVisibleResults()
+            }
+        }
+    }
+
+    private func refreshVisibleResults() {
+        guard panel.isVisible else { return }
+        guard sessionIndex != nil else {
+            pushResults([])
+            return
+        }
+
+        guard isWebViewReady else {
+            refreshResults(query: lastSearchQuery ?? "")
+            return
+        }
+
+        webView.evaluateJavaScript("document.getElementById('searchInput')?.value ?? ''") { [weak self] value, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.panel.isVisible else { return }
+                let currentQuery = (value as? String) ?? self.lastSearchQuery ?? ""
+                self.lastSearchQuery = currentQuery
+                self.refreshResults(query: currentQuery)
+            }
+        }
     }
 }
 

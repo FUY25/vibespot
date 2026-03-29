@@ -482,8 +482,7 @@ body {
   top: 0;
   right: -464px;
   width: 456px;
-  max-height: calc(var(--max-visible-rows) * var(--row-h-closed));
-  overflow-y: auto;
+  overflow: visible;
   background: var(--panel-bg);
   border-left: 1px solid var(--ghost);
   border-radius: 0 var(--panel-radius) var(--panel-radius) 0;
