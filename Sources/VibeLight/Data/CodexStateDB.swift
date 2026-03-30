@@ -1,0 +1,265 @@
+import Foundation
+import SQLite3
+
+final class CodexStateDB {
+    let path: String
+
+    private struct ThrottleState {
+        var lastFailureTime: Date?
+        var lastLogTime: Date?
+    }
+
+    private final class SharedThrottleStore: @unchecked Sendable {
+        private var throttleStateByPath: [String: ThrottleState] = [:]
+        private let stateLock = NSLock()
+
+        func read(path: String) -> ThrottleState {
+            withLockedState { stateMap in
+                stateMap[path] ?? ThrottleState()
+            }
+        }
+
+        func update(path: String, _ update: (inout ThrottleState) -> Void) {
+            withLockedState { stateMap in
+                var state = stateMap[path] ?? ThrottleState()
+                update(&state)
+                stateMap[path] = state
+            }
+        }
+
+        private func withLockedState<T>(_ operation: (inout [String: ThrottleState]) -> T) -> T {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return operation(&throttleStateByPath)
+        }
+    }
+
+    private static let sharedThrottleStore = SharedThrottleStore()
+    private static let cooldownInterval: TimeInterval = 30
+    private static let logThrottleInterval: TimeInterval = 60
+
+    init(path: String) {
+        self.path = path
+    }
+
+    convenience init() {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+            .appendingPathComponent("state_5.sqlite")
+            .path
+        self.init(path: path)
+    }
+
+    func sessionIdByCwd(_ cwd: String) -> String? {
+        guard !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard shouldAttemptOpen() else { return nil }
+
+        return withReadOnlyDatabase { db in
+            let sql = """
+            SELECT id
+            FROM threads
+            WHERE cwd = ?1
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """
+
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                logSQLiteError(db, context: "prepare sessionIdByCwd")
+                return nil
+            }
+            defer { sqlite3_finalize(statement) }
+
+            guard sqlite3_bind_text(statement, 1, (cwd as NSString).utf8String, -1, sqliteTransientDestructor) == SQLITE_OK else {
+                logSQLiteError(db, context: "bind sessionIdByCwd")
+                return nil
+            }
+
+            let rc = sqlite3_step(statement)
+            guard rc == SQLITE_ROW else {
+                if rc != SQLITE_DONE {
+                    logSQLiteError(db, context: "step sessionIdByCwd", code: rc)
+                }
+                return nil
+            }
+            guard let id = sqlite3_column_text(statement, 0) else {
+                return nil
+            }
+
+            return String(cString: id)
+        }
+    }
+
+    func sessionIdByRolloutPath(_ rolloutPath: String) -> String? {
+        let normalizedPath = rolloutPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedPath.isEmpty else { return nil }
+        guard shouldAttemptOpen() else { return nil }
+
+        return withReadOnlyDatabase { db in
+            let sql = """
+            SELECT id
+            FROM threads
+            WHERE rollout_path = ?1
+            LIMIT 2
+            """
+
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                logSQLiteError(db, context: "prepare sessionIdByRolloutPath")
+                return nil
+            }
+            defer { sqlite3_finalize(statement) }
+
+            guard sqlite3_bind_text(statement, 1, (normalizedPath as NSString).utf8String, -1, sqliteTransientDestructor)
+                == SQLITE_OK
+            else {
+                logSQLiteError(db, context: "bind sessionIdByRolloutPath")
+                return nil
+            }
+
+            let firstRC = sqlite3_step(statement)
+            guard firstRC == SQLITE_ROW else {
+                if firstRC != SQLITE_DONE {
+                    logSQLiteError(db, context: "step sessionIdByRolloutPath", code: firstRC)
+                }
+                return nil
+            }
+            guard let id = sqlite3_column_text(statement, 0) else {
+                return nil
+            }
+            let firstID = String(cString: id)
+
+            let secondRC = sqlite3_step(statement)
+            if secondRC == SQLITE_ROW {
+                return nil
+            }
+            if secondRC != SQLITE_DONE {
+                logSQLiteError(db, context: "step sessionIdByRolloutPath second row", code: secondRC)
+                return nil
+            }
+
+            return firstID
+        }
+    }
+
+    func gitBranchMap() -> [String: String] {
+        guard shouldAttemptOpen() else { return [:] }
+
+        return withReadOnlyDatabase { db in
+            let sql = """
+            SELECT id, git_branch
+            FROM threads
+            WHERE git_branch IS NOT NULL
+              AND TRIM(git_branch) <> ''
+            """
+
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+                logSQLiteError(db, context: "prepare gitBranchMap")
+                return [:]
+            }
+            defer { sqlite3_finalize(statement) }
+
+            var branches: [String: String] = [:]
+
+            while true {
+                let rc = sqlite3_step(statement)
+                if rc == SQLITE_DONE {
+                    break
+                }
+                if rc != SQLITE_ROW {
+                    logSQLiteError(db, context: "step gitBranchMap", code: rc)
+                    break
+                }
+
+                guard let idText = sqlite3_column_text(statement, 0),
+                      let branchText = sqlite3_column_text(statement, 1)
+                else {
+                    continue
+                }
+
+                branches[String(cString: idText)] = String(cString: branchText)
+            }
+
+            return branches
+        } ?? [:]
+    }
+
+    private func shouldAttemptOpen() -> Bool {
+        let state = Self.sharedThrottleStore.read(path: path)
+        if let lastFailure = state.lastFailureTime {
+            let elapsed = Date().timeIntervalSince(lastFailure)
+            if elapsed < Self.cooldownInterval {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func withReadOnlyDatabase<T>(_ operation: (OpaquePointer) -> T?) -> T? {
+        // Use immutable URI mode to read WAL databases locked by Codex.
+        // SQLITE_OPEN_READONLY fails on WAL databases held by another process.
+        let uri = "file://\(path)?immutable=1"
+        var handle: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI
+        let rc = sqlite3_open_v2(uri, &handle, flags, nil)
+
+        guard rc == SQLITE_OK, let db = handle else {
+            recordFailure()
+            if let handle {
+                logSQLiteError(handle, context: "open read-only database", code: rc)
+                sqlite3_close_v2(handle)
+            }
+            return nil
+        }
+
+        // Reset failure tracking on successful open
+        clearFailure()
+
+        defer {
+            let closeRC = sqlite3_close_v2(db)
+            if closeRC != SQLITE_OK {
+                logSQLiteError(db, context: "close read-only database", code: closeRC)
+            }
+        }
+        return operation(db)
+    }
+
+    private func logSQLiteError(_ db: OpaquePointer?, context: String, code: Int32? = nil) {
+        guard shouldLog() else {
+            return
+        }
+
+        let rc = code ?? sqlite3_errcode(db)
+        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+        print("CodexStateDB: \(context) failed (\(rc)): \(message)")
+    }
+
+    private func recordFailure() {
+        let now = Date()
+        Self.sharedThrottleStore.update(path: path) { state in
+            state.lastFailureTime = now
+        }
+    }
+
+    private func clearFailure() {
+        Self.sharedThrottleStore.update(path: path) { state in
+            state.lastFailureTime = nil
+        }
+    }
+
+    private func shouldLog() -> Bool {
+        let now = Date()
+        var shouldLog = false
+        Self.sharedThrottleStore.update(path: path) { state in
+            if let lastLog = state.lastLogTime, now.timeIntervalSince(lastLog) < Self.logThrottleInterval {
+                shouldLog = false
+                return
+            }
+            state.lastLogTime = now
+            shouldLog = true
+        }
+        return shouldLog
+    }
+
+}

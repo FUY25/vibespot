@@ -1,0 +1,9 @@
+{"timestamp":"2026-03-22T13:00:00.000Z","type":"session_meta","payload":{"id":"codex-001","timestamp":"2026-03-22T13:00:00.000Z","cwd":"/Users/me/project","originator":"codex_cli","cli_version":"0.78.0"}}
+{"timestamp":"2026-03-22T13:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"analyze the folder structure of this project"},{"type":"input_text","text":"focus on src and tests"}]}}
+{"timestamp":"2026-03-22T13:00:03.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"sandbox_mode is danger-full-access; approval_policy is never"}]}}
+{"timestamp":"2026-03-22T13:00:05.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll analyze the project structure."},{"type":"output_text","text":"The main directories are src/, tests/, and docs/."}]}}
+{"timestamp":"2026-03-22T13:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"bash\",\"-lc\",\"ls\"],\"workdir\":\"/Users/me/project\"}","call_id":"call_shell_001"}}
+{"timestamp":"2026-03-22T13:00:06.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_shell_001","output":"{\"output\":\"file1\\nfile2\\n\",\"metadata\":{\"exit_code\":0}}"}}
+{"timestamp":"2026-03-22T13:00:06.700Z","type":"response_item","payload":{"type":"custom_tool_call","name":"grep_search","input":{"query":"TODO","path":"Sources/App.swift"},"call_id":"call_custom_001"}}
+{"timestamp":"2026-03-22T13:00:06.900Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_custom_001","output":"Found TODO in Sources/App.swift"}}
+{"timestamp":"2026-03-22T13:00:07.000Z","type":"response_item","payload":{"type":"message","role":"system","content":[{"type":"text","text":"Running quick checks before final answer."}]}}

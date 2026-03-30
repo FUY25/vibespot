@@ -1,0 +1,3 @@
+{"type":"user","timestamp":"2026-03-28T14:00:00Z","message":{"role":"user","content":[{"type":"text","text":"Please proceed with the parser update and tests."}]}}
+{"type":"assistant","timestamp":"2026-03-28T14:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Could you confirm I should keep the fixture names unchanged?"}]}}
+{"type":"assistant","timestamp":"2026-03-28T14:00:12Z","message":{"role":"assistant","content":[{"type":"text","text":"I applied the parser update and added regression coverage."}]}}
