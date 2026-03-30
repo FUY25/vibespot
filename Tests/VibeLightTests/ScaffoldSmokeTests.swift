@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 @MainActor
 private func withRestoredSharedApplicationState<Result>(
@@ -36,7 +36,7 @@ func configuresMenuBarApplicationActivationPolicy() {
 
 @MainActor
 @Test
-func createsMenuBarStatusItemTitledVLZeroWhenLaunching() {
+func createsMenuBarStatusItemTitledFLZeroWhenLaunching() {
     let delegate = AppDelegate(startsRuntimeServices: false)
 
     defer {
@@ -47,7 +47,7 @@ func createsMenuBarStatusItemTitledVLZeroWhenLaunching() {
 
     delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
 
-    #expect(delegate.statusItemTitle == "VL: 0")
+    #expect(delegate.statusItemTitle == "FL: 0")
 }
 
 @MainActor

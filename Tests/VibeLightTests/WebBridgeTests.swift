@@ -1,7 +1,7 @@
 // Tests/VibeLightTests/WebBridgeTests.swift
 import Testing
 import Foundation
-@testable import VibeLight
+@testable import Flare
 
 @Suite("WebBridge message parsing")
 struct WebBridgeTests {

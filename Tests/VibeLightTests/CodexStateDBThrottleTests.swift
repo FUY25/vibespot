@@ -1,7 +1,7 @@
 // Tests/VibeLightTests/CodexStateDBThrottleTests.swift
 import Foundation
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 @Suite("CodexStateDB throttle tests")
 struct CodexStateDBThrottleTests {

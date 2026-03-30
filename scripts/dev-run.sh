@@ -10,4 +10,4 @@ if [[ "${1:-}" == "--clean" ]]; then
   shift
 fi
 
-exec swift run -c debug VibeLight "$@"
+exec swift run -c debug Flare "$@"

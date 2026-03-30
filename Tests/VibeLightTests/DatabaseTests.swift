@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 private enum TransactionTestError: Error {
     case rollbackSentinel

@@ -6,7 +6,7 @@ enum WindowJumper {
         case timedOut
     }
 
-    private static let jumpQueue = DispatchQueue(label: "VibeLight.WindowJumper", qos: .userInitiated)
+    private static let jumpQueue = DispatchQueue(label: "Flare.WindowJumper", qos: .userInitiated)
 
     @MainActor
     static func jumpToSession(_ result: SearchResult) {

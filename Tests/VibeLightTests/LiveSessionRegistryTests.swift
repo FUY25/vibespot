@@ -1,5 +1,5 @@
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 @Test
 func parseCodexPIDsExtractsOnlyCodexPIDs() {

@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 private func makeTempDBPath() -> String {
     let tmpDir = FileManager.default.temporaryDirectory

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import VibeLight
+@testable import Flare
 
 @Suite("Search panel controller preview merge")
 struct SearchPanelControllerPreviewTests {

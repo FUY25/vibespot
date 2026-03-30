@@ -1,7 +1,7 @@
 // Tests/VibeLightTests/PIDDeduplicationTests.swift
 import Testing
 import Foundation
-@testable import VibeLight
+@testable import Flare
 
 @Suite("PID deduplication tests")
 struct PIDDeduplicationTests {

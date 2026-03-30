@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(darkItem)
         menu.addItem(autoItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit VibeLight", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Flare", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem?.menu = menu
         statusItem?.button?.performClick(nil)
@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeStatusItemTitle(count: Int) -> String {
-        "VL: \(count)"
+        "FL: \(count)"
     }
 
     static func routeSelection(
@@ -231,13 +231,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appropriateFor: nil,
             create: true
         )
-        let vibeLightSupportURL = applicationSupportURL.appendingPathComponent("VibeLight", isDirectory: true)
+        let flareSupportURL = applicationSupportURL.appendingPathComponent("Flare", isDirectory: true)
         try fileManager.createDirectory(
-            at: vibeLightSupportURL,
+            at: flareSupportURL,
             withIntermediateDirectories: true,
             attributes: nil
         )
-        let dbURL = vibeLightSupportURL.appendingPathComponent("index.sqlite3", isDirectory: false)
+        let dbURL = flareSupportURL.appendingPathComponent("index.sqlite3", isDirectory: false)
         return try SessionIndex(dbPath: dbURL.path)
     }
 }

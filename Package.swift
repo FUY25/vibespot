@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "VibeLight",
+    name: "Flare",
     platforms: [.macOS(.v14)],
     targets: [
         .systemLibrary(
@@ -10,7 +10,7 @@ let package = Package(
             path: "Sources/CLibProc"
         ),
         .executableTarget(
-            name: "VibeLight",
+            name: "Flare",
             dependencies: ["CLibProc"],
             path: "Sources/VibeLight",
             resources: [.process("Resources")],
@@ -19,8 +19,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "VibeLightTests",
-            dependencies: ["VibeLight"],
+            name: "FlareTests",
+            dependencies: ["Flare"],
             path: "Tests/VibeLightTests",
             resources: [.copy("Fixtures")]
         ),
