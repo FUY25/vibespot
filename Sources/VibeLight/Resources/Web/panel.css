@@ -53,6 +53,8 @@
   --search-height: 64px;
   --search-h-pad: 22px;
   --search-top-pad: 14px;
+  --search-font-size: 24px;
+  --search-line-height: 32px;
   --results-h-pad: 6px;
   --results-bottom-pad: 12px;
   --max-visible-rows: 7;
@@ -165,6 +167,9 @@ body {
 
 .search-input-wrapper {
   flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: var(--search-line-height);
   position: relative;
   min-width: 0;
 }
@@ -175,21 +180,26 @@ body {
   border: none;
   outline: none;
   font-family: var(--font-ui);
-  font-size: 24px;
+  font-size: var(--search-font-size);
   font-weight: 500;
+  line-height: var(--search-line-height);
+  height: var(--search-line-height);
   letter-spacing: -0.02em;
   color: var(--label);
   caret-color: transparent;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 /* Block cursor overlay */
 .block-cursor {
   position: absolute;
-  top: 2px;
+  top: 50%;
   width: 2px;
   height: 24px;
   background: var(--neon);
   pointer-events: none;
+  transform: translateY(-50%);
   animation: blink-cursor 1.06s step-end infinite;
 }
 
@@ -206,8 +216,10 @@ body {
   top: 0;
   left: 0;
   font-family: var(--font-ui);
-  font-size: 24px;
+  font-size: var(--search-font-size);
   font-weight: 500;
+  line-height: var(--search-line-height);
+  height: var(--search-line-height);
   letter-spacing: -0.02em;
   color: var(--label-tertiary);
   pointer-events: none;

@@ -697,7 +697,14 @@
   // --- Block Cursor ---
 
   var cursorMeasure = document.createElement('span');
-  cursorMeasure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-family:' + getComputedStyle(searchInput).fontFamily + ';font-size:24px;font-weight:500;letter-spacing:-0.02em;';
+  var searchInputStyle = getComputedStyle(searchInput);
+  cursorMeasure.style.cssText =
+    'position:absolute;visibility:hidden;white-space:pre;' +
+    'font-family:' + searchInputStyle.fontFamily + ';' +
+    'font-size:' + searchInputStyle.fontSize + ';' +
+    'font-weight:' + searchInputStyle.fontWeight + ';' +
+    'line-height:' + searchInputStyle.lineHeight + ';' +
+    'letter-spacing:' + searchInputStyle.letterSpacing + ';';
   document.body.appendChild(cursorMeasure);
 
   function updateBlockCursor() {
