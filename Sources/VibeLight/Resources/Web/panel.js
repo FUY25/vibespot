@@ -437,14 +437,13 @@
   }
 
   function updateRowContent(row, result, index) {
-    // Update state classes
-    row.className = 'row';
+    // Build target className and only apply if different to prevent blink
     var stateClasses = getStateClasses(result);
-    for (var i = 0; i < stateClasses.length; i++) {
-      row.classList.add(stateClasses[i]);
-    }
-    if (index === selectedIndex) {
-      row.classList.add('row--selected');
+    var parts = ['row'].concat(stateClasses);
+    if (index === selectedIndex) parts.push('row--selected');
+    var targetClassName = parts.join(' ');
+    if (row.className !== targetClassName) {
+      row.className = targetClassName;
     }
     row.dataset.index = index;
 
