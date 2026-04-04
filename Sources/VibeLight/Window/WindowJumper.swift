@@ -185,7 +185,7 @@ enum WindowJumper {
             return false
         }
 
-        return application.activate(options: .activateIgnoringOtherApps)
+        return application.activate(options: [])
     }
 
     static func runProcess(
