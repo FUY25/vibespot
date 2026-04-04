@@ -449,9 +449,9 @@
     row.dataset.index = index;
 
     var titleEl = row.querySelector('.row__title');
-    var cleanTitle = stripANSI(result.title);
-    if (titleEl && titleEl.textContent !== cleanTitle) {
-      titleEl.textContent = cleanTitle;
+    var newTitle = displayTitle(result);
+    if (titleEl && titleEl.textContent !== newTitle) {
+      titleEl.textContent = newTitle;
     }
 
     var pathEl = row.querySelector('.row__path');
@@ -503,7 +503,7 @@
 
     var title = document.createElement('span');
     title.className = 'row__title';
-    title.textContent = stripANSI(result.title);
+    title.textContent = displayTitle(result);
     body.appendChild(title);
 
     var metaRow = document.createElement('div');
@@ -659,6 +659,30 @@
     if (!text) return '';
     // eslint-disable-next-line no-control-regex
     return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  }
+
+  function stripSnippetMarkers(text) {
+    return (text || '').replace(/>>>/g, '').replace(/<<</g, '');
+  }
+
+  function isGenericTitle(title, result) {
+    if (!title || title === 'Untitled') return true;
+    var pName = stripANSI(result.projectName || '');
+    if (pName && title === pName) return true;
+    return false;
+  }
+
+  function displayTitle(result) {
+    // For FTS snippet matches: show the matched text
+    if (result.snippet) {
+      return stripSnippetMarkers(stripANSI(result.snippet));
+    }
+    var title = stripANSI(result.title || '');
+    // Fallback to last user prompt ONLY when no smart title/summary exists
+    if (result.lastUserPrompt && isGenericTitle(title, result)) {
+      return stripANSI(result.lastUserPrompt);
+    }
+    return title;
   }
 
   function stripMarkdown(text) {
