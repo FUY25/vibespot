@@ -774,21 +774,7 @@
 
     previewCard.innerHTML = '';
 
-    if (data.state) {
-      var stateLine = document.createElement('div');
-      stateLine.className = 'preview__state';
-      stateLine.textContent = stripMarkdown(stripANSI(data.state));
-      previewCard.appendChild(stateLine);
-    }
-
-    if (data.detail) {
-      var detailLine = document.createElement('div');
-      detailLine.className = 'preview__detail';
-      detailLine.textContent = stripMarkdown(stripANSI(data.detail));
-      previewCard.appendChild(detailLine);
-    }
-
-    var exchanges = (data.exchanges || []).slice(-2);
+    var exchanges = (data.exchanges || []).slice(-3);
     if (exchanges.length > 0) {
       var rounds = document.createElement('div');
       rounds.className = 'preview__rounds';
