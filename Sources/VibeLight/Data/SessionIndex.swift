@@ -405,7 +405,7 @@ final class SessionIndex: @unchecked Sendable {
                 git_branch LIKE ?1 ESCAPE '\\'
             )
             \(statusClause)
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 
@@ -416,6 +416,7 @@ final class SessionIndex: @unchecked Sendable {
                     transcripts.session_id,
                     CASE s.status WHEN 'live' THEN 0 ELSE 1 END AS status_priority,
                     s.started_at AS session_started_at,
+                    COALESCE(s.last_activity_at, s.started_at) AS session_last_active,
                     transcripts.timestamp_str AS transcript_timestamp,
                     rank AS match_rank
                 FROM transcripts
@@ -429,6 +430,7 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    session_last_active,
                     transcript_timestamp,
                     match_rank,
                     ROW_NUMBER() OVER (
@@ -443,6 +445,7 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    session_last_active,
                     transcript_timestamp,
                     match_rank
                 FROM session_matches
@@ -450,7 +453,7 @@ final class SessionIndex: @unchecked Sendable {
                 ORDER BY
                     status_priority,
                     match_rank,
-                    session_started_at DESC,
+                    session_last_active DESC,
                     transcript_timestamp DESC,
                     transcript_rowid DESC
                 LIMIT 50
@@ -488,7 +491,7 @@ final class SessionIndex: @unchecked Sendable {
             ORDER BY
                 deduplicated_matches.status_priority,
                 deduplicated_matches.match_rank,
-                deduplicated_matches.session_started_at DESC,
+                deduplicated_matches.session_last_active DESC,
                 deduplicated_matches.transcript_timestamp DESC,
                 deduplicated_matches.transcript_rowid DESC
         """
@@ -557,7 +560,7 @@ final class SessionIndex: @unchecked Sendable {
                 last_context_sample_at
             FROM session_matches
             WHERE match_row_number = 1
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 
@@ -875,7 +878,7 @@ final class SessionIndex: @unchecked Sendable {
                 context_confidence, context_source, last_context_sample_at
             FROM sessions
             \(liveOnly ? "WHERE status = 'live'" : "")
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 

@@ -1730,3 +1730,42 @@ private enum TestDatabaseError: Error {
 }
 
 private let transientDestructor = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+@Test
+func testSearchOrdersByLastActivityAtDescendingNotStartedAt() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+
+    // Session A: started first but had recent activity
+    try index.upsertSession(
+        id: "session-a",
+        tool: "claude",
+        title: "old session recent activity",
+        project: "/p", projectName: "proj", gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-3600), // started 1h ago
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-60) // active 1 min ago
+    )
+
+    // Session B: started more recently but has been idle longer
+    try index.upsertSession(
+        id: "session-b",
+        tool: "claude",
+        title: "newer session older activity",
+        project: "/p", projectName: "proj", gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-1800), // started 30min ago
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-3600) // active 1h ago
+    )
+
+    let results = try index.search(query: "", includeHistory: true)
+    let ids = results.map(\.sessionId)
+    // session-a should be first because its lastActivityAt is more recent
+    #expect(ids.first == "session-a", "Most recently active session should rank first")
+}
