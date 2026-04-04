@@ -753,13 +753,20 @@ final class Indexer {
             betterTitle = codexTitleMap[result.sessionId]
         }
 
-        // Fall back to last user prompt from JSONL tail
-        if betterTitle == nil, let fileURL = findSessionFile(sessionId: result.sessionId) {
-            betterTitle = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
+        var lastUserPrompt: String?
+        if let fileURL = findSessionFile(sessionId: result.sessionId) {
+            lastUserPrompt = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
+        }
+
+        if betterTitle == nil {
+            betterTitle = lastUserPrompt
         }
 
         if let betterTitle, !betterTitle.isEmpty {
             try? sessionIndex.updateTitle(sessionId: result.sessionId, title: betterTitle)
+        }
+        if let lastUserPrompt, !lastUserPrompt.isEmpty {
+            try? sessionIndex.updateLastUserPrompt(sessionId: result.sessionId, prompt: lastUserPrompt)
         }
     }
 
