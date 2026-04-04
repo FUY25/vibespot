@@ -64,6 +64,7 @@ enum WindowJumper {
                 repeat with terminalTab in tabs of terminalWindow
                     if tty of terminalTab is targetTTY then
                         set selected of terminalTab to true
+                        set frontmost of terminalWindow to true
                         set index of terminalWindow to 1
                         activate
                         return "ok"
@@ -184,7 +185,7 @@ enum WindowJumper {
             return false
         }
 
-        return application.activate(options: [])
+        return application.activate(options: .activateIgnoringOtherApps)
     }
 
     static func runProcess(
