@@ -89,18 +89,21 @@ enum WindowJumper {
             let targetTTY = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
             log("jumpViaTerminal: pid=\(pid) → tty=\(targetTTY)")
 
-            let terminalResult = runAppleScript(buildTerminalAppScript(targetTTY: targetTTY))
-            log("jumpViaTerminal: Terminal.app script returned \(terminalResult ?? "nil")")
-            if terminalResult == "ok" {
-                openBundleOnMainThread("com.apple.Terminal")
-                return true
+            // Switch Space FIRST via `open -a`, then select the right tab.
+            // NSWorkspace.open after AppleScript activate is a no-op because
+            // macOS already considers the app "active" on its own Space.
+            if isAppRunning("com.apple.Terminal") {
+                bringAppViaOpen("Terminal")
+                let result = runAppleScript(buildTerminalAppScript(targetTTY: targetTTY))
+                log("jumpViaTerminal: Terminal.app script returned \(result ?? "nil")")
+                if result == "ok" { return true }
             }
 
-            let itermResult = runAppleScript(buildITermScript(targetTTY: targetTTY))
-            log("jumpViaTerminal: iTerm script returned \(itermResult ?? "nil")")
-            if itermResult == "ok" {
-                openBundleOnMainThread("com.googlecode.iterm2")
-                return true
+            if isAppRunning("com.googlecode.iterm2") {
+                bringAppViaOpen("iTerm")
+                let result = runAppleScript(buildITermScript(targetTTY: targetTTY))
+                log("jumpViaTerminal: iTerm script returned \(result ?? "nil")")
+                if result == "ok" { return true }
             }
 
             return false
@@ -116,15 +119,23 @@ enum WindowJumper {
         }
     }
 
-    private static func openBundleOnMainThread(_ bundleIdentifier: String) {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first,
-              let bundleURL = app.bundleURL else { return }
-        if Thread.isMainThread {
-            NSWorkspace.shared.open(bundleURL)
-        } else {
-            DispatchQueue.main.async {
-                NSWorkspace.shared.open(bundleURL)
-            }
+    private static func isAppRunning(_ bundleIdentifier: String) -> Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
+    }
+
+    /// Use `/usr/bin/open -a` to bring an app to the foreground — this reliably
+    /// switches macOS Spaces/desktops, unlike NSWorkspace.open or AppleScript activate.
+    private static func bringAppViaOpen(_ appName: String) {
+        log("bringAppViaOpen: switching to \(appName)")
+        do {
+            let result = try runProcess(
+                executableURL: URL(fileURLWithPath: "/usr/bin/open"),
+                arguments: ["-a", appName],
+                timeout: 3.0
+            )
+            log("bringAppViaOpen: \(appName) exit=\(result.terminationStatus)")
+        } catch {
+            log("bringAppViaOpen: \(appName) error: \(error)")
         }
     }
 
