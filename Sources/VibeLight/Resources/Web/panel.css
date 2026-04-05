@@ -552,17 +552,17 @@ body {
 .preview__rounds {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 8px;
   margin-bottom: 12px;
   border-top: 1px solid var(--ghost);
+  padding-top: 8px;
 }
 
 .preview__round {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--ghost);
   border-radius: 0;
-  padding: 8px 0;
+  padding: 0;
 }
 
 .preview__round-role {
@@ -588,8 +588,6 @@ body {
 
 .preview__round--user {
   background: transparent;
-  border-radius: 4px;
-  padding: 8px 6px;
 }
 
 .preview__round--user .preview__round-text {
