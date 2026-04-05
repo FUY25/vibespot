@@ -283,10 +283,6 @@ enum SessionTitleNormalizer {
         }
 
         if lines.count == 1 {
-            let lowercasedLine = lines[0].lowercased()
-            if outputPrefixes.contains(where: { lowercasedLine.hasPrefix($0) }) {
-                return true
-            }
             return isLikelyOutputLine(lines[0])
         }
 
@@ -312,23 +308,27 @@ enum SessionTitleNormalizer {
             return true
         }
 
-        // Line-numbered file content (e.g. "1→", "  42→")
+        // Line-numbered output: "42→" (cat -n), "478:.foo" / "479- bar" (grep)
         let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-        if let arrowIndex = trimmedLine.firstIndex(of: "→") {
-            let beforeArrow = trimmedLine[trimmedLine.startIndex..<arrowIndex]
-            if !beforeArrow.isEmpty && beforeArrow.allSatisfy(\.isWholeNumber) {
-                return true
-            }
+        if hasLeadingLineNumber(trimmedLine) {
+            return true
         }
 
-        // Grep-style line-numbered output (e.g. "478:.keyboard-hints", "479- display:")
-        if let colonOrDash = trimmedLine.firstIndex(where: { $0 == ":" || $0 == "-" }) {
-            let beforeDelimiter = trimmedLine[trimmedLine.startIndex..<colonOrDash]
-            if !beforeDelimiter.isEmpty && beforeDelimiter.allSatisfy(\.isWholeNumber) {
-                return true
+        return false
+    }
+
+    /// Detects line-numbered output patterns: digits followed by a delimiter (→, :, -).
+    /// Requires 2+ digits to avoid false positives on natural language like "5-star" or "3: things".
+    private static func hasLeadingLineNumber(_ line: String) -> Bool {
+        let delimiters: [Character] = ["→", ":", "-"]
+        for delimiter in delimiters {
+            if let idx = line.firstIndex(of: delimiter) {
+                let prefix = line[line.startIndex..<idx]
+                if prefix.count >= 2 && prefix.allSatisfy(\.isWholeNumber) {
+                    return true
+                }
             }
         }
-
         return false
     }
 }
