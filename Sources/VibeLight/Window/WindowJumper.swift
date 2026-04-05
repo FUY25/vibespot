@@ -29,6 +29,10 @@ enum WindowJumper {
     }
 
     private static func performJump(for pid: Int) {
+        // Yield Flare's activation before attempting the jump so the target
+        // terminal can reliably grab focus regardless of macOS window ordering.
+        yieldToTerminalProcess(pid: pid)
+
         if jumpViaTerminal(pid: pid) {
             return
         }
@@ -38,6 +42,28 @@ enum WindowJumper {
         }
 
         _ = activateFirstAvailableApplication(startingAt: pid)
+    }
+
+    /// Yield activation to the running app that owns this PID (or its parent chain).
+    private static func yieldToTerminalProcess(pid: Int) {
+        var currentPID: Int? = pid
+        var visited = Set<Int>()
+
+        while let p = currentPID, visited.insert(p).inserted {
+            if let app = NSRunningApplication(processIdentifier: pid_t(p)),
+               app.activationPolicy != .prohibited {
+                DispatchQueue.main.async {
+                    NSApp.yieldActivation(to: app)
+                }
+                return
+            }
+            switch parentPIDLookup(for: p) {
+            case .success(let parent) where parent != p:
+                currentPID = parent
+            default:
+                currentPID = nil
+            }
+        }
     }
 
     private static func jumpViaTerminal(pid: Int) -> Bool {
@@ -244,9 +270,6 @@ enum WindowJumper {
             return false
         }
 
-        // Bring the app to the current Space and force focus.
-        // NSWorkspace.open moves across Spaces; activateIgnoringOtherApps
-        // ensures the app becomes key even when Flare just resigned.
         if let bundleURL = application.bundleURL {
             NSWorkspace.shared.open(bundleURL)
         }

@@ -102,9 +102,6 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         visibleRefreshTimer = nil
         isPreviewVisible = false
         panel.orderOut(nil)
-        // Resign active status so the target terminal can grab focus.
-        // Accessory apps hold activation after orderOut; deactivate releases it.
-        NSApp.deactivate()
     }
 
     // MARK: - WebBridgeDelegate

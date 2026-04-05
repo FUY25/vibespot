@@ -188,7 +188,7 @@ final class SessionIndex: @unchecked Sendable {
                 project = excluded.project,
                 project_name = excluded.project_name,
                 git_branch = excluded.git_branch,
-                status = excluded.status,
+                status = CASE WHEN sessions.status = 'live' THEN sessions.status ELSE excluded.status END,
                 started_at = excluded.started_at,
                 pid = excluded.pid,
                 token_count = excluded.token_count,
