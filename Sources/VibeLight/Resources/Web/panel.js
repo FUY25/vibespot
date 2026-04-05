@@ -457,6 +457,21 @@
       titleEl.innerHTML = displayTitleHTML(result);
     }
 
+    var snippetEl = row.querySelector('.row__snippet');
+    var newSnippetHTML = displaySnippetHTML(result);
+    if (newSnippetHTML && !snippetEl) {
+      row.classList.add('row--has-snippet');
+      var snippet = document.createElement('span');
+      snippet.className = 'row__snippet';
+      snippet.innerHTML = newSnippetHTML;
+      if (titleEl) titleEl.insertAdjacentElement('afterend', snippet);
+    } else if (newSnippetHTML && snippetEl) {
+      snippetEl.innerHTML = newSnippetHTML;
+    } else if (!newSnippetHTML && snippetEl) {
+      snippetEl.remove();
+      row.classList.remove('row--has-snippet');
+    }
+
     var pathEl = row.querySelector('.row__path');
     var newPath = formatSessionPath(result);
     if (pathEl && pathEl.textContent !== newPath) {
@@ -508,6 +523,15 @@
     title.className = 'row__title';
     title.innerHTML = displayTitleHTML(result);
     body.appendChild(title);
+
+    var snippetHTML = displaySnippetHTML(result);
+    if (snippetHTML) {
+      row.classList.add('row--has-snippet');
+      var snippet = document.createElement('span');
+      snippet.className = 'row__snippet';
+      snippet.innerHTML = snippetHTML;
+      body.appendChild(snippet);
+    }
 
     var metaRow = document.createElement('div');
     metaRow.className = 'row__meta-row';
@@ -684,12 +708,7 @@
   }
 
   function displayTitle(result) {
-    // For FTS snippet matches: show the matched text (plain text version)
-    if (result.snippet) {
-      return stripSnippetMarkers(stripANSI(result.snippet));
-    }
     var title = stripANSI(result.title || '');
-    // Fallback to last user prompt ONLY when no smart title/summary exists
     if (result.lastUserPrompt && isGenericTitle(title, result)) {
       return stripANSI(result.lastUserPrompt);
     }
@@ -697,37 +716,29 @@
   }
 
   function displayTitleHTML(result) {
-    // For FTS snippet matches: render with <mark> highlighting around matched terms
-    if (result.snippet) {
-      var cleaned = stripANSI(result.snippet || '');
-      // Split on >>> and <<< markers, escaping HTML in each segment
-      var parts = [];
-      var remaining = cleaned;
-      while (remaining.length > 0) {
-        var openIdx = remaining.indexOf('>>>');
-        if (openIdx === -1) {
-          parts.push(escapeHTML(remaining));
-          break;
-        }
-        if (openIdx > 0) {
-          parts.push(escapeHTML(remaining.slice(0, openIdx)));
-        }
-        remaining = remaining.slice(openIdx + 3);
-        var closeIdx = remaining.indexOf('<<<');
-        if (closeIdx === -1) {
-          parts.push('<mark>' + escapeHTML(remaining) + '</mark>');
-          break;
-        }
-        parts.push('<mark>' + escapeHTML(remaining.slice(0, closeIdx)) + '</mark>');
-        remaining = remaining.slice(closeIdx + 3);
-      }
-      return parts.join('');
-    }
     var title = stripANSI(result.title || '');
     if (result.lastUserPrompt && isGenericTitle(title, result)) {
       return escapeHTML(stripANSI(result.lastUserPrompt));
     }
     return escapeHTML(title);
+  }
+
+  function displaySnippetHTML(result) {
+    if (!result.snippet) return null;
+    var cleaned = stripANSI(result.snippet);
+    var parts = [];
+    var remaining = cleaned;
+    while (remaining.length > 0) {
+      var openIdx = remaining.indexOf('>>>');
+      if (openIdx === -1) { parts.push(escapeHTML(remaining)); break; }
+      if (openIdx > 0) parts.push(escapeHTML(remaining.slice(0, openIdx)));
+      remaining = remaining.slice(openIdx + 3);
+      var closeIdx = remaining.indexOf('<<<');
+      if (closeIdx === -1) { parts.push('<mark>' + escapeHTML(remaining) + '</mark>'); break; }
+      parts.push('<mark>' + escapeHTML(remaining.slice(0, closeIdx)) + '</mark>');
+      remaining = remaining.slice(closeIdx + 3);
+    }
+    return parts.join('');
   }
 
   function stripMarkdown(text) {

@@ -383,6 +383,26 @@ body {
   padding: 0 1px;
 }
 
+.row__snippet {
+  display: block;
+  width: 100%;
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.row__snippet mark {
+  background: var(--mark-bg);
+  color: var(--mark-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .row__meta-row {
   display: flex;
   align-items: baseline;
