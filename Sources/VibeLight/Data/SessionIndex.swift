@@ -1108,7 +1108,7 @@ final class SessionIndex: @unchecked Sendable {
         )
     }
 
-    static func smartTruncate(_ text: String, maxLength: Int = 60) -> String {
+    static func smartTruncate(_ text: String, maxLength: Int = 120) -> String {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard stripped.count > maxLength else { return stripped }
         if stripped.last == "?" {
