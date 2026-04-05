@@ -185,6 +185,13 @@ enum WindowJumper {
             return false
         }
 
+        // First try to bring the app to the current Space via NSWorkspace.
+        // NSRunningApplication.activate does NOT switch Spaces/desktops,
+        // but opening the app URL via NSWorkspace does.
+        if let bundleURL = application.bundleURL {
+            NSWorkspace.shared.open(bundleURL)
+        }
+
         return application.activate(options: [])
     }
 

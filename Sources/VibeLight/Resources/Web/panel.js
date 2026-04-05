@@ -450,7 +450,7 @@
     var titleEl = row.querySelector('.row__title');
     var newTitle = displayTitle(result);
     if (titleEl && titleEl.textContent !== newTitle) {
-      titleEl.textContent = newTitle;
+      titleEl.innerHTML = displayTitleHTML(result);
     }
 
     var pathEl = row.querySelector('.row__path');
@@ -502,7 +502,7 @@
 
     var title = document.createElement('span');
     title.className = 'row__title';
-    title.textContent = displayTitle(result);
+    title.innerHTML = displayTitleHTML(result);
     body.appendChild(title);
 
     var metaRow = document.createElement('div');
@@ -664,6 +664,14 @@
     return (text || '').replace(/>>>/g, '').replace(/<<</g, '');
   }
 
+  function escapeHTML(text) {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function isGenericTitle(title, result) {
     if (!title || title === 'Untitled') return true;
     var pName = stripANSI(result.projectName || '');
@@ -672,7 +680,7 @@
   }
 
   function displayTitle(result) {
-    // For FTS snippet matches: show the matched text
+    // For FTS snippet matches: show the matched text (plain text version)
     if (result.snippet) {
       return stripSnippetMarkers(stripANSI(result.snippet));
     }
@@ -682,6 +690,40 @@
       return stripANSI(result.lastUserPrompt);
     }
     return title;
+  }
+
+  function displayTitleHTML(result) {
+    // For FTS snippet matches: render with <mark> highlighting around matched terms
+    if (result.snippet) {
+      var cleaned = stripANSI(result.snippet || '');
+      // Split on >>> and <<< markers, escaping HTML in each segment
+      var parts = [];
+      var remaining = cleaned;
+      while (remaining.length > 0) {
+        var openIdx = remaining.indexOf('>>>');
+        if (openIdx === -1) {
+          parts.push(escapeHTML(remaining));
+          break;
+        }
+        if (openIdx > 0) {
+          parts.push(escapeHTML(remaining.slice(0, openIdx)));
+        }
+        remaining = remaining.slice(openIdx + 3);
+        var closeIdx = remaining.indexOf('<<<');
+        if (closeIdx === -1) {
+          parts.push('<mark>' + escapeHTML(remaining) + '</mark>');
+          break;
+        }
+        parts.push('<mark>' + escapeHTML(remaining.slice(0, closeIdx)) + '</mark>');
+        remaining = remaining.slice(closeIdx + 3);
+      }
+      return parts.join('');
+    }
+    var title = stripANSI(result.title || '');
+    if (result.lastUserPrompt && isGenericTitle(title, result)) {
+      return escapeHTML(stripANSI(result.lastUserPrompt));
+    }
+    return escapeHTML(title);
   }
 
   function stripMarkdown(text) {
