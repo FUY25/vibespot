@@ -73,14 +73,30 @@ enum WindowJumper {
 
         let targetTTY = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
 
-        // Try Terminal.app first, then iTerm2
+        // Try Terminal.app first, then iTerm2.
+        // AppleScript selects the right tab/session, but doesn't switch Spaces.
+        // NSWorkspace.open forces macOS to switch to the Space containing the app.
         if jumpViaTerminalApp(targetTTY: targetTTY) {
+            openBundleOnMainThread("com.apple.Terminal")
             return true
         }
         if jumpViaITerm(targetTTY: targetTTY) {
+            openBundleOnMainThread("com.googlecode.iterm2")
             return true
         }
         return false
+    }
+
+    private static func openBundleOnMainThread(_ bundleIdentifier: String) {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first,
+              let bundleURL = app.bundleURL else { return }
+        if Thread.isMainThread {
+            NSWorkspace.shared.open(bundleURL)
+        } else {
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(bundleURL)
+            }
+        }
     }
 
     private static func jumpViaTerminalApp(targetTTY: String) -> Bool {
