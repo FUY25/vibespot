@@ -46,6 +46,18 @@ enum WindowJumper {
         }
 
         let targetTTY = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
+
+        // Try Terminal.app first, then iTerm2
+        if jumpViaTerminalApp(targetTTY: targetTTY) {
+            return true
+        }
+        if jumpViaITerm(targetTTY: targetTTY) {
+            return true
+        }
+        return false
+    }
+
+    private static func jumpViaTerminalApp(targetTTY: String) -> Bool {
         let script = """
         set targetTTY to \(appleScriptStringLiteral(targetTTY))
 
@@ -64,7 +76,6 @@ enum WindowJumper {
                 repeat with terminalTab in tabs of terminalWindow
                     if tty of terminalTab is targetTTY then
                         set selected of terminalTab to true
-                        set frontmost of terminalWindow to true
                         set index of terminalWindow to 1
                         activate
                         return "ok"
@@ -76,19 +87,55 @@ enum WindowJumper {
         return "not-found"
         """
 
+        return runAppleScript(script) == "ok"
+    }
+
+    private static func jumpViaITerm(targetTTY: String) -> Bool {
+        let script = """
+        set targetTTY to \(appleScriptStringLiteral(targetTTY))
+
+        try
+            path to application id "com.googlecode.iterm2"
+        on error
+            return "missing"
+        end try
+
+        if application "iTerm" is not running then
+            return "not-running"
+        end if
+
+        tell application "iTerm"
+            repeat with aWindow in windows
+                repeat with aTab in tabs of aWindow
+                    repeat with aSession in sessions of aTab
+                        if tty of aSession is targetTTY then
+                            select aSession
+                            select aTab
+                            select aWindow
+                            activate
+                            return "ok"
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+        end tell
+
+        return "not-found"
+        """
+
+        return runAppleScript(script) == "ok"
+    }
+
+    private static func runAppleScript(_ script: String) -> String? {
         do {
             let result = try runProcess(
                 executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
                 arguments: ["-e", script]
             )
-
-            guard result.terminationStatus == 0 else {
-                return false
-            }
-
-            return result.trimmedStdout == "ok"
+            guard result.terminationStatus == 0 else { return nil }
+            return result.trimmedStdout
         } catch {
-            return false
+            return nil
         }
     }
 
@@ -166,14 +213,26 @@ enum WindowJumper {
         }
     }
 
-    private static func activateTerminalApplication() -> Bool {
-        if Thread.isMainThread {
-            return activate(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first)
-        }
+    private static let terminalBundleIDs = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "net.kovidgoyal.kitty",
+    ]
 
-        return DispatchQueue.main.sync {
-            activate(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first)
+    private static func activateTerminalApplication() -> Bool {
+        for bundleID in terminalBundleIDs {
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            if let app = apps.first {
+                if Thread.isMainThread {
+                    if activate(app) { return true }
+                } else {
+                    let activated = DispatchQueue.main.sync { activate(app) }
+                    if activated { return true }
+                }
+            }
         }
+        return false
     }
 
     private static func activate(_ application: NSRunningApplication?) -> Bool {
@@ -185,14 +244,14 @@ enum WindowJumper {
             return false
         }
 
-        // First try to bring the app to the current Space via NSWorkspace.
-        // NSRunningApplication.activate does NOT switch Spaces/desktops,
-        // but opening the app URL via NSWorkspace does.
+        // Bring the app to the current Space and force focus.
+        // NSWorkspace.open moves across Spaces; activateIgnoringOtherApps
+        // ensures the app becomes key even when Flare just resigned.
         if let bundleURL = application.bundleURL {
             NSWorkspace.shared.open(bundleURL)
         }
 
-        return application.activate(options: [])
+        return application.activate(options: [.activateIgnoringOtherApps])
     }
 
     static func runProcess(

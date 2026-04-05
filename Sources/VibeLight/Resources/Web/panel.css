@@ -124,6 +124,7 @@ body {
 .panel__content {
   overflow: hidden;
   border-radius: var(--panel-radius);
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
 }
 
 .panel__top-edge {

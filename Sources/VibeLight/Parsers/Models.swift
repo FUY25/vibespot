@@ -304,6 +304,18 @@ enum SessionTitleNormalizer {
             return true
         }
 
+        // Git commit output: "[branch-name hash] message" — hash is 7+ hex chars
+        if lowercasedLine.hasPrefix("["),
+           let closeBracket = lowercasedLine.firstIndex(of: "]") {
+            let bracketContent = lowercasedLine[lowercasedLine.index(after: lowercasedLine.startIndex)..<closeBracket]
+            let parts = bracketContent.split(separator: " ")
+            if parts.count >= 2 {
+                let lastPart = parts.last!
+                let isHex = lastPart.count >= 7 && lastPart.allSatisfy({ $0.isHexDigit })
+                if isHex { return true }
+            }
+        }
+
         if lowercasedLine.hasPrefix("#"), let firstCharacter = lowercasedLine.dropFirst().first, firstCharacter.wholeNumberValue != nil {
             return true
         }
