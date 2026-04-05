@@ -8,12 +8,18 @@ enum WindowJumper {
 
     private static let jumpQueue = DispatchQueue(label: "Flare.WindowJumper", qos: .userInitiated)
 
+    private static func log(_ message: String) {
+        print("[WindowJumper] \(message)")
+    }
+
     @MainActor
     static func jumpToSession(_ result: SearchResult) {
         guard result.status == "live", let pid = result.pid else {
+            log("jumpToSession: skipped — status=\(result.status), pid=\(result.pid ?? -1)")
             return
         }
 
+        log("jumpToSession: session=\(result.sessionId.prefix(8))… tool=\(result.tool) pid=\(pid)")
         jumpQueue.async {
             performJump(for: pid)
         }
@@ -29,19 +35,26 @@ enum WindowJumper {
     }
 
     private static func performJump(for pid: Int) {
+        log("performJump: starting for pid=\(pid)")
+
         // Yield Flare's activation before attempting the jump so the target
         // terminal can reliably grab focus regardless of macOS window ordering.
         yieldToTerminalProcess(pid: pid)
 
         if jumpViaTerminal(pid: pid) {
+            log("performJump: jumpViaTerminal succeeded")
             return
         }
+        log("performJump: jumpViaTerminal failed, trying activateTerminalApplication")
 
         if activateTerminalApplication() {
+            log("performJump: activateTerminalApplication succeeded")
             return
         }
+        log("performJump: activateTerminalApplication failed, trying parent chain")
 
-        _ = activateFirstAvailableApplication(startingAt: pid)
+        let result = activateFirstAvailableApplication(startingAt: pid)
+        log("performJump: activateFirstAvailableApplication result=\(result)")
     }
 
     /// Yield activation to the running app that owns this PID (or its parent chain).
@@ -52,6 +65,8 @@ enum WindowJumper {
         while let p = currentPID, visited.insert(p).inserted {
             if let app = NSRunningApplication(processIdentifier: pid_t(p)),
                app.activationPolicy != .prohibited {
+                let name = app.localizedName ?? "unknown"
+                log("yieldToTerminalProcess: yielding to \(name) (pid=\(p), bundle=\(app.bundleIdentifier ?? "nil"))")
                 DispatchQueue.main.async {
                     NSApp.yieldActivation(to: app)
                 }
@@ -61,30 +76,44 @@ enum WindowJumper {
             case .success(let parent) where parent != p:
                 currentPID = parent
             default:
+                log("yieldToTerminalProcess: no activatable app found in parent chain from pid=\(pid)")
                 currentPID = nil
             }
         }
     }
 
     private static func jumpViaTerminal(pid: Int) -> Bool {
-        guard case .success(let tty) = ttyLookup(for: pid) else {
+        let ttyResult = ttyLookup(for: pid)
+        switch ttyResult {
+        case .success(let tty):
+            let targetTTY = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
+            log("jumpViaTerminal: pid=\(pid) → tty=\(targetTTY)")
+
+            let terminalResult = runAppleScript(buildTerminalAppScript(targetTTY: targetTTY))
+            log("jumpViaTerminal: Terminal.app script returned \(terminalResult ?? "nil")")
+            if terminalResult == "ok" {
+                openBundleOnMainThread("com.apple.Terminal")
+                return true
+            }
+
+            let itermResult = runAppleScript(buildITermScript(targetTTY: targetTTY))
+            log("jumpViaTerminal: iTerm script returned \(itermResult ?? "nil")")
+            if itermResult == "ok" {
+                openBundleOnMainThread("com.googlecode.iterm2")
+                return true
+            }
+
+            return false
+        case .processFailure(let output):
+            log("jumpViaTerminal: tty lookup process failed for pid=\(pid), status=\(output.terminationStatus), stderr=\(output.stderr)")
+            return false
+        case .launchFailure(let error):
+            log("jumpViaTerminal: tty lookup launch failed for pid=\(pid): \(error)")
+            return false
+        case .invalidOutput(let output):
+            log("jumpViaTerminal: tty lookup invalid output for pid=\(pid): stdout='\(output.trimmedStdout)'")
             return false
         }
-
-        let targetTTY = tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
-
-        // Try Terminal.app first, then iTerm2.
-        // AppleScript selects the right tab/session, but doesn't switch Spaces.
-        // NSWorkspace.open forces macOS to switch to the Space containing the app.
-        if jumpViaTerminalApp(targetTTY: targetTTY) {
-            openBundleOnMainThread("com.apple.Terminal")
-            return true
-        }
-        if jumpViaITerm(targetTTY: targetTTY) {
-            openBundleOnMainThread("com.googlecode.iterm2")
-            return true
-        }
-        return false
     }
 
     private static func openBundleOnMainThread(_ bundleIdentifier: String) {
@@ -99,8 +128,8 @@ enum WindowJumper {
         }
     }
 
-    private static func jumpViaTerminalApp(targetTTY: String) -> Bool {
-        let script = """
+    private static func buildTerminalAppScript(targetTTY: String) -> String {
+        """
         set targetTTY to \(appleScriptStringLiteral(targetTTY))
 
         try
@@ -128,12 +157,10 @@ enum WindowJumper {
 
         return "not-found"
         """
-
-        return runAppleScript(script) == "ok"
     }
 
-    private static func jumpViaITerm(targetTTY: String) -> Bool {
-        let script = """
+    private static func buildITermScript(targetTTY: String) -> String {
+        """
         set targetTTY to \(appleScriptStringLiteral(targetTTY))
 
         try
@@ -164,8 +191,6 @@ enum WindowJumper {
 
         return "not-found"
         """
-
-        return runAppleScript(script) == "ok"
     }
 
     private static func runAppleScript(_ script: String) -> String? {
@@ -174,9 +199,13 @@ enum WindowJumper {
                 executableURL: URL(fileURLWithPath: "/usr/bin/osascript"),
                 arguments: ["-e", script]
             )
-            guard result.terminationStatus == 0 else { return nil }
+            guard result.terminationStatus == 0 else {
+                log("runAppleScript: exit=\(result.terminationStatus), stderr=\(result.stderr.prefix(200))")
+                return nil
+            }
             return result.trimmedStdout
         } catch {
+            log("runAppleScript: launch error: \(error)")
             return nil
         }
     }
@@ -279,10 +308,15 @@ enum WindowJumper {
 
     private static func activate(_ application: NSRunningApplication?) -> Bool {
         guard let application else {
+            log("activate: nil application")
             return false
         }
 
+        let name = application.localizedName ?? "unknown"
+        let bundle = application.bundleIdentifier ?? "nil"
+
         guard application.activationPolicy != .prohibited else {
+            log("activate: \(name) (\(bundle)) has prohibited activation policy")
             return false
         }
 
@@ -290,7 +324,9 @@ enum WindowJumper {
             NSWorkspace.shared.open(bundleURL)
         }
 
-        return application.activate(options: [])
+        let result = application.activate(options: [])
+        log("activate: \(name) (\(bundle)) → \(result ? "success" : "failed")")
+        return result
     }
 
     static func runProcess(
