@@ -284,7 +284,10 @@ enum SessionTitleNormalizer {
 
         if lines.count == 1 {
             let lowercasedLine = lines[0].lowercased()
-            return outputPrefixes.contains(where: { lowercasedLine.hasPrefix($0) })
+            if outputPrefixes.contains(where: { lowercasedLine.hasPrefix($0) }) {
+                return true
+            }
+            return isLikelyOutputLine(lines[0])
         }
 
         if lines[0].lowercased() == "output:" {
@@ -314,6 +317,14 @@ enum SessionTitleNormalizer {
         if let arrowIndex = trimmedLine.firstIndex(of: "→") {
             let beforeArrow = trimmedLine[trimmedLine.startIndex..<arrowIndex]
             if !beforeArrow.isEmpty && beforeArrow.allSatisfy(\.isWholeNumber) {
+                return true
+            }
+        }
+
+        // Grep-style line-numbered output (e.g. "478:.keyboard-hints", "479- display:")
+        if let colonOrDash = trimmedLine.firstIndex(where: { $0 == ":" || $0 == "-" }) {
+            let beforeDelimiter = trimmedLine[trimmedLine.startIndex..<colonOrDash]
+            if !beforeDelimiter.isEmpty && beforeDelimiter.allSatisfy(\.isWholeNumber) {
                 return true
             }
         }

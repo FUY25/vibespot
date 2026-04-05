@@ -866,6 +866,7 @@ final class SessionIndex: @unchecked Sendable {
             WHERE title = project_name
                OR title = 'Untitled'
                OR title = ''
+               OR (last_user_prompt IS NOT NULL AND last_user_prompt != '' AND title = last_user_prompt)
             ORDER BY started_at DESC
             LIMIT ?1
         """

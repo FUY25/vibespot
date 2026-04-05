@@ -157,11 +157,14 @@
     // Clear ghost immediately on new input — feels snappy
     ghostSuggestion.innerHTML = '';
     updateBlockCursor();
+    var query = searchInput.value;
+    // Fire instantly when clearing or first character; short debounce otherwise
+    var delay = (query.length <= 1) ? 0 : 60;
     debounceTimer = setTimeout(function() {
       if (bridge) {
-        bridge.postMessage({ type: 'search', query: searchInput.value });
+        bridge.postMessage({ type: 'search', query: query });
       }
-    }, 150);
+    }, delay);
   });
 
   // --- Keyboard Navigation ---
@@ -449,7 +452,8 @@
 
     var titleEl = row.querySelector('.row__title');
     var newTitle = displayTitle(result);
-    if (titleEl && titleEl.textContent !== newTitle) {
+    // Don't blank out a good title during live session refresh flicker
+    if (titleEl && newTitle && titleEl.textContent !== newTitle) {
       titleEl.innerHTML = displayTitleHTML(result);
     }
 

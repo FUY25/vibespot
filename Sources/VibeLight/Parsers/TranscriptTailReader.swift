@@ -545,7 +545,7 @@ enum TranscriptTailReader {
                let payload = record["payload"] as? [String: Any],
                let payloadType = payload["type"] as? String, payloadType == "message",
                let role = payload["role"] as? String, role == "user" {
-                let content = extractText(from: payload["content"])
+                let content = extractUserOnlyText(from: payload["content"])
                 if let title = SessionTitleNormalizer.displayTitleCandidate(from: content) {
                     return title
                 }
