@@ -456,8 +456,8 @@ final class SessionIndex: @unchecked Sendable {
                 WHERE match_row_number = 1
                 ORDER BY
                     status_priority,
-                    match_rank,
                     session_last_active DESC,
+                    match_rank,
                     transcript_timestamp DESC,
                     transcript_rowid DESC
                 LIMIT 50
@@ -495,8 +495,8 @@ final class SessionIndex: @unchecked Sendable {
             WHERE transcripts MATCH ?1
             ORDER BY
                 deduplicated_matches.status_priority,
-                deduplicated_matches.match_rank,
                 deduplicated_matches.session_last_active DESC,
+                deduplicated_matches.match_rank,
                 deduplicated_matches.transcript_timestamp DESC,
                 deduplicated_matches.transcript_rowid DESC
         """
