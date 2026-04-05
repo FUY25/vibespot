@@ -157,11 +157,14 @@
     // Clear ghost immediately on new input — feels snappy
     ghostSuggestion.innerHTML = '';
     updateBlockCursor();
+    var query = searchInput.value;
+    // Fire instantly when clearing or first character; short debounce otherwise
+    var delay = (query.length <= 1) ? 0 : 60;
     debounceTimer = setTimeout(function() {
       if (bridge) {
-        bridge.postMessage({ type: 'search', query: searchInput.value });
+        bridge.postMessage({ type: 'search', query: query });
       }
-    }, 150);
+    }, delay);
   });
 
   // --- Keyboard Navigation ---
@@ -437,21 +440,36 @@
   }
 
   function updateRowContent(row, result, index) {
-    // Update state classes
-    row.className = 'row';
+    // Build target className and only apply if different to prevent blink
     var stateClasses = getStateClasses(result);
-    for (var i = 0; i < stateClasses.length; i++) {
-      row.classList.add(stateClasses[i]);
-    }
-    if (index === selectedIndex) {
-      row.classList.add('row--selected');
+    var parts = ['row'].concat(stateClasses);
+    if (index === selectedIndex) parts.push('row--selected');
+    var targetClassName = parts.join(' ');
+    if (row.className !== targetClassName) {
+      row.className = targetClassName;
     }
     row.dataset.index = index;
 
     var titleEl = row.querySelector('.row__title');
-    var cleanTitle = stripANSI(result.title);
-    if (titleEl && titleEl.textContent !== cleanTitle) {
-      titleEl.textContent = cleanTitle;
+    var newTitle = displayTitle(result);
+    // Don't blank out a good title during live session refresh flicker
+    if (titleEl && newTitle && titleEl.textContent !== newTitle) {
+      titleEl.innerHTML = displayTitleHTML(result);
+    }
+
+    var snippetEl = row.querySelector('.row__snippet');
+    var newSnippetHTML = displaySnippetHTML(result);
+    if (newSnippetHTML && !snippetEl) {
+      row.classList.add('row--has-snippet');
+      var snippet = document.createElement('span');
+      snippet.className = 'row__snippet';
+      snippet.innerHTML = newSnippetHTML;
+      if (titleEl) titleEl.insertAdjacentElement('afterend', snippet);
+    } else if (newSnippetHTML && snippetEl) {
+      snippetEl.innerHTML = newSnippetHTML;
+    } else if (!newSnippetHTML && snippetEl) {
+      snippetEl.remove();
+      row.classList.remove('row--has-snippet');
     }
 
     var pathEl = row.querySelector('.row__path');
@@ -503,8 +521,17 @@
 
     var title = document.createElement('span');
     title.className = 'row__title';
-    title.textContent = stripANSI(result.title);
+    title.innerHTML = displayTitleHTML(result);
     body.appendChild(title);
+
+    var snippetHTML = displaySnippetHTML(result);
+    if (snippetHTML) {
+      row.classList.add('row--has-snippet');
+      var snippet = document.createElement('span');
+      snippet.className = 'row__snippet';
+      snippet.innerHTML = snippetHTML;
+      body.appendChild(snippet);
+    }
 
     var metaRow = document.createElement('div');
     metaRow.className = 'row__meta-row';
@@ -661,6 +688,59 @@
     return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
   }
 
+  function stripSnippetMarkers(text) {
+    return (text || '').replace(/>>>/g, '').replace(/<<</g, '');
+  }
+
+  function escapeHTML(text) {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function isGenericTitle(title, result) {
+    if (!title || title === 'Untitled') return true;
+    var pName = stripANSI(result.projectName || '');
+    if (pName && title === pName) return true;
+    return false;
+  }
+
+  function displayTitle(result) {
+    var title = stripANSI(result.title || '');
+    if (result.lastUserPrompt && isGenericTitle(title, result)) {
+      return stripANSI(result.lastUserPrompt);
+    }
+    return title;
+  }
+
+  function displayTitleHTML(result) {
+    var title = stripANSI(result.title || '');
+    if (result.lastUserPrompt && isGenericTitle(title, result)) {
+      return escapeHTML(stripANSI(result.lastUserPrompt));
+    }
+    return escapeHTML(title);
+  }
+
+  function displaySnippetHTML(result) {
+    if (!result.snippet) return null;
+    var cleaned = stripANSI(result.snippet);
+    var parts = [];
+    var remaining = cleaned;
+    while (remaining.length > 0) {
+      var openIdx = remaining.indexOf('>>>');
+      if (openIdx === -1) { parts.push(escapeHTML(remaining)); break; }
+      if (openIdx > 0) parts.push(escapeHTML(remaining.slice(0, openIdx)));
+      remaining = remaining.slice(openIdx + 3);
+      var closeIdx = remaining.indexOf('<<<');
+      if (closeIdx === -1) { parts.push('<mark>' + escapeHTML(remaining) + '</mark>'); break; }
+      parts.push('<mark>' + escapeHTML(remaining.slice(0, closeIdx)) + '</mark>');
+      remaining = remaining.slice(closeIdx + 3);
+    }
+    return parts.join('');
+  }
+
   function stripMarkdown(text) {
     if (!text) return '';
     return stripANSI(text)
@@ -774,21 +854,7 @@
 
     previewCard.innerHTML = '';
 
-    if (data.state) {
-      var stateLine = document.createElement('div');
-      stateLine.className = 'preview__state';
-      stateLine.textContent = stripMarkdown(stripANSI(data.state));
-      previewCard.appendChild(stateLine);
-    }
-
-    if (data.detail) {
-      var detailLine = document.createElement('div');
-      detailLine.className = 'preview__detail';
-      detailLine.textContent = stripMarkdown(stripANSI(data.detail));
-      previewCard.appendChild(detailLine);
-    }
-
-    var exchanges = (data.exchanges || []).slice(-2);
+    var exchanges = (data.exchanges || []).slice(-3);
     if (exchanges.length > 0) {
       var rounds = document.createElement('div');
       rounds.className = 'preview__rounds';

@@ -21,6 +21,9 @@
   --error-red: #FF6B6B;
   --error-tint: rgba(255,107,107,0.06);
   --stale-tint: rgba(255,201,101,0.06);
+  --user-green: #7ACC9E;
+  --mark-bg: rgba(255,230,0,0.25);
+  --mark-color: #FFE566;
 
   /* Labels */
   --label: #DEE4E1;
@@ -52,7 +55,7 @@
   --logo-gap: 14px;
   --search-height: 64px;
   --search-h-pad: 22px;
-  --search-top-pad: 14px;
+  --search-top-pad: 18px;
   --search-font-size: 24px;
   --search-line-height: 32px;
   --results-h-pad: 6px;
@@ -86,6 +89,9 @@
   --error-red: #E54545;
   --error-tint: rgba(229,69,69,0.04);
   --stale-tint: rgba(255,201,101,0.04);
+  --user-green: #4A8B6A;
+  --mark-bg: rgba(255,210,0,0.30);
+  --mark-color: #8B7000;
 }
 
 /* Reset */
@@ -113,6 +119,12 @@ body {
   box-shadow: var(--panel-shadow);
   position: relative;
   overflow: visible;
+}
+
+.panel__content {
+  overflow: hidden;
+  border-radius: var(--panel-radius);
+  -webkit-mask-image: -webkit-radial-gradient(white, black);
 }
 
 .panel__top-edge {
@@ -364,6 +376,33 @@ body {
   min-width: 0;
 }
 
+.row__title mark {
+  background: var(--mark-bg);
+  color: var(--mark-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.row__snippet {
+  display: block;
+  width: 100%;
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.row__snippet mark {
+  background: var(--mark-bg);
+  color: var(--mark-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .row__meta-row {
   display: flex;
   align-items: baseline;
@@ -533,17 +572,17 @@ body {
 .preview__rounds {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 8px;
   margin-bottom: 12px;
   border-top: 1px solid var(--ghost);
+  padding-top: 8px;
 }
 
 .preview__round {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--ghost);
   border-radius: 0;
-  padding: 8px 0;
+  padding: 0;
 }
 
 .preview__round-role {
@@ -556,7 +595,7 @@ body {
 }
 
 .preview__round--user .preview__round-role {
-  color: var(--label-secondary);
+  color: var(--user-green);
 }
 
 .preview__round--error .preview__round-role {
@@ -567,8 +606,12 @@ body {
   color: var(--label);
 }
 
+.preview__round--user {
+  background: transparent;
+}
+
 .preview__round--user .preview__round-text {
-  color: var(--label-secondary);
+  color: var(--user-green);
 }
 
 .preview__round--error .preview__round-text {

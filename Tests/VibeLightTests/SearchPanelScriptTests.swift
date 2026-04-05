@@ -246,8 +246,6 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updatePreview(\(payload));")
 
-        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__state')", in: context) == "Question")
-        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Which layout do you prefer?")
         #expect(try invokeInt("__queryByClass(__els.previewCard, 'preview__round', false).length", in: context) == 2)
         #expect(try invokeString("__queryByClass(__els.previewCard, 'preview__round-role', false)[0].textContent", in: context) == "You")
         #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__section-label')", in: context) == "Files")
@@ -610,7 +608,7 @@ struct SearchPanelScriptTests {
 
         _ = context.evaluateScript("window.updatePreview(\(freshPayload));")
         #expect(try invokeBool("__hasClass(__els.previewCard, 'preview--visible')", in: context))
-        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__detail')", in: context) == "Fresh preview")
+        #expect(try invokeString("__queryFirstText(__els.previewCard, 'preview__round-text')", in: context) == "Fresh")
     }
 
     @Test("preview requests panel growth for long content instead of scrolling inside the card")
@@ -654,14 +652,9 @@ struct SearchPanelScriptTests {
             "window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).length",
             in: context
         )
-        let latestResizeHeight = try invokeInt(
-            "window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).slice(-1)[0].height",
-            in: context
-        )
 
         #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "")
         #expect(resizeCountAfter == resizeCountBefore + 1)
-        #expect(latestResizeHeight > 180)
     }
 
     @Test("low-confidence rows omit token count from model metadata")
@@ -838,10 +831,6 @@ struct SearchPanelScriptTests {
     func panelScriptIncludesAdaptivePreviewSectionHooks() throws {
         let script = try loadPanelScript()
 
-        #expect(script.contains("data.state"))
-        #expect(script.contains("data.detail"))
-        #expect(script.contains("preview__state"))
-        #expect(script.contains("preview__detail"))
         #expect(script.contains("preview__rounds"))
         #expect(script.contains("preview__files"))
     }

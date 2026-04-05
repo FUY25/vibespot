@@ -25,6 +25,7 @@ struct SearchResult: Sendable {
     let contextConfidence: ContextConfidence
     let contextSource: String?
     let lastContextSampleAt: Date?
+    let lastUserPrompt: String?
 
     init(
         sessionId: String,
@@ -49,7 +50,8 @@ struct SearchResult: Sendable {
         contextPercentEstimate: Int? = nil,
         contextConfidence: ContextConfidence = .unknown,
         contextSource: String? = nil,
-        lastContextSampleAt: Date? = nil
+        lastContextSampleAt: Date? = nil,
+        lastUserPrompt: String? = nil
     ) {
         self.sessionId = sessionId
         self.tool = tool
@@ -74,6 +76,7 @@ struct SearchResult: Sendable {
         self.contextConfidence = contextConfidence
         self.contextSource = contextSource
         self.lastContextSampleAt = lastContextSampleAt
+        self.lastUserPrompt = lastUserPrompt
     }
 }
 
@@ -130,6 +133,7 @@ final class SessionIndex: @unchecked Sendable {
         try ensureSessionColumnExists(name: "context_confidence", definition: "TEXT NOT NULL DEFAULT 'unknown'")
         try ensureSessionColumnExists(name: "context_source", definition: "TEXT")
         try ensureSessionColumnExists(name: "last_context_sample_at", definition: "REAL")
+        try ensureSessionColumnExists(name: "last_user_prompt", definition: "TEXT")
 
         try db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts USING fts5(
@@ -184,7 +188,7 @@ final class SessionIndex: @unchecked Sendable {
                 project = excluded.project,
                 project_name = excluded.project_name,
                 git_branch = excluded.git_branch,
-                status = excluded.status,
+                status = CASE WHEN sessions.status = 'live' THEN sessions.status ELSE excluded.status END,
                 started_at = excluded.started_at,
                 pid = excluded.pid,
                 token_count = excluded.token_count,
@@ -395,7 +399,7 @@ final class SessionIndex: @unchecked Sendable {
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
                 activity_preview_kind, NULL AS snippet, health_status, health_detail,
                 effective_model, context_window_tokens, context_used_estimate, context_percent_estimate,
-                context_confidence, context_source, last_context_sample_at
+                context_confidence, context_source, last_context_sample_at, last_user_prompt
             FROM sessions
             WHERE (
                 title LIKE ?1 ESCAPE '\\' OR
@@ -405,7 +409,7 @@ final class SessionIndex: @unchecked Sendable {
                 git_branch LIKE ?1 ESCAPE '\\'
             )
             \(statusClause)
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 
@@ -416,6 +420,7 @@ final class SessionIndex: @unchecked Sendable {
                     transcripts.session_id,
                     CASE s.status WHEN 'live' THEN 0 ELSE 1 END AS status_priority,
                     s.started_at AS session_started_at,
+                    COALESCE(s.last_activity_at, s.started_at) AS session_last_active,
                     transcripts.timestamp_str AS transcript_timestamp,
                     rank AS match_rank
                 FROM transcripts
@@ -429,6 +434,7 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    session_last_active,
                     transcript_timestamp,
                     match_rank,
                     ROW_NUMBER() OVER (
@@ -443,14 +449,15 @@ final class SessionIndex: @unchecked Sendable {
                     session_id,
                     status_priority,
                     session_started_at,
+                    session_last_active,
                     transcript_timestamp,
                     match_rank
                 FROM session_matches
                 WHERE match_row_number = 1
                 ORDER BY
                     status_priority,
+                    session_last_active DESC,
                     match_rank,
-                    session_started_at DESC,
                     transcript_timestamp DESC,
                     transcript_rowid DESC
                 LIMIT 50
@@ -480,15 +487,16 @@ final class SessionIndex: @unchecked Sendable {
                 s.context_percent_estimate,
                 s.context_confidence,
                 s.context_source,
-                s.last_context_sample_at
+                s.last_context_sample_at,
+                s.last_user_prompt
             FROM deduplicated_matches
             JOIN transcripts ON transcripts.rowid = deduplicated_matches.transcript_rowid
             JOIN sessions s ON s.id = deduplicated_matches.session_id
             WHERE transcripts MATCH ?1
             ORDER BY
                 deduplicated_matches.status_priority,
+                deduplicated_matches.session_last_active DESC,
                 deduplicated_matches.match_rank,
-                deduplicated_matches.session_started_at DESC,
                 deduplicated_matches.transcript_timestamp DESC,
                 deduplicated_matches.transcript_rowid DESC
         """
@@ -520,6 +528,7 @@ final class SessionIndex: @unchecked Sendable {
                     s.context_confidence,
                     s.context_source,
                     s.last_context_sample_at,
+                    s.last_user_prompt,
                     ROW_NUMBER() OVER (
                         PARTITION BY s.id
                         ORDER BY transcripts.timestamp_str DESC, transcripts.rowid DESC
@@ -554,10 +563,11 @@ final class SessionIndex: @unchecked Sendable {
                 context_percent_estimate,
                 context_confidence,
                 context_source,
-                last_context_sample_at
+                last_context_sample_at,
+                last_user_prompt
             FROM session_matches
             WHERE match_row_number = 1
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 
@@ -826,6 +836,15 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func updateLastUserPrompt(sessionId: String, prompt: String) throws {
+        try runStatement(
+            "UPDATE sessions SET last_user_prompt = ?1 WHERE id = ?2"
+        ) { statement in
+            try statement.bind(index: 1, text: prompt)
+            try statement.bind(index: 2, text: sessionId)
+        }
+    }
+
     func currentTitle(sessionId: String) throws -> String? {
         let rows = try db.query(
             "SELECT title FROM sessions WHERE id = ?1",
@@ -847,6 +866,7 @@ final class SessionIndex: @unchecked Sendable {
             WHERE title = project_name
                OR title = 'Untitled'
                OR title = ''
+               OR (last_user_prompt IS NOT NULL AND last_user_prompt != '' AND title = last_user_prompt)
             ORDER BY started_at DESC
             LIMIT ?1
         """
@@ -872,10 +892,10 @@ final class SessionIndex: @unchecked Sendable {
                 token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
                 activity_preview_kind, NULL AS snippet, health_status, health_detail,
                 effective_model, context_window_tokens, context_used_estimate, context_percent_estimate,
-                context_confidence, context_source, last_context_sample_at
+                context_confidence, context_source, last_context_sample_at, last_user_prompt
             FROM sessions
             \(liveOnly ? "WHERE status = 'live'" : "")
-            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, started_at DESC
+            ORDER BY CASE status WHEN 'live' THEN 0 ELSE 1 END, COALESCE(last_activity_at, started_at) DESC
             LIMIT 50
         """
 
@@ -1000,6 +1020,7 @@ final class SessionIndex: @unchecked Sendable {
         let lastContextSampleAt = sqlite3_column_type(statement, 24) == SQLITE_NULL
             ? nil
             : Date(timeIntervalSince1970: sqlite3_column_double(statement, 24))
+        let lastUserPrompt = optionalTextColumn(statement, index: 25)
         return SearchResult(
             sessionId: textColumn(statement, index: 0),
             tool: textColumn(statement, index: 1),
@@ -1034,7 +1055,8 @@ final class SessionIndex: @unchecked Sendable {
                 : Int(sqlite3_column_int64(statement, 21)),
             contextConfidence: contextConfidence,
             contextSource: optionalTextColumn(statement, index: 23),
-            lastContextSampleAt: lastContextSampleAt
+            lastContextSampleAt: lastContextSampleAt,
+            lastUserPrompt: lastUserPrompt
         )
     }
 
@@ -1086,7 +1108,7 @@ final class SessionIndex: @unchecked Sendable {
         )
     }
 
-    static func smartTruncate(_ text: String, maxLength: Int = 60) -> String {
+    static func smartTruncate(_ text: String, maxLength: Int = 160) -> String {
         let stripped = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard stripped.count > maxLength else { return stripped }
         if stripped.last == "?" {

@@ -128,6 +128,12 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
         if let lastContextSampleAt = result.lastContextSampleAt {
             dict["lastContextSampleAt"] = iso8601Formatter.string(from: lastContextSampleAt)
         }
+        if let snippet = result.snippet {
+            dict["snippet"] = snippet
+        }
+        if let lastUserPrompt = result.lastUserPrompt {
+            dict["lastUserPrompt"] = lastUserPrompt
+        }
         return dict
     }
 

@@ -283,8 +283,7 @@ enum SessionTitleNormalizer {
         }
 
         if lines.count == 1 {
-            let lowercasedLine = lines[0].lowercased()
-            return outputPrefixes.contains(where: { lowercasedLine.hasPrefix($0) })
+            return isLikelyOutputLine(lines[0])
         }
 
         if lines[0].lowercased() == "output:" {
@@ -305,19 +304,43 @@ enum SessionTitleNormalizer {
             return true
         }
 
+        // Git commit output: "[branch-name hash] message" — hash is 7+ hex chars
+        if lowercasedLine.hasPrefix("["),
+           let closeBracket = lowercasedLine.firstIndex(of: "]") {
+            let bracketContent = lowercasedLine[lowercasedLine.index(after: lowercasedLine.startIndex)..<closeBracket]
+            let parts = bracketContent.split(separator: " ")
+            if parts.count >= 2 {
+                let lastPart = parts.last!
+                let isHex = lastPart.count >= 7 && lastPart.allSatisfy({ $0.isHexDigit })
+                if isHex { return true }
+            }
+        }
+
         if lowercasedLine.hasPrefix("#"), let firstCharacter = lowercasedLine.dropFirst().first, firstCharacter.wholeNumberValue != nil {
             return true
         }
 
-        // Line-numbered file content (e.g. "1→", "  42→")
+        // Line-numbered output: "42→" (cat -n), "478:.foo" / "479- bar" (grep)
         let trimmedLine = line.trimmingCharacters(in: .whitespaces)
-        if let arrowIndex = trimmedLine.firstIndex(of: "→") {
-            let beforeArrow = trimmedLine[trimmedLine.startIndex..<arrowIndex]
-            if !beforeArrow.isEmpty && beforeArrow.allSatisfy(\.isWholeNumber) {
-                return true
-            }
+        if hasLeadingLineNumber(trimmedLine) {
+            return true
         }
 
+        return false
+    }
+
+    /// Detects line-numbered output patterns: digits followed by a delimiter (→, :, -).
+    /// Requires 2+ digits to avoid false positives on natural language like "5-star" or "3: things".
+    private static func hasLeadingLineNumber(_ line: String) -> Bool {
+        let delimiters: [Character] = ["→", ":", "-"]
+        for delimiter in delimiters {
+            if let idx = line.firstIndex(of: delimiter) {
+                let prefix = line[line.startIndex..<idx]
+                if prefix.count >= 2 && prefix.allSatisfy(\.isWholeNumber) {
+                    return true
+                }
+            }
+        }
         return false
     }
 }
