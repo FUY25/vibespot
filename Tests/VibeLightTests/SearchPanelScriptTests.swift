@@ -227,6 +227,39 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-2'; })", in: context) == false)
     }
 
+    @Test("same-row refresh preserves pending preview dwell")
+    func sameRowRefreshPreservesPendingPreviewDwell() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-stable",
+          "tool": "claude",
+          "title": "Stable Session",
+          "project": "/tmp/stable",
+          "projectName": "stable",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[0], 'mouseenter');")
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("__runAllTimeouts();")
+
+        #expect(try invokeBool(
+            "window.__bridgeMessages.some(function(msg) { return msg.type === 'preview' && msg.sessionId === 'sess-stable'; })",
+            in: context
+        ))
+    }
+
     @Test("preview renders state detail rounds and files in adaptive sections")
     func previewRendersStateDetailRoundsAndFilesInAdaptiveSections() throws {
         let context = try makePanelScriptContext()
@@ -655,6 +688,33 @@ struct SearchPanelScriptTests {
 
         #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "")
         #expect(resizeCountAfter == resizeCountBefore + 1)
+    }
+
+    @Test("preview card clamps upward instead of hanging below the panel")
+    func previewCardClampsUpwardInsteadOfHangingBelowThePanel() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        {
+          "exchanges": [
+            { "role": "assistant", "text": "Preview line 0", "isError": false },
+            { "role": "assistant", "text": "Preview line 1", "isError": false },
+            { "role": "assistant", "text": "Preview line 2", "isError": false }
+          ],
+          "files": [
+            "/tmp/project/file0.swift",
+            "/tmp/project/file1.swift"
+          ]
+        }
+        """#
+
+        _ = context.evaluateScript("__els.panel.offsetHeight = 180;")
+        _ = context.evaluateScript("__els.panel.getBoundingClientRect = function(){ return { top: 0, bottom: 180, height: 180 }; };")
+        _ = context.evaluateScript("__els.results.children = [__registerBaseClass(__makeEl('div'))];")
+        _ = context.evaluateScript("__els.results.children[0].className = 'row';")
+        _ = context.evaluateScript("__els.results.children[0].getBoundingClientRect = function(){ return { top: 150, bottom: 170, height: 20 }; };")
+        _ = context.evaluateScript("window.updatePreview(\(payload));")
+
+        #expect(try invokeBool("parseInt(__els.previewCard.style.top, 10) < 150", in: context))
     }
 
     @Test("low-confidence rows omit token count from model metadata")

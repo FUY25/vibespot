@@ -605,13 +605,9 @@ final class SessionIndex: @unchecked Sendable {
         for result in metadataMatches where !seenIDs.contains(result.sessionId) {
             results.append(result)
             seenIDs.insert(result.sessionId)
-
-            if results.count == 50 {
-                break
-            }
         }
 
-        return Array(results.prefix(50))
+        return Array(sortedSearchResults(results).prefix(50))
     }
 
     func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
@@ -1058,6 +1054,30 @@ final class SessionIndex: @unchecked Sendable {
             lastContextSampleAt: lastContextSampleAt,
             lastUserPrompt: lastUserPrompt
         )
+    }
+
+    private func sortedSearchResults(_ results: [SearchResult]) -> [SearchResult] {
+        results.sorted { lhs, rhs in
+            let lhsStatusPriority = lhs.status == "live" ? 0 : 1
+            let rhsStatusPriority = rhs.status == "live" ? 0 : 1
+            if lhsStatusPriority != rhsStatusPriority {
+                return lhsStatusPriority < rhsStatusPriority
+            }
+            if lhs.lastActivityAt != rhs.lastActivityAt {
+                return lhs.lastActivityAt > rhs.lastActivityAt
+            }
+            if lhs.startedAt != rhs.startedAt {
+                return lhs.startedAt > rhs.startedAt
+            }
+
+            let lhsHasSnippet = lhs.snippet?.isEmpty == false
+            let rhsHasSnippet = rhs.snippet?.isEmpty == false
+            if lhsHasSnippet != rhsHasSnippet {
+                return lhsHasSnippet && !rhsHasSnippet
+            }
+
+            return lhs.sessionId < rhs.sessionId
+        }
     }
 
     private func ensureSessionColumnExists(name: String, definition: String) throws {
