@@ -28,8 +28,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private let webView: WKWebView
     private let webBridge = WebBridge()
     private let searchDebouncer = Debouncer(delay: 0.08)
+    private let sessionFileLocator: SessionFileLocator
     private var visibleRefreshTimer: Timer?
     private var sessionSourceResolution: SessionSourceResolution
+    private var previewTask: Task<Void, Never>?
 
     private var results: [SearchResult] = []
     private var deactivationObserver: NSObjectProtocol?
@@ -62,7 +64,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }()
 
     init(
-        sessionSourceResolution: SessionSourceResolution = SessionSourceLocator().resolve(for: AppSettings.default)
+        sessionSourceResolution: SessionSourceResolution = SessionSourceLocator().resolve(for: AppSettings.default),
+        sessionFileLocator: SessionFileLocator = SessionFileLocator()
     ) {
         self.panel = SearchPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.minPanelHeight),
@@ -71,6 +74,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             defer: false
         )
         self.sessionSourceResolution = sessionSourceResolution
+        self.sessionFileLocator = sessionFileLocator
 
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
@@ -106,6 +110,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func applySessionSourceResolution(_ resolution: SessionSourceResolution) {
         guard sessionSourceResolution != resolution else { return }
+        previewTask?.cancel()
+        previewTask = nil
         sessionSourceResolution = resolution
         pendingResetAndFocus = true
         requestResetAndFocus()
@@ -131,6 +137,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func hide() {
         searchDebouncer.cancel()
+        previewTask?.cancel()
+        previewTask = nil
         visibleRefreshTimer?.invalidate()
         visibleRefreshTimer = nil
         isPreviewVisible = false
@@ -178,18 +186,28 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String) {
-        guard let fileURL = findSessionFile(sessionId: sessionId),
-              let liveResult = results.first(where: { $0.sessionId == sessionId }) else { return }
-        Task.detached(priority: .utility) { [weak self] in
+        previewTask?.cancel()
+        guard let liveResult = results.first(where: { $0.sessionId == sessionId }) else { return }
+
+        let sessionFileLocator = self.sessionFileLocator
+        let sourceResolution = self.sessionSourceResolution
+        previewTask = Task.detached(priority: .utility) { [weak self] in
+            guard let fileURL = sessionFileLocator.fileURL(sessionID: sessionId, sourceResolution: sourceResolution) else {
+                return
+            }
+            guard !Task.isCancelled else { return }
             let transcriptPreview = TranscriptTailReader.read(fileURL: fileURL)
+            guard !Task.isCancelled else { return }
             let mergedPreview = Self.mergePreviewState(transcriptPreview: transcriptPreview, with: liveResult)
             let json = Self.previewPayloadToJSONString(
                 preview: mergedPreview,
                 sessionId: sessionId,
                 lastActivityAt: liveResult.lastActivityAt
             )
+            guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self, self.isWebViewReady else { return }
+                guard !Task.isCancelled else { return }
                 let escaped = self.escapeForSingleQuotedJavaScriptString(json)
                 self.webView.evaluateJavaScript("updatePreview('\(escaped)')", completionHandler: nil)
             }
@@ -198,6 +216,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func webBridge(_ bridge: WebBridge, didChangePreviewVisibility visible: Bool) {
         isPreviewVisible = visible
+        if !visible {
+            previewTask?.cancel()
+            previewTask = nil
+        }
         var frame = panel.frame
         let targetWidth = visible ? Self.panelWidth + Self.previewExtraWidth : Self.panelWidth
         frame.size.width = targetWidth
@@ -226,40 +248,6 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     // MARK: - Private
-
-    private func findSessionFile(sessionId: String) -> URL? {
-        let fm = FileManager.default
-
-        let claudeProjectsPath = sessionSourceResolution.claudeProjectsPath
-        if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
-            for projectDir in projectDirs {
-                let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
-                if fm.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
-            }
-        }
-
-        // Codex: exact match first
-        let codexPath = "\(sessionSourceResolution.codexSessionsPath)/\(sessionId).jsonl"
-        if fm.fileExists(atPath: codexPath) { return URL(fileURLWithPath: codexPath) }
-
-        // Codex: session files may have prefixed names (e.g. rollout-...-<uuid>.jsonl)
-        let codexRoot = URL(fileURLWithPath: sessionSourceResolution.codexSessionsPath, isDirectory: true)
-        if let enumerator = fm.enumerator(
-            at: codexRoot,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for case let fileURL as URL in enumerator {
-                guard fileURL.pathExtension == "jsonl" else { continue }
-                let fileName = fileURL.deletingPathExtension().lastPathComponent
-                if fileName.contains(sessionId) {
-                    return fileURL
-                }
-            }
-        }
-
-        return nil
-    }
 
     private func refreshResults(query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -949,6 +937,12 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             print("SearchPanelController visible live refresh failed: \(error)")
         }
     }
+
+#if DEBUG
+    func installPreviewTaskForTesting(_ task: Task<Void, Never>) {
+        previewTask = task
+    }
+#endif
 }
 
 private final class SearchPanel: NSPanel {

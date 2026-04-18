@@ -171,6 +171,36 @@ struct SearchPanelControllerPreviewTests {
         #expect(controller.currentHistoryMode == .liveOnly)
     }
 
+    @MainActor
+    @Test("hide cancels any in-flight preview task")
+    func hideCancelsAnyInFlightPreviewTask() async {
+        let controller = SearchPanelController()
+        let task = Task<Void, Never> {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        defer {
+            task.cancel()
+        }
+
+        controller.installPreviewTaskForTesting(task)
+        controller.hide()
+
+        #expect(task.isCancelled)
+        _ = await task.value
+    }
+
+    @Test("empty query stays live-only even when history mode is enabled")
+    func emptyQueryStaysLiveOnlyEvenWhenHistoryModeIsEnabled() {
+        #expect(SearchPanelController.effectiveLiveOnlyMode(for: "", isLiveOnlyMode: false))
+        #expect(SearchPanelController.effectiveLiveOnlyMode(for: "   ", isLiveOnlyMode: false))
+    }
+
+    @Test("non-empty query follows the current history mode")
+    func nonEmptyQueryFollowsCurrentHistoryMode() {
+        #expect(SearchPanelController.effectiveLiveOnlyMode(for: "fix bug", isLiveOnlyMode: true))
+        #expect(!SearchPanelController.effectiveLiveOnlyMode(for: "fix bug", isLiveOnlyMode: false))
+    }
+
     private func makeResult(
         tool: String,
         activityStatus: SessionActivityStatus,

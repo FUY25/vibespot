@@ -11,6 +11,7 @@ final class Indexer: @unchecked Sendable {
 
     let sessionIndex: SessionIndex
     private let sourceResolution: SessionSourceResolution
+    private let sessionFileLocator: SessionFileLocator
     private let changeHandlingQueue: DispatchQueue
     private let changeHandlingQueueSpecificKey = DispatchSpecificKey<Void>()
     private let generationLock = NSLock()
@@ -20,8 +21,6 @@ final class Indexer: @unchecked Sendable {
     private var activeGeneration: UInt64 = 0
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
-    private var sessionFileURLCache: [String: URL] = [:]
-    private var sessionFileLookupMissAt: [String: Date] = [:]
     private var lastTailReadMtimeBySessionId: [String: Date] = [:]
 
 #if DEBUG
@@ -31,10 +30,12 @@ final class Indexer: @unchecked Sendable {
     init(
         sessionIndex: SessionIndex,
         sourceResolution: SessionSourceResolution = SessionSourceLocator().resolve(for: AppSettings.default),
+        sessionFileLocator: SessionFileLocator = SessionFileLocator(),
         changeHandlingQueue: DispatchQueue = DispatchQueue(label: Indexer.changeHandlingQueueLabel, qos: .utility)
     ) {
         self.sessionIndex = sessionIndex
         self.sourceResolution = sourceResolution
+        self.sessionFileLocator = sessionFileLocator
         self.changeHandlingQueue = changeHandlingQueue
         self.changeHandlingQueue.setSpecific(key: changeHandlingQueueSpecificKey, value: ())
     }
@@ -334,6 +335,7 @@ final class Indexer: @unchecked Sendable {
         let mtime = IndexingHelpers.fileMtime(at: path)
 
         let url = URL(fileURLWithPath: path)
+        sessionFileLocator.record(sessionID: sessionId, fileURL: url)
         guard let (messages, telemetry) = try? ClaudeParser.parseSessionFile(url: url) else {
             return
         }
@@ -445,6 +447,7 @@ final class Indexer: @unchecked Sendable {
         guard let sessionId, !sessionId.isEmpty else {
             return
         }
+        sessionFileLocator.record(sessionID: sessionId, fileURL: url)
         if IndexingHelpers.shouldSkipFile(path: path, sessionId: sessionId, sessionIndex: sessionIndex) {
             return
         }
@@ -570,8 +573,7 @@ final class Indexer: @unchecked Sendable {
         let liveResults = (try? sessionIndex.search(query: "", liveOnly: true)) ?? []
         let eligibleResults = liveResults.filter { aliveAfterDedup.contains($0.sessionId) }
         let eligibleIDs = Set(eligibleResults.map(\.sessionId))
-        sessionFileURLCache = sessionFileURLCache.filter { eligibleIDs.contains($0.key) }
-        sessionFileLookupMissAt = sessionFileLookupMissAt.filter { eligibleIDs.contains($0.key) }
+        sessionFileLocator.prune(keeping: eligibleIDs)
         lastTailReadMtimeBySessionId = lastTailReadMtimeBySessionId.filter { eligibleIDs.contains($0.key) }
 
         var toolBySessionId: [String: String] = [:]
@@ -580,7 +582,12 @@ final class Indexer: @unchecked Sendable {
             toolBySessionId[r.sessionId] = r.tool
         }
 
-        primeSessionFileCache(sessionIDs: eligibleIDs, toolBySessionId: toolBySessionId)
+        sessionFileLocator.prime(
+            sessionIDs: eligibleIDs,
+            toolBySessionId: toolBySessionId,
+            sourceResolution: sourceResolution,
+            now: now
+        )
 
         // Update titles for live sessions from smart sources
         for result in eligibleResults {
@@ -914,117 +921,8 @@ final class Indexer: @unchecked Sendable {
         return nil
     }
 
-    private func primeSessionFileCache(
-        sessionIDs: Set<String>,
-        toolBySessionId: [String: String],
-        now: Date = Date()
-    ) {
-        let lookupCooldown: TimeInterval = 30
-        let fileManager = FileManager.default
-
-        let missingClaudeIDs = sessionIDs.filter {
-            toolBySessionId[$0] == "claude"
-                && sessionFileURLCache[$0] == nil
-                && now.timeIntervalSince(sessionFileLookupMissAt[$0] ?? .distantPast) >= lookupCooldown
-        }
-        if !missingClaudeIDs.isEmpty {
-            let projectsPath = sourceResolution.claudeProjectsPath
-            if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
-                for encodedProjectPath in projectDirectories {
-                    let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
-                    for sessionID in missingClaudeIDs where sessionFileURLCache[sessionID] == nil {
-                        let candidatePath = (directoryPath as NSString)
-                            .appendingPathComponent(sessionID)
-                            .appending(".jsonl")
-                        if fileManager.fileExists(atPath: candidatePath) {
-                            sessionFileURLCache[sessionID] = URL(fileURLWithPath: candidatePath)
-                            sessionFileLookupMissAt.removeValue(forKey: sessionID)
-                        }
-                    }
-                }
-            }
-            for sessionID in missingClaudeIDs where sessionFileURLCache[sessionID] == nil {
-                sessionFileLookupMissAt[sessionID] = now
-            }
-        }
-
-        let missingCodexIDs = sessionIDs.filter {
-            toolBySessionId[$0] == "codex"
-                && sessionFileURLCache[$0] == nil
-                && now.timeIntervalSince(sessionFileLookupMissAt[$0] ?? .distantPast) >= lookupCooldown
-        }
-        if !missingCodexIDs.isEmpty {
-            let missingSet = Set(missingCodexIDs)
-            let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
-            if let enumerator = fileManager.enumerator(
-                at: codexRoot,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) {
-                for case let fileURL as URL in enumerator {
-                    guard fileURL.pathExtension == "jsonl" else { continue }
-                    let fileNameID = fileURL.deletingPathExtension().lastPathComponent
-                    let candidateIDs = [fileNameID, IndexingHelpers.codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
-                    for sessionID in candidateIDs where missingSet.contains(sessionID) {
-                        sessionFileURLCache[sessionID] = fileURL
-                        sessionFileLookupMissAt.removeValue(forKey: sessionID)
-                    }
-                }
-            }
-            for sessionID in missingCodexIDs where sessionFileURLCache[sessionID] == nil {
-                sessionFileLookupMissAt[sessionID] = now
-            }
-        }
-    }
-
     private func findSessionFile(sessionId: String) -> URL? {
-        if let cached = sessionFileURLCache[sessionId] {
-            return cached
-        }
-
-        let now = Date()
-        let lookupCooldown: TimeInterval = 30
-        if now.timeIntervalSince(sessionFileLookupMissAt[sessionId] ?? .distantPast) < lookupCooldown {
-            return nil
-        }
-
-        let fileManager = FileManager.default
-        let projectsPath = sourceResolution.claudeProjectsPath
-        if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
-            for encodedProjectPath in projectDirectories {
-                let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
-                let candidatePath = (directoryPath as NSString)
-                    .appendingPathComponent(sessionId)
-                    .appending(".jsonl")
-                if fileManager.fileExists(atPath: candidatePath) {
-                    let url = URL(fileURLWithPath: candidatePath)
-                    sessionFileURLCache[sessionId] = url
-                    sessionFileLookupMissAt.removeValue(forKey: sessionId)
-                    return url
-                }
-            }
-        }
-
-        let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
-        if let enumerator = fileManager.enumerator(
-            at: codexRoot,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for case let fileURL as URL in enumerator {
-                guard fileURL.pathExtension == "jsonl" else { continue }
-                let fileNameID = fileURL.deletingPathExtension().lastPathComponent
-                let candidateIDs = [fileNameID, IndexingHelpers.codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
-                if candidateIDs.contains(sessionId) {
-                    sessionFileURLCache[sessionId] = fileURL
-                    sessionFileLookupMissAt.removeValue(forKey: sessionId)
-                    return fileURL
-                }
-            }
-        }
-
-        sessionFileLookupMissAt[sessionId] = now
-        return nil
+        sessionFileLocator.fileURL(sessionID: sessionId, sourceResolution: sourceResolution)
     }
 
 }

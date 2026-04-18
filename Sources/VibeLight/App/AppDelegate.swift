@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sourceSwitchGeneration = 0
     private var runtimeServicesStarted = false
     private let sessionSourceLocator = SessionSourceLocator()
+    private let sessionFileLocator = SessionFileLocator()
     private var sessionSourceResolution: SessionSourceResolution
 
     override init() {
@@ -206,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         indexer?.stop()
         indexer = nil
+        sessionFileLocator.reset()
 
         searchPanelController?.hide()
         searchPanelController = nil
@@ -327,8 +329,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard generation == self.sourceSwitchGeneration else { return }
 
                     self.indexer?.stop()
+                    self.sessionFileLocator.reset()
 
-                    let rebuiltIndexer = Indexer(sessionIndex: readyIndex, sourceResolution: targetResolution)
+                    let rebuiltIndexer = Indexer(
+                        sessionIndex: readyIndex,
+                        sourceResolution: targetResolution,
+                        sessionFileLocator: self.sessionFileLocator
+                    )
                     self.settings = targetSettings
                     self.sessionSourceResolution = targetResolution
                     self.settingsStore.save(self.settings)
@@ -439,7 +446,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let sessionIndex = try makeSessionIndex()
-            let panelController = SearchPanelController(sessionSourceResolution: sessionSourceResolution)
+            sessionFileLocator.reset()
+            let panelController = SearchPanelController(
+                sessionSourceResolution: sessionSourceResolution,
+                sessionFileLocator: sessionFileLocator
+            )
             panelController.applySettings(settings)
             panelController.sessionIndex = sessionIndex
             panelController.onSelect = { result in
@@ -453,7 +464,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
                 self?.togglePanel(nil)
             }
-            let indexer = Indexer(sessionIndex: sessionIndex, sourceResolution: sessionSourceResolution)
+            let indexer = Indexer(
+                sessionIndex: sessionIndex,
+                sourceResolution: sessionSourceResolution,
+                sessionFileLocator: sessionFileLocator
+            )
 
             self.sessionIndex = sessionIndex
             self.searchPanelController = panelController
