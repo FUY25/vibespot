@@ -70,10 +70,17 @@ struct SessionIndexWorkspace {
         guard !fileManager.fileExists(atPath: activeURL.path) else {
             return
         }
-        guard fileManager.fileExists(atPath: legacyDatabaseURL.path) else {
+        let legacyArtifacts = databaseArtifactURLs(for: legacyDatabaseURL)
+        guard legacyArtifacts.contains(where: { fileManager.fileExists(atPath: $0.path) }) else {
             return
         }
-        try fileManager.moveItem(at: legacyDatabaseURL, to: activeURL)
+        let activeArtifacts = databaseArtifactURLs(for: activeURL)
+        for (legacyArtifactURL, activeArtifactURL) in zip(legacyArtifacts, activeArtifacts) {
+            guard fileManager.fileExists(atPath: legacyArtifactURL.path) else {
+                continue
+            }
+            try fileManager.moveItem(at: legacyArtifactURL, to: activeArtifactURL)
+        }
     }
 
     private func removeDatabaseArtifacts(at databaseURL: URL) throws {

@@ -5,6 +5,50 @@ import Testing
 @Suite("Source switch coordinator")
 struct SourceSwitchCoordinatorTests {
     @MainActor
+    @Test("app delegate keeps the current source fingerprint when staged switch fails")
+    func appDelegateKeepsTheCurrentSourceFingerprintWhenStagedSwitchFails() async throws {
+        let currentClaudeRoot = try makeClaudeRoot(prefix: "app-delegate-current-claude")
+        let currentCodexRoot = try makeCodexRoot(prefix: "app-delegate-current-codex")
+        let nextClaudeRoot = try makeClaudeRoot(prefix: "app-delegate-next-claude")
+        let nextCodexRoot = try makeCodexRoot(prefix: "app-delegate-next-codex")
+
+        let suiteName = "SourceSwitchCoordinatorTests.appDelegate.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = SettingsStore(defaults: defaults)
+
+        var initialSettings = store.load()
+        initialSettings.sessionSourceConfiguration = SessionSourceConfiguration(
+            claude: ToolSessionSourceConfiguration(mode: .custom, customRoot: currentClaudeRoot),
+            codex: ToolSessionSourceConfiguration(mode: .custom, customRoot: currentCodexRoot)
+        )
+        store.save(initialSettings)
+
+        let delegate = AppDelegate(
+            startsRuntimeServices: false,
+            settingsStore: store,
+            sourceSwitchHandler: { _, _ in
+                struct SwitchFailure: Error {}
+                throw SwitchFailure()
+            }
+        )
+        delegate.setRuntimeServicesStartedForTesting(true)
+
+        let originalFingerprint = delegate.currentSessionSourceFingerprintForTesting
+
+        var newSettings = initialSettings
+        newSettings.sessionSourceConfiguration = SessionSourceConfiguration(
+            claude: ToolSessionSourceConfiguration(mode: .custom, customRoot: nextClaudeRoot),
+            codex: ToolSessionSourceConfiguration(mode: .custom, customRoot: nextCodexRoot)
+        )
+
+        delegate.applySettingsForTesting(newSettings)
+        await delegate.waitForSourceSwitchForTesting()
+
+        #expect(delegate.currentSessionSourceFingerprintForTesting == originalFingerprint)
+    }
+
+    @MainActor
     @Test("keeps the current index active until the staged build succeeds")
     func keepsTheCurrentIndexActiveUntilTheStagedBuildSucceeds() async throws {
         let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -131,6 +175,41 @@ struct SourceSwitchCoordinatorTests {
             pid: nil,
             lastActivityAt: now
         )
+    }
+
+    private func makeClaudeRoot(prefix: String) throws -> String {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(prefix)-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("projects", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        return root.path
+    }
+
+    private func makeCodexRoot(prefix: String) throws -> String {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "\(prefix)-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(
+            atPath: root.appendingPathComponent("state_5.sqlite").path,
+            contents: Data(),
+            attributes: nil
+        )
+        return root.path
     }
 }
 

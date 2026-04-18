@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    typealias SourceSwitchHandler = @Sendable (
+        SessionSourceResolution,
+        @escaping @MainActor (SessionIndex) -> Void
+    ) async throws -> Void
+
     private struct RuntimeBehavior {
         let startsRuntimeServices: Bool
 
@@ -14,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtimeBehavior: RuntimeBehavior
     private let settingsStore: SettingsStore
     private let launchAtLoginManager: any LaunchAtLoginManaging
+    private let sourceSwitchHandler: SourceSwitchHandler
     private var settings: AppSettings
     private var statusItem: NSStatusItem?
     private var sessionIndex: SessionIndex?
@@ -33,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.runtimeBehavior = .automatic
         self.settingsStore = SettingsStore()
         self.launchAtLoginManager = LaunchAtLoginManager()
+        self.sourceSwitchHandler = Self.defaultSourceSwitchHandler
         self.settings = settingsStore.load()
         self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
@@ -41,11 +48,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     init(
         startsRuntimeServices: Bool,
         settingsStore: SettingsStore = SettingsStore(),
-        launchAtLoginManager: any LaunchAtLoginManaging = LaunchAtLoginManager()
+        launchAtLoginManager: any LaunchAtLoginManaging = LaunchAtLoginManager(),
+        sourceSwitchHandler: @escaping SourceSwitchHandler = AppDelegate.defaultSourceSwitchHandler
     ) {
         self.runtimeBehavior = RuntimeBehavior(startsRuntimeServices: startsRuntimeServices)
         self.settingsStore = settingsStore
         self.launchAtLoginManager = launchAtLoginManager
+        self.sourceSwitchHandler = sourceSwitchHandler
         self.settings = settingsStore.load()
         self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
@@ -249,8 +258,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newSessionSourceResolution: newSourceResolution
         )
 
-        settings = newSettings
-        sessionSourceResolution = newSourceResolution
+        let shouldDeferSourceCommit = changeSet.sourceFingerprintChanged && runtimeServicesStarted
+        if shouldDeferSourceCommit {
+            var committedSettings = newSettings
+            committedSettings.sessionSourceConfiguration = previousSettings.sessionSourceConfiguration
+            settings = committedSettings
+            sessionSourceResolution = previousSourceResolution
+        } else {
+            settings = newSettings
+            sessionSourceResolution = newSourceResolution
+        }
 
         if changeSet.themeChanged {
             applyAppearance(for: newSettings.theme)
@@ -261,7 +278,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.syncSettings(newSettings)
 
         if changeSet.sourceFingerprintChanged {
-            reconfigureIndexerForSessionSourceChange()
+            if shouldDeferSourceCommit {
+                reconfigureIndexerForSessionSourceChange(
+                    targetSettings: newSettings,
+                    targetResolution: newSourceResolution
+                )
+            } else {
+                searchPanelController?.applySessionSourceResolution(newSourceResolution)
+            }
         }
 
         if changeSet.launchAtLoginChanged {
@@ -281,26 +305,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.syncSettings(settings)
     }
 
-    private func reconfigureIndexerForSessionSourceChange() {
+    private func reconfigureIndexerForSessionSourceChange(
+        targetSettings: AppSettings,
+        targetResolution: SessionSourceResolution
+    ) {
         guard runtimeServicesStarted else { return }
 
         sourceSwitchTask?.cancel()
         sourceSwitchGeneration += 1
         let generation = sourceSwitchGeneration
-        let targetResolution = sessionSourceResolution
 
         sourceSwitchTask = Task.detached(priority: .utility) { [weak self] in
             do {
-                let coordinator = try SourceSwitchCoordinator(workspace: Self.makeSessionIndexWorkspace())
-                try await coordinator.switchToSource(targetResolution) { readyIndex in
+                try await self?.sourceSwitchHandler(targetResolution) { readyIndex in
                     guard let self else { return }
                     guard self.runtimeServicesStarted else { return }
                     guard generation == self.sourceSwitchGeneration else { return }
-                    guard self.sessionSourceResolution == targetResolution else { return }
 
                     self.indexer?.stop()
 
                     let rebuiltIndexer = Indexer(sessionIndex: readyIndex, sourceResolution: targetResolution)
+                    self.settings = targetSettings
+                    self.sessionSourceResolution = targetResolution
                     self.sessionIndex = readyIndex
                     self.searchPanelController?.sessionIndex = readyIndex
                     self.searchPanelController?.applySessionSourceResolution(targetResolution)
@@ -443,8 +469,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionSourceResolution.effectiveFingerprint
     }
 
+    func applySettingsForTesting(_ newSettings: AppSettings) {
+        applySettings(newSettings)
+    }
+
     func applyHistoryModeForTesting(_ historyMode: SearchHistoryMode) {
         applyHistoryMode(historyMode)
+    }
+
+    func setRuntimeServicesStartedForTesting(_ started: Bool) {
+        runtimeServicesStarted = started
+    }
+
+    func waitForSourceSwitchForTesting() async {
+        await sourceSwitchTask?.value
     }
 
     private func startSessionCountUpdates() {
@@ -518,6 +556,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let dbURL = try Self.makeSessionIndexWorkspace()
             .activeDatabaseURL(for: sessionSourceResolution.effectiveFingerprint)
         return try SessionIndex(dbPath: dbURL.path)
+    }
+
+    nonisolated private static func defaultSourceSwitchHandler(
+        targetResolution: SessionSourceResolution,
+        onReady: @escaping @MainActor (SessionIndex) -> Void
+    ) async throws {
+        let coordinator = try SourceSwitchCoordinator(workspace: makeSessionIndexWorkspace())
+        try await coordinator.switchToSource(targetResolution, onReady: onReady)
     }
 
     nonisolated private static func makeSessionIndexWorkspace() throws -> SessionIndexWorkspace {
