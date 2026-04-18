@@ -13,7 +13,7 @@ Native macOS glass meets terminal soul. The interface floats in ambient depth, l
 1. **No-Line Rule.** Boundaries through tonal shifts, not borders. Ghost borders (15% opacity) only when tonal contrast isn't enough.
 2. **Ambient glow, not drop shadow.** In dark mode, floating elements emit soft neon light. In light mode, subtle tonal layering creates depth.
 3. **Color means alive.** Neon green = working. Amber = waiting. Cyan = data stream. Everything dead is grayscale.
-4. **Technical precision.** Tight radii (12px panel, 6px rows, 3-5px icons). No bubbly roundness. This is a control surface, not a toy.
+4. **Technical precision.** Tight radii (8px panel, 4px rows, 3px icons). No bubbly roundness. This is a control surface, not a toy.
 
 ## Aesthetic Direction
 - **Direction:** Ethereal Terminal — premium macOS panel with terminal-native content
@@ -123,7 +123,7 @@ Color appears only when something is alive. The panel itself uses system materia
 - **Row vertical padding:** 10px
 - **Row horizontal padding:** 14px
 - **Search bar height:** 64px
-- **Search bar padding:** 14px top, 22px horizontal
+- **Search bar padding:** 10px top, 14px horizontal
 - **Panel results padding:** 6px horizontal, 8px vertical (inner), 12px bottom
 - **Logo to text gap:** 12px
 - **Inter-cell spacing:** 0 (managed by row padding)
@@ -139,10 +139,10 @@ Color appears only when something is alive. The panel itself uses system materia
 |-------|-------|-------|
 | `radius-icon` | 3px | Tool logo icons (fallback) |
 | `radius-btn` | 4px | Buttons |
-| `radius-logo` | 5px | Tool logo images |
-| `radius-row` | 6px | Result rows, selected state |
+| `radius-logo` | 3px | Tool logo images |
+| `radius-row` | 4px | Result rows, selected state |
 | `radius-card` | 10px | Cards, containers |
-| `radius-panel` | 12px | Main panel |
+| `radius-panel` | 8px | Main panel |
 
 ## Motion
 - **Approach:** Minimal-functional with three signature animations
@@ -186,7 +186,7 @@ Color appears only when something is alive. The panel itself uses system materia
 ## Tool Icons
 - **Source:** Bundled PNGs in `Sources/VibeLight/Resources/ToolIcons/` and `Assets.xcassets`
 - **Supported tools:** Claude (`claude-icon.png`), Codex (`codex-icon.png`), Gemini (`gemini-icon.png`)
-- **Display size:** 22x22 in rows, 22x22 in search bar
+- **Display size:** 32x32 in rows, 34x34 in search bar
 - **Fallback:** Gray circle with first letter of tool name in white (Space Grotesk Bold)
 - **Rendering:** `isTemplate = false` — show original brand colors
 

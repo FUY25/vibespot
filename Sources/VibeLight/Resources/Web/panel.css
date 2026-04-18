@@ -44,18 +44,19 @@
 
   /* Spacing */
   --panel-width: 720px;
-  --panel-radius: 12px;
-  --row-radius: 6px;
+  --panel-radius: 8px;
+  --row-radius: 4px;
   --row-h-closed: 68px;
   --row-h-active: 82px;
   --row-v-pad: 11px;
   --row-h-pad: 14px;
   --icon-size: 32px;
-  --icon-radius: 5px;
+  --icon-radius: 3px;
   --logo-gap: 14px;
   --search-height: 64px;
-  --search-h-pad: 22px;
-  --search-top-pad: 18px;
+  --search-h-pad: 14px;
+  --search-top-pad: 10px;
+  --search-tool-icon-size: 34px;
   --search-font-size: 24px;
   --search-line-height: 32px;
   --separator-gap: 6px;
@@ -174,7 +175,7 @@ body {
   align-items: center;
   height: var(--search-height);
   padding: var(--search-top-pad) var(--search-h-pad) 0;
-  gap: 12px;
+  gap: 10px;
   position: relative;
   z-index: 3;
 }
@@ -274,11 +275,12 @@ body {
 }
 
 .search-bar__tool-icon {
-  width: var(--icon-size);
-  height: var(--icon-size);
+  width: var(--search-tool-icon-size);
+  height: var(--search-tool-icon-size);
   border-radius: var(--icon-radius);
   flex-shrink: 0;
   object-fit: cover;
+  display: block;
 }
 
 .search-bar__tool-icon[src=""],
