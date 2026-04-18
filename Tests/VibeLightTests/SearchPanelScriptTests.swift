@@ -748,6 +748,13 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("__queryFirstText(__els.results.children[0], 'row__model-meta')", in: context) == "claude-sonnet-4 · 2m ago")
     }
 
+    @Test("panel script treats prompt-derived titles as weak titles")
+    func panelScriptTreatsPromptDerivedTitlesAsWeakTitles() throws {
+        let script = try loadPanelScript()
+
+        #expect(script.contains("title === lastUserPrompt"))
+    }
+
     @Test("high-confidence rows fall back to token count when used estimate is missing")
     func highConfidenceRowsFallbackToTokenCountWhenUsedEstimateMissing() throws {
         let context = try makePanelScriptContext()

@@ -10,4 +10,13 @@ if [[ "${1:-}" == "--clean" ]]; then
   shift
 fi
 
+# Optional one-shot onboarding reset for QA.
+if [[ "${1:-}" == "--reset-onboarding" ]]; then
+  for domain in "com.fuyuming.Flare" "Flare"; do
+    defaults delete "$domain" "flare.settings.v1" >/dev/null 2>&1 || true
+    defaults delete "$domain" "flare.onboardingCompleted" >/dev/null 2>&1 || true
+  done
+  shift
+fi
+
 exec swift run -c debug Flare "$@"

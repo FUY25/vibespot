@@ -143,7 +143,8 @@ final class Indexer {
                     sessionId: sessionId,
                     projectPath: decodedProjectPath,
                     projectName: projectName,
-                    preferredTitle: metadataBySessionId[sessionId]?.title
+                    preferredTitle: metadataBySessionId[sessionId]?.title,
+                    preferredFirstPrompt: metadataBySessionId[sessionId]?.firstPrompt
                 )
             }
         }
@@ -177,7 +178,8 @@ final class Indexer {
         sessionId: String,
         projectPath: String,
         projectName: String,
-        preferredTitle: String? = nil
+        preferredTitle: String? = nil,
+        preferredFirstPrompt: String? = nil
     ) {
         guard !processedFiles.contains(path) else {
             return
@@ -203,11 +205,11 @@ final class Indexer {
         let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
         let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
-        let cleanedPreferredTitle = preferredTitle.flatMap(IndexingHelpers.normalizedDisplayTitle(from:))
-        let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
-            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
-            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
-            ?? "Untitled"
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: preferredTitle,
+            firstPromptHint: preferredFirstPrompt,
+            messages: messages
+        )
         let startedAt = messages.first?.timestamp ?? .distantPast
         let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
 
@@ -305,10 +307,10 @@ final class Indexer {
         }
         let mtime = IndexingHelpers.fileMtime(at: path)
 
-        let title = titleMap[sessionId]
-            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
-            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
-            ?? "Untitled"
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: titleMap[sessionId],
+            messages: messages
+        )
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
 
@@ -603,7 +605,8 @@ final class Indexer {
                 sessionId: meta.sessionId,
                 projectPath: decodedProjectPath,
                 projectName: projectName,
-                preferredTitle: meta.title
+                preferredTitle: meta.title,
+                preferredFirstPrompt: meta.firstPrompt
             )
         }
     }
@@ -652,7 +655,8 @@ final class Indexer {
             sessionId: sessionId,
             projectPath: decodedProjectPath,
             projectName: projectName,
-            preferredTitle: metadataBySessionId[sessionId]?.title
+            preferredTitle: metadataBySessionId[sessionId]?.title,
+            preferredFirstPrompt: metadataBySessionId[sessionId]?.firstPrompt
         )
     }
 
@@ -740,33 +744,35 @@ final class Indexer {
         let currentTitle = result.title
         let projectName = result.projectName
 
-        // Skip if title already looks meaningful (not just project name or "Untitled")
-        let isGenericTitle = currentTitle == projectName
-            || currentTitle == "Untitled"
-            || currentTitle.isEmpty
-        guard isGenericTitle else { return }
-
         var betterTitle: String?
+        var lastUserPrompt: String?
+        if let fileURL = findSessionFile(sessionId: result.sessionId) {
+            lastUserPrompt = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
+        }
+
+        if let lastUserPrompt, !lastUserPrompt.isEmpty {
+            try? sessionIndex.updateLastUserPrompt(sessionId: result.sessionId, prompt: lastUserPrompt)
+        }
+
+        let isWeakTitle = IndexingHelpers.hasWeakLiveTitle(
+            currentTitle: currentTitle,
+            projectName: projectName,
+            storedLastUserPrompt: result.lastUserPrompt,
+            latestLastUserPrompt: lastUserPrompt
+        )
+        guard isWeakTitle else { return }
 
         // For Codex: prefer thread_name from titleMap
         if result.tool == "codex" {
             betterTitle = codexTitleMap[result.sessionId]
         }
 
-        var lastUserPrompt: String?
-        if let fileURL = findSessionFile(sessionId: result.sessionId) {
-            lastUserPrompt = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
-        }
-
         if betterTitle == nil {
             betterTitle = lastUserPrompt
         }
 
-        if let betterTitle, !betterTitle.isEmpty {
+        if let betterTitle, !betterTitle.isEmpty, betterTitle != currentTitle {
             try? sessionIndex.updateTitle(sessionId: result.sessionId, title: betterTitle)
-        }
-        if let lastUserPrompt, !lastUserPrompt.isEmpty {
-            try? sessionIndex.updateLastUserPrompt(sessionId: result.sessionId, prompt: lastUserPrompt)
         }
     }
 

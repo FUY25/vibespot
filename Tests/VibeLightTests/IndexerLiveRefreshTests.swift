@@ -21,3 +21,25 @@ func unrelatedChangesDoNotForceImmediateLiveRefresh() {
 
     #expect(Indexer.shouldRefreshLiveSessions(forChangedPaths: changedPaths) == false)
 }
+
+@Test
+func promptDerivedTitlesStayWeakForFastLiveRefresh() {
+    #expect(
+        IndexingHelpers.hasWeakLiveTitle(
+            currentTitle: "old prompt",
+            projectName: "vibelight",
+            storedLastUserPrompt: "old prompt"
+        )
+    )
+}
+
+@Test
+func smartTitlesDoNotStayWeakForFastLiveRefresh() {
+    #expect(
+        IndexingHelpers.hasWeakLiveTitle(
+            currentTitle: "Ship telemetry in the panel",
+            projectName: "vibelight",
+            storedLastUserPrompt: "old prompt"
+        ) == false
+    )
+}

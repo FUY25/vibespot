@@ -8,6 +8,7 @@ func testRecentFileModificationIsWorking() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-2),
+        lastActivityAt: now.addingTimeInterval(-2),
         lastJSONLEntryType: "assistant",
         now: now
     )
@@ -20,6 +21,7 @@ func testQuietFileWithToolUseIsWorking() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-9),
         lastJSONLEntryType: "tool_use",
         activityPreview: ActivityPreview(text: "Running bash command", kind: .tool),
         now: now
@@ -28,11 +30,26 @@ func testQuietFileWithToolUseIsWorking() {
 }
 
 @Test
+func testQuietFileWithToolUseDowngradesAfterTenSecondGraceWindow() {
+    let now = Date()
+    let status = SessionActivityStatus.determine(
+        sessionStatus: "live",
+        lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-11),
+        lastJSONLEntryType: "tool_use",
+        activityPreview: ActivityPreview(text: "Running bash command", kind: .tool),
+        now: now
+    )
+    #expect(status == .waiting)
+}
+
+@Test
 func testQuietFileWithAssistantResponseIsWaiting() {
     let now = Date()
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-30),
         lastJSONLEntryType: "assistant",
         activityPreview: ActivityPreview(text: "Waiting for user", kind: .assistant),
         now: now
@@ -46,6 +63,7 @@ func testClosedSessionIsClosed() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "closed",
         lastFileModification: now.addingTimeInterval(-3600),
+        lastActivityAt: now.addingTimeInterval(-3600),
         lastJSONLEntryType: "assistant",
         activityPreview: nil,
         now: now
@@ -59,6 +77,7 @@ func testUserMessageMeansWorking() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-10),
+        lastActivityAt: now.addingTimeInterval(-10),
         lastJSONLEntryType: "user",
         activityPreview: nil,
         now: now
@@ -72,6 +91,7 @@ func testAssistantPermissionQuestionCountsAsWaiting() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-30),
         lastJSONLEntryType: "assistant",
         activityPreview: ActivityPreview(text: "Can you approve write access for this edit?", kind: .assistant),
         now: now
@@ -85,6 +105,7 @@ func testToolUseWithAssistantPromptPreviewFallsBackToWaiting() {
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-30),
         lastJSONLEntryType: "tool_use",
         activityPreview: ActivityPreview(text: "Could you confirm I should keep the current fixture names?", kind: .assistant),
         now: now
@@ -190,7 +211,7 @@ func testPreviewForWriteToolCallClassifiesAsFileEdit() {
 }
 
 @Test
-func testSessionMetricsTrailingApplyPatchToolUseStaysWorkingEvenWhenStale() throws {
+func testSessionMetricsTrailingApplyPatchToolUseDowngradesToWaitingWhenStale() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try "tmp".write(to: tempURL, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: tempURL) }
@@ -215,15 +236,16 @@ func testSessionMetricsTrailingApplyPatchToolUseStaysWorkingEvenWhenStale() thro
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: Date().addingTimeInterval(-300),
+        lastActivityAt: Date().addingTimeInterval(-300),
         lastJSONLEntryType: metrics.lastEntryType,
         activityPreview: metrics.activityPreview,
         now: Date()
     )
-    #expect(status == .working)
+    #expect(status == .waiting)
 }
 
 @Test
-func testSessionMetricsTrailingWriteToolUseStaysWorkingWithoutAssistantPromptEvidence() throws {
+func testSessionMetricsTrailingWriteToolUseDowngradesToWaitingWithoutFreshActivity() throws {
     let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try "tmp".write(to: tempURL, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: tempURL) }
@@ -248,9 +270,38 @@ func testSessionMetricsTrailingWriteToolUseStaysWorkingWithoutAssistantPromptEvi
     let status = SessionActivityStatus.determine(
         sessionStatus: "live",
         lastFileModification: Date().addingTimeInterval(-75),
+        lastActivityAt: Date().addingTimeInterval(-75),
         lastJSONLEntryType: metrics.lastEntryType,
         activityPreview: metrics.activityPreview,
         now: Date()
     )
+    #expect(status == .waiting)
+}
+
+@Test
+func testRecentToolResultStaysWorkingDuringGraceWindow() {
+    let now = Date()
+    let status = SessionActivityStatus.determine(
+        sessionStatus: "live",
+        lastFileModification: now.addingTimeInterval(-30),
+        lastActivityAt: now.addingTimeInterval(-9),
+        lastJSONLEntryType: "tool_result",
+        activityPreview: ActivityPreview(text: "Running bash command", kind: .tool),
+        now: now
+    )
     #expect(status == .working)
+}
+
+@Test
+func testStaleToolResultDowngradesToWaiting() {
+    let now = Date()
+    let status = SessionActivityStatus.determine(
+        sessionStatus: "live",
+        lastFileModification: now.addingTimeInterval(-45),
+        lastActivityAt: now.addingTimeInterval(-45),
+        lastJSONLEntryType: "tool_result",
+        activityPreview: ActivityPreview(text: "Tool finished earlier", kind: .tool),
+        now: now
+    )
+    #expect(status == .waiting)
 }

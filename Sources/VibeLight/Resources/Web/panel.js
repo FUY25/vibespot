@@ -742,6 +742,8 @@
     if (!title || title === 'Untitled') return true;
     var pName = stripANSI(result.projectName || '');
     if (pName && title === pName) return true;
+    var lastUserPrompt = stripANSI(result.lastUserPrompt || '');
+    if (lastUserPrompt && title === lastUserPrompt) return true;
     return false;
   }
 

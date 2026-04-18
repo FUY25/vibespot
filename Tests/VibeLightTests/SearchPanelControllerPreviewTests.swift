@@ -156,6 +156,21 @@ struct SearchPanelControllerPreviewTests {
         #expect(merged.detail == "Awaiting your confirmation")
     }
 
+    @MainActor
+    @Test("applies history mode settings to the panel")
+    func appliesHistoryModeSettingsToThePanel() {
+        let controller = SearchPanelController()
+        defer {
+            controller.hide()
+        }
+
+        var settings = AppSettings.default
+        settings.historyMode = .liveOnly
+        controller.applySettings(settings)
+
+        #expect(controller.currentHistoryMode == .liveOnly)
+    }
+
     private func makeResult(
         tool: String,
         activityStatus: SessionActivityStatus,

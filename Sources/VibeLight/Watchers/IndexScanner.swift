@@ -83,7 +83,8 @@ struct IndexScanner {
                     sessionId: sessionId,
                     projectPath: decodedProjectPath,
                     projectName: projectName,
-                    preferredTitle: metadataBySessionId[sessionId]?.title
+                    preferredTitle: metadataBySessionId[sessionId]?.title,
+                    preferredFirstPrompt: metadataBySessionId[sessionId]?.firstPrompt
                 )
             }
         }
@@ -156,7 +157,8 @@ struct IndexScanner {
         sessionId: String,
         projectPath: String,
         projectName: String,
-        preferredTitle: String? = nil
+        preferredTitle: String? = nil,
+        preferredFirstPrompt: String? = nil
     ) {
         guard !Task.isCancelled else {
             return
@@ -188,11 +190,11 @@ struct IndexScanner {
         let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
         let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
         let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
-        let cleanedPreferredTitle = preferredTitle.flatMap(IndexingHelpers.normalizedDisplayTitle(from:))
-        let title = (cleanedPreferredTitle?.isEmpty == false ? cleanedPreferredTitle : nil)
-            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
-            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
-            ?? "Untitled"
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: preferredTitle,
+            firstPromptHint: preferredFirstPrompt,
+            messages: messages
+        )
         let startedAt = messages.first?.timestamp ?? .distantPast
         let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
 
@@ -267,10 +269,10 @@ struct IndexScanner {
         }
         let mtime = parseStartMtime ?? IndexingHelpers.fileMtime(at: path)
 
-        let title = titleMap[sessionId]
-            ?? SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
-            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
-            ?? "Untitled"
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: titleMap[sessionId],
+            messages: messages
+        )
         let cwd = (meta?.cwd ?? messages.compactMap(\.cwd).first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
 

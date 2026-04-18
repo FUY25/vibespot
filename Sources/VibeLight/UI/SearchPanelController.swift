@@ -14,6 +14,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
     var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
+    var currentHistoryMode: SearchHistoryMode {
+        isLiveOnlyMode ? .liveOnly : .liveAndHistory
+    }
 
     private let panel: SearchPanel
     private let webView: WKWebView
@@ -76,6 +79,17 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func toggle() {
         panel.isVisible ? hide() : show()
+    }
+
+    func applySettings(_ settings: AppSettings) {
+        let newLiveOnlyMode = settings.historyMode == .liveOnly
+        let didChangeMode = newLiveOnlyMode != isLiveOnlyMode
+        isLiveOnlyMode = newLiveOnlyMode
+
+        guard didChangeMode else { return }
+
+        pushMode()
+        refreshResults(query: lastSearchQuery ?? "")
     }
 
     func show() {

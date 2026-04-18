@@ -1411,32 +1411,37 @@ func testSmartTruncateShortText() {
 
 @Test
 func testSmartTruncateLongText() {
-    let raw = String(repeating: "word ", count: 20)
-    let expected = Array(repeating: "word", count: 12).joined(separator: " ") + "…"
+    let raw = String(repeating: "word ", count: 40)
+    let expected = Array(repeating: "word", count: 32).joined(separator: " ") + "…"
     #expect(SessionIndex.smartTruncate(raw) == expected)
 }
 
 @Test
 func testSmartTruncatePreservesQuestion() {
-    // Use a multi-word question with a long final word so truncation must not cut mid-word.
-    // Prior behavior would include a partial "supercalifragilisticexpialidocious" fragment.
-    let raw = "How do we truncate this title without cutting supercalifragilisticexpialidocious?"
-    let expected = "How do we truncate this title without cutting…?"
+    let raw = [
+        "How do we truncate this title without cutting",
+        "supercalifragilisticexpialidocious",
+        "while keeping the session title readable for fast scanning",
+        "inside a crowded menu bar search result",
+        "when the original prompt keeps going and going and going?"
+    ].joined(separator: " ")
+    let expected =
+        "How do we truncate this title without cutting supercalifragilisticexpialidocious while keeping the session title readable for fast scanning inside a crowded…?"
     let truncated = SessionIndex.smartTruncate(raw)
     #expect(truncated == expected)
     #expect(truncated.hasSuffix("…?"))
-    #expect(!truncated.contains("super"))
-    #expect(truncated.count <= 61)
+    #expect(!truncated.contains("result when"))
+    #expect(truncated.count <= 161)
 }
 
 @Test
 func testCleanTitleCombined() {
-    let raw = "\u{001b}[32m" + String(repeating: "word ", count: 20) + "\u{001b}[0m"
+    let raw = "\u{001b}[32m" + String(repeating: "word ", count: 40) + "\u{001b}[0m"
     let cleaned = SessionIndex.cleanTitle(raw)
-    let expected = Array(repeating: "word", count: 12).joined(separator: " ") + "…"
+    let expected = Array(repeating: "word", count: 32).joined(separator: " ") + "…"
     #expect(cleaned == expected)
     #expect(!cleaned.contains("\u{001b}"))
-    #expect(cleaned.count <= 61)
+    #expect(cleaned.count <= 161)
 }
 
 @Test
@@ -1445,8 +1450,9 @@ func testUpsertSessionCleansTitleBeforeStorage() throws {
     defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
     let raw =
-        "\u{001b}[1;31mHow do we truncate this title without cutting supercalifragilisticexpialidocious?\u{001b}[0m"
-    let expected = "How do we truncate this title without cutting…?"
+        "\u{001b}[1;31mHow do we truncate this title without cutting supercalifragilisticexpialidocious while keeping the session title readable for fast scanning inside a crowded menu bar search result when the original prompt keeps going and going and going?\u{001b}[0m"
+    let expected =
+        "How do we truncate this title without cutting supercalifragilisticexpialidocious while keeping the session title readable for fast scanning inside a crowded…?"
 
     try index.upsertSession(
         id: "t1",
@@ -1464,7 +1470,7 @@ func testUpsertSessionCleansTitleBeforeStorage() throws {
     #expect(results.count == 1)
     #expect(results[0].title == expected)
     #expect(!results[0].title.contains("\u{001b}"))
-    #expect(results[0].title.count <= 61)
+    #expect(results[0].title.count <= 161)
 }
 
 private func makeTestIndex() throws -> (SessionIndex, String) {

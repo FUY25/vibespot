@@ -16,9 +16,13 @@ enum SessionActivityStatus: String, Sendable {
     case waiting
     case closed
 
+    private static let activeWriteWindow: TimeInterval = 5
+    private static let toolActivityGraceWindow: TimeInterval = 10
+
     static func determine(
         sessionStatus: String,
         lastFileModification: Date,
+        lastActivityAt: Date,
         lastJSONLEntryType: String?,
         activityPreview: ActivityPreview? = nil,
         now: Date = Date()
@@ -28,17 +32,15 @@ enum SessionActivityStatus: String, Sendable {
         }
 
         let secondsSinceModification = now.timeIntervalSince(lastFileModification)
+        let secondsSinceActivity = now.timeIntervalSince(lastActivityAt)
 
         // File modified very recently — model is actively writing
-        if secondsSinceModification < 5 {
+        if secondsSinceModification < activeWriteWindow {
             return .working
         }
 
-        // File not modified recently — check what the last entry was.
-        // Tool activity (including edit/write calls) remains working unless
-        // we have an explicit assistant prompt captured separately.
-        if lastJSONLEntryType == "user"
-            || lastJSONLEntryType == "tool_result" {
+        // A fresh user turn means the agent has likely just started responding.
+        if lastJSONLEntryType == "user" {
             return .working
         }
 
@@ -49,8 +51,14 @@ enum SessionActivityStatus: String, Sendable {
             return .waiting
         }
 
+        // Tool-use and tool-result entries are ambiguous. Keep them working briefly
+        // after activity lands, then downgrade once the session has gone quiet.
+        if lastJSONLEntryType == "tool_result" {
+            return secondsSinceActivity < toolActivityGraceWindow ? .working : .waiting
+        }
+
         if lastJSONLEntryType == "tool_use" {
-            return .working
+            return secondsSinceActivity < toolActivityGraceWindow ? .working : .waiting
         }
 
         // "assistant" or anything else with no recent file activity = waiting for user

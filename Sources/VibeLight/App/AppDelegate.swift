@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -11,68 +12,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private let runtimeBehavior: RuntimeBehavior
+    private let settingsStore: SettingsStore
+    private let launchAtLoginManager: any LaunchAtLoginManaging
+    private var settings: AppSettings
     private var statusItem: NSStatusItem?
     private var sessionIndex: SessionIndex?
     private var hotkeyManager: HotkeyManager?
+    private var preferencesWindowController: PreferencesWindowController?
     private var searchPanelController: SearchPanelController?
+    private var onboardingWindowController: OnboardingWindowController?
     private var indexer: Indexer?
     private var sessionCountTimer: Timer?
+    private var runtimeServicesStarted = false
 
     override init() {
         self.runtimeBehavior = .automatic
+        self.settingsStore = SettingsStore()
+        self.launchAtLoginManager = LaunchAtLoginManager()
+        self.settings = settingsStore.load()
         super.init()
     }
 
-    init(startsRuntimeServices: Bool) {
+    init(
+        startsRuntimeServices: Bool,
+        settingsStore: SettingsStore = SettingsStore(),
+        launchAtLoginManager: any LaunchAtLoginManaging = LaunchAtLoginManager()
+    ) {
         self.runtimeBehavior = RuntimeBehavior(startsRuntimeServices: startsRuntimeServices)
+        self.settingsStore = settingsStore
+        self.launchAtLoginManager = launchAtLoginManager
+        self.settings = settingsStore.load()
         super.init()
     }
 
     var statusItemTitle: String? {
-        statusItem?.button?.title
+        guard let title = statusItem?.button?.title, !title.isEmpty else { return nil }
+        return title
+    }
+
+    var statusItemImage: NSImage? {
+        statusItem?.button?.image
+    }
+
+    var isOnboardingVisible: Bool {
+        onboardingWindowController?.window?.isVisible == true
+    }
+
+    var isPreferencesVisible: Bool {
+        preferencesWindowController?.window?.isVisible == true
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
-            button.title = makeStatusItemTitle(count: 0)
+            button.image = MenuBarLogo.makeImage()
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyUpOrDown
+            button.title = ""
+            button.toolTip = makeStatusItemToolTip(count: 0)
             button.target = self
             button.action = #selector(togglePanel(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         statusItem?.menu = nil
+        applyAppearance(for: settings.theme)
+        syncLaunchAtLogin()
 
-        guard runtimeBehavior.startsRuntimeServices else {
+        guard settings.onboardingCompleted else {
+            presentOnboarding()
             return
         }
 
-        do {
-            let sessionIndex = try makeSessionIndex()
-            let panelController = SearchPanelController()
-            panelController.sessionIndex = sessionIndex
-            panelController.onSelect = { result in
-                Self.routeSelection(result)
-            }
-
-            let hotkeyManager = HotkeyManager { [weak self] in
-                self?.togglePanel(nil)
-            }
-            let indexer = Indexer(sessionIndex: sessionIndex)
-
-            self.sessionIndex = sessionIndex
-            self.searchPanelController = panelController
-            self.hotkeyManager = hotkeyManager
-            self.indexer = indexer
-
-            refreshStatusItemTitle()
-            startSessionCountUpdates()
-            hotkeyManager.register()
-            indexer.start()
-        } catch {
-            print("AppDelegate failed to initialize runtime services: \(error)")
-            refreshStatusItemTitle()
-        }
+        startRuntimeServicesIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -89,8 +101,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showContextMenu() {
+        let menu = makeContextMenu()
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    func makeContextMenuForTesting() -> NSMenu {
+        makeContextMenu()
+    }
+
+    @objc func openPreferences() {
+        if preferencesWindowController == nil {
+            preferencesWindowController = PreferencesWindowController(
+                settingsStore: settingsStore,
+                launchAtLoginSupported: launchAtLoginManager.isSupportedRuntime,
+                onApplySettings: { [weak self] settings in
+                    self?.applySettings(settings)
+                },
+                onReindex: { [weak self] in
+                    self?.performReindex()
+                },
+                onExportDiagnostics: { [weak self] in
+                    self?.exportDiagnostics()
+                }
+            )
+        }
+
+        preferencesWindowController?.showPreferences()
+    }
+
+    private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
 
+        let preferencesItem = NSMenuItem(title: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        preferencesItem.target = self
+        let exportItem = NSMenuItem(title: "Export Diagnostics…", action: #selector(exportDiagnostics), keyEquivalent: "")
+        exportItem.target = self
         let lightItem = NSMenuItem(title: "Light", action: #selector(switchToLight), keyEquivalent: "")
         lightItem.target = self
         let darkItem = NSMenuItem(title: "Dark", action: #selector(switchToDark), keyEquivalent: "")
@@ -98,15 +145,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let autoItem = NSMenuItem(title: "Auto", action: #selector(switchToAuto), keyEquivalent: "")
         autoItem.target = self
 
-        let current = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
-        if NSApp.appearance == nil {
+        switch settings.theme {
+        case .system:
             autoItem.state = .on
-        } else if current == .darkAqua {
-            darkItem.state = .on
-        } else {
+        case .light:
             lightItem.state = .on
+        case .dark:
+            darkItem.state = .on
         }
 
+        menu.addItem(preferencesItem)
+        menu.addItem(exportItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Appearance", action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(lightItem)
@@ -114,22 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(autoItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Flare", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-
-        statusItem?.menu = menu
-        statusItem?.button?.performClick(nil)
-        statusItem?.menu = nil
-    }
-
-    @objc private func switchToLight() {
-        NSApp.appearance = NSAppearance(named: .aqua)
-    }
-
-    @objc private func switchToDark() {
-        NSApp.appearance = NSAppearance(named: .darkAqua)
-    }
-
-    @objc private func switchToAuto() {
-        NSApp.appearance = nil
+        return menu
     }
 
     func removeStatusItem() {
@@ -153,7 +188,164 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         searchPanelController?.hide()
         searchPanelController = nil
+        onboardingWindowController?.close()
+        onboardingWindowController = nil
+        preferencesWindowController?.close()
+        preferencesWindowController = nil
         sessionIndex = nil
+        runtimeServicesStarted = false
+    }
+
+    private func syncLaunchAtLogin() {
+        do {
+            try launchAtLoginManager.setEnabled(settings.launchAtLogin)
+        } catch {
+            print("AppDelegate failed to update launch-at-login state: \(error)")
+        }
+    }
+
+    private func applyAppearance(for theme: AppTheme) {
+        switch theme {
+        case .system:
+            NSApp.appearance = nil
+        case .light:
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
+
+    private func performReindex() {
+        indexer?.performFullScan()
+        refreshStatusItemTitle()
+    }
+
+    @objc private func exportDiagnostics() {
+        do {
+            let exporter = DiagnosticsExporter()
+            let outputURL = try exporter.export(settings: settings)
+            NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+        } catch {
+            print("AppDelegate failed to export diagnostics: \(error)")
+        }
+    }
+
+    private func applySettings(_ newSettings: AppSettings) {
+        settings = newSettings
+        applyAppearance(for: newSettings.theme)
+        searchPanelController?.applySettings(newSettings)
+        syncLaunchAtLogin()
+        rebuildHotkeyManagerIfNeeded()
+    }
+
+    private func rebuildHotkeyManagerIfNeeded() {
+        guard runtimeServicesStarted else { return }
+
+        hotkeyManager?.unregister()
+        hotkeyManager = nil
+
+        let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
+            self?.togglePanel(nil)
+        }
+        self.hotkeyManager = hotkeyManager
+        hotkeyManager.register()
+    }
+
+    @objc private func switchToLight() {
+        applySettings(AppSettings(
+            hotkeyKeyCode: settings.hotkeyKeyCode,
+            hotkeyModifiers: settings.hotkeyModifiers,
+            theme: .light,
+            historyMode: settings.historyMode,
+            launchAtLogin: settings.launchAtLogin,
+            onboardingCompleted: settings.onboardingCompleted
+        ))
+        settingsStore.save(settings)
+    }
+
+    @objc private func switchToDark() {
+        applySettings(AppSettings(
+            hotkeyKeyCode: settings.hotkeyKeyCode,
+            hotkeyModifiers: settings.hotkeyModifiers,
+            theme: .dark,
+            historyMode: settings.historyMode,
+            launchAtLogin: settings.launchAtLogin,
+            onboardingCompleted: settings.onboardingCompleted
+        ))
+        settingsStore.save(settings)
+    }
+
+    @objc private func switchToAuto() {
+        applySettings(AppSettings(
+            hotkeyKeyCode: settings.hotkeyKeyCode,
+            hotkeyModifiers: settings.hotkeyModifiers,
+            theme: .system,
+            historyMode: settings.historyMode,
+            launchAtLogin: settings.launchAtLogin,
+            onboardingCompleted: settings.onboardingCompleted
+        ))
+        settingsStore.save(settings)
+    }
+
+    private func presentOnboarding() {
+        guard onboardingWindowController == nil else {
+            onboardingWindowController?.showOnboarding()
+            return
+        }
+
+        let controller = OnboardingWindowController(
+            settingsStore: settingsStore,
+            launchAtLoginSupported: launchAtLoginManager.isSupportedRuntime
+        ) { [weak self] in
+            guard let self else { return }
+            self.settings = self.settingsStore.load()
+            self.applyAppearance(for: self.settings.theme)
+            self.syncLaunchAtLogin()
+            self.onboardingWindowController?.close()
+            self.onboardingWindowController = nil
+            self.startRuntimeServicesIfNeeded()
+        }
+        onboardingWindowController = controller
+        controller.showOnboarding()
+    }
+
+    private func startRuntimeServicesIfNeeded() {
+        guard runtimeBehavior.startsRuntimeServices, !runtimeServicesStarted else {
+            return
+        }
+
+        do {
+            let sessionIndex = try makeSessionIndex()
+            let panelController = SearchPanelController()
+            panelController.applySettings(settings)
+            panelController.sessionIndex = sessionIndex
+            panelController.onSelect = { result in
+                Self.routeSelection(result)
+            }
+
+            let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
+                self?.togglePanel(nil)
+            }
+            let indexer = Indexer(sessionIndex: sessionIndex)
+
+            self.sessionIndex = sessionIndex
+            self.searchPanelController = panelController
+            self.hotkeyManager = hotkeyManager
+            self.indexer = indexer
+
+            refreshStatusItemTitle()
+            startSessionCountUpdates()
+            hotkeyManager.register()
+            indexer.start()
+            runtimeServicesStarted = true
+        } catch {
+            print("AppDelegate failed to initialize runtime services: \(error)")
+            refreshStatusItemTitle()
+        }
+    }
+
+    var configuredHotkeyBinding: HotkeyBinding {
+        settings.hotkeyBinding
     }
 
     private func startSessionCountUpdates() {
@@ -174,13 +366,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             count = 0
         }
 
-        let newTitle = makeStatusItemTitle(count: count)
-        guard statusItem?.button?.title != newTitle else { return }
-        statusItem?.button?.title = newTitle
+        let newToolTip = makeStatusItemToolTip(count: count)
+        guard statusItem?.button?.toolTip != newToolTip else { return }
+        statusItem?.button?.toolTip = newToolTip
     }
 
-    private func makeStatusItemTitle(count: Int) -> String {
-        "FL: \(count)"
+    private func makeStatusItemToolTip(count: Int) -> String {
+        "Flare • \(count) live session\(count == 1 ? "" : "s")"
     }
 
     static func routeSelection(

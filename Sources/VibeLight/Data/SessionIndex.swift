@@ -1033,6 +1033,7 @@ final class SessionIndex: @unchecked Sendable {
             activityStatus: SessionActivityStatus.determine(
                 sessionStatus: status,
                 lastFileModification: lastFileModification,
+                lastActivityAt: lastActivityAt,
                 lastJSONLEntryType: optionalTextColumn(statement, index: 12),
                 activityPreview: activityPreview
             ),

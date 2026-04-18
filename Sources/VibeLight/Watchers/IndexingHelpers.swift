@@ -267,6 +267,54 @@ enum IndexingHelpers {
         return trimmedTitle.isEmpty ? nil : trimmedTitle
     }
 
+    static func hasWeakLiveTitle(
+        currentTitle: String,
+        projectName: String,
+        storedLastUserPrompt: String?,
+        latestLastUserPrompt: String? = nil
+    ) -> Bool {
+        let normalizedTitle = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedTitle.isEmpty || normalizedTitle == "Untitled" {
+            return true
+        }
+
+        let normalizedProjectName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedProjectName.isEmpty, normalizedTitle == normalizedProjectName {
+            return true
+        }
+
+        let promptCandidates = [storedLastUserPrompt, latestLastUserPrompt]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return promptCandidates.contains(normalizedTitle)
+    }
+
+    static func bestSessionTitle(
+        externalTitle: String?,
+        firstPromptHint: String? = nil,
+        messages: [ParsedMessage]
+    ) -> String {
+        let normalizedExternalTitle = externalTitle.flatMap(normalizedDisplayTitle(from:))
+        let latestPromptTitle = SessionTitleNormalizer.lastMeaningfulUserPrompt(in: messages)
+        let firstPromptTitle = firstPromptHint.flatMap(normalizedDisplayTitle(from:))
+            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
+
+        let externalLooksWeak = normalizedExternalTitle == nil
+            || normalizedExternalTitle == "Untitled"
+            || normalizedExternalTitle == latestPromptTitle
+            || normalizedExternalTitle == firstPromptTitle
+
+        if let normalizedExternalTitle, !externalLooksWeak {
+            return normalizedExternalTitle
+        }
+
+        return latestPromptTitle
+            ?? SessionTitleNormalizer.firstMeaningfulDisplayTitle(in: messages)
+            ?? normalizedExternalTitle
+            ?? "Untitled"
+    }
+
     static func fileMtime(at path: String) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
     }

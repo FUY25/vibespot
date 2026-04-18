@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Testing
 @testable import Flare
 
@@ -36,7 +37,7 @@ func configuresMenuBarApplicationActivationPolicy() {
 
 @MainActor
 @Test
-func createsMenuBarStatusItemTitledFLZeroWhenLaunching() {
+func createsMenuBarStatusItemLogoWhenLaunching() {
     let delegate = AppDelegate(startsRuntimeServices: false)
 
     defer {
@@ -47,7 +48,87 @@ func createsMenuBarStatusItemTitledFLZeroWhenLaunching() {
 
     delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
 
-    #expect(delegate.statusItemTitle == "FL: 0")
+    #expect(delegate.statusItemImage != nil)
+}
+
+@MainActor
+@Test
+func appDelegateUsesConfiguredHotkeyBinding() {
+    let suite = UserDefaults(suiteName: "AppDelegate.hotkey.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var settings = store.load()
+    settings.hotkeyKeyCode = UInt32(kVK_ANSI_K)
+    settings.hotkeyModifiers = UInt32(cmdKey | optionKey)
+    store.save(settings)
+
+    let delegate = AppDelegate(startsRuntimeServices: false, settingsStore: store)
+    #expect(delegate.configuredHotkeyBinding == HotkeyBinding(keyCode: UInt32(kVK_ANSI_K), modifiers: UInt32(cmdKey | optionKey)))
+}
+
+@MainActor
+@Test
+func appContextMenuContainsPreferencesAction() {
+    let delegate = AppDelegate(startsRuntimeServices: false)
+    let menu = delegate.makeContextMenuForTesting()
+
+    #expect(menu.items.contains { $0.title == "Preferences…" })
+}
+
+@MainActor
+@Test
+func appDelegateOpensPreferencesWindow() {
+    let delegate = AppDelegate(startsRuntimeServices: false)
+
+    delegate.openPreferences()
+
+    #expect(delegate.isPreferencesVisible)
+}
+
+@MainActor
+@Test
+func appDelegateAppliesLaunchAtLoginSettingOnLaunch() {
+    final class LaunchAtLoginSpy: LaunchAtLoginManaging {
+        var enabledValues: [Bool] = []
+        var isSupportedRuntime: Bool = true
+        func setEnabled(_ enabled: Bool) throws {
+            enabledValues.append(enabled)
+        }
+    }
+
+    let suite = UserDefaults(suiteName: "AppDelegate.launchAtLogin.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var settings = store.load()
+    settings.launchAtLogin = false
+    store.save(settings)
+
+    let spy = LaunchAtLoginSpy()
+    let delegate = AppDelegate(
+        startsRuntimeServices: false,
+        settingsStore: store,
+        launchAtLoginManager: spy
+    )
+    delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+    #expect(spy.enabledValues == [false])
+}
+
+@MainActor
+@Test
+func appShowsOnboardingWhenNotCompleted() {
+    let suite = UserDefaults(suiteName: "AppDelegate.onboarding.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var settings = store.load()
+    settings.onboardingCompleted = false
+    store.save(settings)
+
+    let delegate = AppDelegate(startsRuntimeServices: false, settingsStore: store)
+    defer {
+        delegate.removeStatusItem()
+    }
+
+    delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+    #expect(delegate.isOnboardingVisible)
 }
 
 @MainActor
