@@ -52,6 +52,34 @@ struct SettingsStoreTests {
         #expect(reloaded.sessionSourceConfiguration == settings.sessionSourceConfiguration)
     }
 
+    @Test("migrates legacy flat session source payload")
+    func migratesLegacyFlatSessionSourcePayload() {
+        let suite = UserDefaults(suiteName: "SettingsStoreTests.legacySource.\(UUID().uuidString)")!
+        let legacyPayload = """
+        {
+          "hotkeyKeyCode": 49,
+          "hotkeyModifiers": 1048576,
+          "theme": "system",
+          "historyMode": "liveAndHistory",
+          "launchAtLogin": true,
+          "onboardingCompleted": false,
+          "sessionSourceConfiguration": {
+            "mode": "custom",
+            "customClaudeRoot": "/Users/me/.claude-workspace",
+            "customCodexRoot": "/Users/me/.codex-workspace"
+          }
+        }
+        """
+        suite.set(Data(legacyPayload.utf8), forKey: "flare.settings.v1")
+
+        let loaded = SettingsStore(defaults: suite).load()
+
+        #expect(loaded.sessionSourceConfiguration.claude.mode == .custom)
+        #expect(loaded.sessionSourceConfiguration.claude.customRoot == "/Users/me/.claude-workspace")
+        #expect(loaded.sessionSourceConfiguration.codex.mode == .custom)
+        #expect(loaded.sessionSourceConfiguration.codex.customRoot == "/Users/me/.codex-workspace")
+    }
+
     @Test("migrates legacy keys")
     func migratesLegacyKeys() {
         let suite = UserDefaults(suiteName: "SettingsStoreTests.legacy.\(UUID().uuidString)")!

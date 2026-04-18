@@ -144,6 +144,11 @@ struct SessionSourceResolution: Equatable, Sendable {
         autoFallbackForCodex: Bool,
         requestedMode: SessionSourceMode
     ) {
+        precondition(claudeProjectsPath == claudeRootPath + "/projects")
+        precondition(claudeSessionsPath == claudeRootPath + "/sessions")
+        precondition(codexSessionsPath == codexRootPath + "/sessions")
+        precondition(codexStatePath == codexRootPath + "/state_5.sqlite")
+
         let claudeStatus = Self.legacyStatus(
             usingCustom: usingCustomClaude,
             autoFallback: autoFallbackForClaude,
@@ -169,6 +174,9 @@ struct SessionSourceResolution: Equatable, Sendable {
                 autoAvailable: autoCodexAvailable
             )
         )
+
+        precondition(self.requestedMode == requestedMode)
+        precondition(self.customRequestedButUnavailable == customRequestedButUnavailable)
     }
 
     var claudeRootPath: String { claude.rootPath }

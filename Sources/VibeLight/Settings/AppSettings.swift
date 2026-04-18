@@ -38,7 +38,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         historyMode: SearchHistoryMode,
         launchAtLogin: Bool,
         onboardingCompleted: Bool,
-        sessionSourceConfiguration: SessionSourceConfiguration
+        sessionSourceConfiguration: SessionSourceConfiguration = .default
     ) {
         self.hotkeyKeyCode = hotkeyKeyCode
         self.hotkeyModifiers = hotkeyModifiers
