@@ -10,7 +10,10 @@
   const ghostSuggestion = document.getElementById('ghostSuggestion');
   const actionHint = document.getElementById('actionHint');
   const searchBarIcon = document.getElementById('searchBarIcon');
+  const searchBar = document.getElementById('searchBar');
+  const separator = document.getElementById('separator');
   const resultsContainer = document.getElementById('results');
+  const keyboardHints = document.getElementById('keyboardHints');
   const panel = document.getElementById('panel');
   const blockCursor = document.getElementById('blockCursor');
   const sessionCountEl = document.getElementById('sessionCount');
@@ -29,6 +32,7 @@
   var previewedLastActivity = null;
   var isPreviewShowing = false;
   var currentMode = 'all'; // 'all' = live + history, 'live' = live only
+  var lastNotifiedResizeHeight = null;
 
   var codexIntentAliases = ['codex', 'code', 'cod', 'co'];
   var claudeIntentAliases = ['claude', 'clau', 'cla', 'cl'];
@@ -511,9 +515,10 @@
     }
 
     var pathEl = row.querySelector('.row__path');
-    var newPath = formatSessionPath(result);
-    if (pathEl && pathEl.textContent !== newPath) {
-      pathEl.textContent = newPath;
+    var newPathHTML = displayPathHTML(result);
+    if (pathEl && pathEl.dataset.renderedHtml !== newPathHTML) {
+      pathEl.dataset.renderedHtml = newPathHTML;
+      pathEl.innerHTML = newPathHTML;
     }
 
     var modelMetaEl = row.querySelector('.row__model-meta');
@@ -581,7 +586,8 @@
 
     var path = document.createElement('span');
     path.className = 'row__path';
-    path.textContent = formatSessionPath(result);
+    path.dataset.renderedHtml = displayPathHTML(result);
+    path.innerHTML = path.dataset.renderedHtml;
     metaRow.appendChild(path);
     body.appendChild(metaRow);
 
@@ -781,6 +787,40 @@
     return parts.join('');
   }
 
+  function highlightLiteralMatchHTML(text, query) {
+    var source = text || '';
+    var needle = (query || '').trim();
+    if (!source) return '';
+    if (!needle) return escapeHTML(source);
+
+    var lowerSource = source.toLowerCase();
+    var lowerNeedle = needle.toLowerCase();
+    var parts = [];
+    var cursor = 0;
+    var matchFound = false;
+
+    while (cursor < source.length) {
+      var matchIndex = lowerSource.indexOf(lowerNeedle, cursor);
+      if (matchIndex === -1) break;
+      if (matchIndex > cursor) {
+        parts.push(escapeHTML(source.slice(cursor, matchIndex)));
+      }
+      parts.push('<mark>' + escapeHTML(source.slice(matchIndex, matchIndex + needle.length)) + '</mark>');
+      cursor = matchIndex + needle.length;
+      matchFound = true;
+    }
+
+    if (!matchFound) return escapeHTML(source);
+    if (cursor < source.length) {
+      parts.push(escapeHTML(source.slice(cursor)));
+    }
+    return parts.join('');
+  }
+
+  function displayPathHTML(result) {
+    return highlightLiteralMatchHTML(formatSessionPath(result), searchInput.value);
+  }
+
   function stripMarkdown(text) {
     if (!text) return '';
     return stripANSI(text)
@@ -799,15 +839,52 @@
 
   // --- Resize Notification ---
 
+  function numericStyleValue(el, property, fallback) {
+    if (!el || typeof getComputedStyle !== 'function') return fallback;
+    var styles = getComputedStyle(el);
+    var numeric = parseFloat(styles && styles[property]);
+    return isFinite(numeric) ? numeric : fallback;
+  }
+
+  function measuredElementHeight(el, fallback) {
+    if (!el) return fallback;
+    var measured = typeof el.offsetHeight === 'number' ? el.offsetHeight : 0;
+    return measured > 0 ? measured : fallback;
+  }
+
+  function computeResultsViewportHeight() {
+    var minHeight = numericStyleValue(resultsContainer, 'paddingTop', 8) +
+      numericStyleValue(resultsContainer, 'paddingBottom', 12);
+    var maxHeight = numericStyleValue(resultsContainer, 'maxHeight', minHeight);
+    var scrollHeight = resultsContainer && typeof resultsContainer.scrollHeight === 'number'
+      ? resultsContainer.scrollHeight
+      : minHeight;
+    return Math.max(minHeight, Math.min(scrollHeight || minHeight, maxHeight));
+  }
+
+  function computePanelHeight() {
+    var height = measuredElementHeight(searchBar, 64) +
+      measuredElementHeight(separator, 6) +
+      computeResultsViewportHeight() +
+      measuredElementHeight(keyboardHints, 26);
+
+    if (isPreviewShowing && previewCard.classList.contains('preview--visible')) {
+      var previewTop = parseFloat(previewCard.style.top || '0');
+      if (!isFinite(previewTop)) previewTop = 0;
+      var previewHeight = previewCard.scrollHeight || previewCard.offsetHeight || 0;
+      height = Math.max(height, Math.ceil(previewTop + previewHeight + 16));
+    }
+
+    return Math.ceil(height);
+  }
+
   function notifyResize() {
     requestAnimationFrame(function() {
-      var height = panel.offsetHeight;
-      if (isPreviewShowing && previewCard.classList.contains('preview--visible')) {
-        var previewTop = parseFloat(previewCard.style.top || '0');
-        if (!isFinite(previewTop)) previewTop = 0;
-        var previewHeight = previewCard.scrollHeight || previewCard.offsetHeight || 0;
-        height = Math.max(height, Math.ceil(previewTop + previewHeight + 16));
+      var height = computePanelHeight();
+      if (lastNotifiedResizeHeight !== null && height === lastNotifiedResizeHeight) {
+        return;
       }
+      lastNotifiedResizeHeight = height;
       if (bridge) {
         bridge.postMessage({ type: 'resize', height: height });
       }

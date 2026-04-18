@@ -323,6 +323,65 @@ struct SearchPanelScriptTests {
         #expect(try invokeInt("__queryByClass(__els.results.children[0], 'row__context-rail', false).length", in: context) == 0)
     }
 
+    @Test("path-only match highlights the footer path without adding a snippet row")
+    func pathOnlyMatchHighlightsFooterPathWithoutAddingSnippetRow() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-path-only",
+          "tool": "codex",
+          "title": "Project launcher",
+          "project": "/Users/fuyuming/Desktop/project/vibelight/.worktrees/v1-implementation",
+          "projectName": "vibelight",
+          "gitBranch": "main",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("__els.searchInput.value = 'vibelight';")
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+
+        #expect(try invokeInt("__queryByClass(__els.results.children[0], 'row__snippet', false).length", in: context) == 0)
+        #expect(try invokeBool("__queryFirstText(__els.results.children[0], 'row__path').indexOf('<mark>vibelight</mark>') !== -1", in: context))
+    }
+
+    @Test("transcript match keeps snippet highlighting and also highlights footer path when both match")
+    func transcriptMatchKeepsSnippetAndHighlightsFooterPathWhenBothMatch() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [{
+          "sessionId": "sess-transcript-path",
+          "tool": "claude",
+          "title": "Renderer cleanup",
+          "project": "/Users/fuyuming/Desktop/project/renderer-lab",
+          "projectName": "renderer-lab",
+          "gitBranch": "main",
+          "status": "live",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 6100,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "waiting",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": "",
+          "snippet": "Touched >>>renderer<<< internals while tracing the panel issue."
+        }]
+        """#
+
+        _ = context.evaluateScript("__els.searchInput.value = 'renderer';")
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+
+        #expect(try invokeBool("__queryFirstText(__els.results.children[0], 'row__snippet').indexOf('<mark>renderer</mark>') !== -1", in: context))
+        #expect(try invokeBool("__queryFirstText(__els.results.children[0], 'row__path').indexOf('<mark>renderer</mark>') !== -1", in: context))
+    }
+
     @Test("mouseenter selects hovered row")
     func mouseEnterSelectsHoveredRow() throws {
         let context = try makePanelScriptContext()
@@ -688,6 +747,30 @@ struct SearchPanelScriptTests {
 
         #expect(try invokeString("__els.previewCard.style.maxHeight", in: context) == "")
         #expect(resizeCountAfter == resizeCountBefore + 1)
+    }
+
+    @Test("results resize uses a chrome floor and skips duplicate height notifications")
+    func resultsResizeUsesChromeFloorAndSkipsDuplicateHeightNotifications() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        []
+        """#
+
+        _ = context.evaluateScript(
+            """
+            __els.panel.offsetHeight = 80;
+            document.getElementById('searchBar').offsetHeight = 64;
+            document.getElementById('separator').offsetHeight = 6;
+            document.getElementById('keyboardHints').offsetHeight = 26;
+            __els.results.scrollHeight = 0;
+            """
+        )
+
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+        _ = context.evaluateScript("window.updateResults(\(payload));")
+
+        #expect(try invokeInt("window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).length", in: context) == 1)
+        #expect(try invokeBool("window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; })[0].height >= 110", in: context))
     }
 
     @Test("preview card clamps upward instead of hanging below the panel")

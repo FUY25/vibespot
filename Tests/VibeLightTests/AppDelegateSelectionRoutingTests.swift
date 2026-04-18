@@ -184,6 +184,35 @@ func fuzzyLaunchIntentHelpersDetectToolQueries() {
 }
 
 @MainActor
+@Test("results render signature changes when only the query changes")
+func resultsRenderSignatureChangesWhenOnlyQueryChanges() {
+    let result = SearchResult(
+        sessionId: "sess-cache-key",
+        tool: "claude",
+        title: "Renderer cleanup",
+        project: "/Users/fuyuming/Desktop/project/vibelight",
+        projectName: "vibelight",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+        pid: nil,
+        tokenCount: 0,
+        lastActivityAt: Date(timeIntervalSince1970: 1_700_000_100),
+        activityPreview: nil,
+        activityStatus: .closed,
+        snippet: nil
+    )
+    let resultsJSON = WebBridge.resultsToJSONString([result])
+
+    let signatureA = SearchPanelController.resultsRenderSignature(resultsJSON: resultsJSON, query: "vi")
+    let signatureB = SearchPanelController.resultsRenderSignature(resultsJSON: resultsJSON, query: "vibe")
+    let signatureC = SearchPanelController.resultsRenderSignature(resultsJSON: resultsJSON, query: "vibe")
+
+    #expect(signatureA != signatureB)
+    #expect(signatureB == signatureC)
+}
+
+@MainActor
 @Test("new-session command parser keeps allowlisted flags and turns the rest into prompt")
 func newSessionCommandParserKeepsFlagsAndPrompt() {
     let codex = SearchPanelController.parseNewSessionCommand(from: "new codex --yolo fix auth bug")

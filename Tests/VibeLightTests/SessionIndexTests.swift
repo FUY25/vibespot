@@ -1818,3 +1818,50 @@ func testNonEmptySearchGloballyOrdersMergedMatchesByLastActivityAt() throws {
 
     #expect(Array(ids.prefix(2)) == ["metadata-newer", "transcript-older"])
 }
+
+@Test
+func testNonEmptySearchOrdersPathMetadataAndTranscriptHitsByLastActivityAt() throws {
+    let tmpDir = FileManager.default.temporaryDirectory
+    let dbPath = tmpDir.appendingPathComponent("test_\(UUID().uuidString).sqlite3").path
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let index = try SessionIndex(dbPath: dbPath)
+    let now = Date()
+
+    try index.upsertSession(
+        id: "path-newer",
+        tool: "codex",
+        title: "recent path metadata hit",
+        project: "/Users/fuyuming/Desktop/project/vibelight",
+        projectName: "vibelight",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-1200),
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-30)
+    )
+
+    try index.upsertSession(
+        id: "transcript-older",
+        tool: "claude",
+        title: "older transcript hit",
+        project: "/Users/fuyuming/Desktop/project/other",
+        projectName: "other",
+        gitBranch: "main",
+        status: "closed",
+        startedAt: now.addingTimeInterval(-2400),
+        pid: nil,
+        lastActivityAt: now.addingTimeInterval(-300)
+    )
+    try index.insertTranscript(
+        sessionId: "transcript-older",
+        role: "assistant",
+        content: "vibelight only appears in this transcript body",
+        timestamp: now.addingTimeInterval(-300)
+    )
+
+    let results = try index.search(query: "vibelight", includeHistory: true)
+
+    #expect(Array(results.map(\.sessionId).prefix(2)) == ["path-newer", "transcript-older"])
+    #expect(results.first?.snippet == nil)
+}

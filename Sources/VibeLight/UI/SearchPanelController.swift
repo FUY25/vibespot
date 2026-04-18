@@ -28,7 +28,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var deactivationObserver: NSObjectProtocol?
     private var panelResignKeyObserver: NSObjectProtocol?
     private var appearanceObservation: NSKeyValueObservation?
-    private var lastPushedResultsJSON: String = ""
+    private var lastPushedResultsSignature: String = ""
     private var lastSearchQuery: String?
     private var isWebViewReady = false
     private var pendingResetAndFocus = false
@@ -38,7 +38,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     private let panelWidth: CGFloat = 720
     private let previewExtraWidth: CGFloat = 470
-    private let minPanelHeight: CGFloat = 104
+    private let minPanelHeight: CGFloat = 118
+    private let panelResizeEpsilon: CGFloat = 0.5
     private var isPreviewVisible = false
     private var isLiveOnlyMode = false
 
@@ -150,8 +151,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         guard height > 0 else { return }
         var frame = panel.frame
         let maxY = frame.maxY
-        let newHeight = max(minPanelHeight, height + 2) // +2 for border
+        let newHeight = max(minPanelHeight, ceil(height + 2)) // +2 for border
         let currentWidth = isPreviewVisible ? panelWidth + previewExtraWidth : panelWidth
+        let heightDelta = abs(frame.height - newHeight)
+        let widthDelta = abs(frame.width - currentWidth)
+        guard heightDelta >= panelResizeEpsilon || widthDelta >= panelResizeEpsilon else { return }
         frame.size = NSSize(width: currentWidth, height: newHeight)
         frame.origin.y = maxY - newHeight
         panel.setFrame(frame, display: true, animate: panel.isVisible)
@@ -242,7 +246,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     private func refreshResults(query: String) {
         guard let sessionIndex else {
-            pushResults([])
+            pushResults([], query: query.trimmingCharacters(in: .whitespacesAndNewlines))
             return
         }
 
@@ -253,27 +257,32 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             let command = Self.parseNewSessionCommand(from: trimmed)
             if Self.looksLikeNewSessionIntent(trimmed) || command != nil {
                 let actionRows = makeNewSessionActionRows(for: trimmed, command: command)
-                pushResults(actionRows + matches)
+                pushResults(actionRows + matches, query: trimmed)
             } else {
-                pushResults(matches)
+                pushResults(matches, query: trimmed)
             }
         } catch {
-            pushResults([])
+            pushResults([], query: query.trimmingCharacters(in: .whitespacesAndNewlines))
             print("SearchPanelController search failed: \(error)")
         }
     }
 
-    private func pushResults(_ newResults: [SearchResult]) {
+    private func pushResults(_ newResults: [SearchResult], query: String) {
         results = newResults
         let json = WebBridge.resultsToJSONString(results)
+        let signature = Self.resultsRenderSignature(resultsJSON: json, query: query)
 
-        // Skip push if results haven't changed
-        guard json != lastPushedResultsJSON else { return }
-        lastPushedResultsJSON = json
+        // Skip push only when both the result set and the query-dependent rendering state are unchanged.
+        guard signature != lastPushedResultsSignature else { return }
+        lastPushedResultsSignature = signature
         pendingResultsJSON = json
 
         guard isWebViewReady else { return }
         pushResultsJSONIfNeeded()
+    }
+
+    static func resultsRenderSignature(resultsJSON: String, query: String) -> String {
+        "\(query)\u{1F}\(resultsJSON)"
     }
 
     private func pushResultsJSONIfNeeded() {
@@ -614,7 +623,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     private func requestResetAndFocus() {
         // resetAndFocus() clears JS-side rows, so force the next push even if JSON is identical.
-        lastPushedResultsJSON = ""
+        lastPushedResultsSignature = ""
         pendingResetAndFocus = true
         guard isWebViewReady else { return }
         flushPendingWebViewState()
@@ -793,7 +802,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private func refreshVisibleResults() {
         guard panel.isVisible else { return }
         guard sessionIndex != nil else {
-            pushResults([])
+            pushResults([], query: lastSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
             return
         }
 

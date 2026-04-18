@@ -58,8 +58,12 @@
   --search-top-pad: 18px;
   --search-font-size: 24px;
   --search-line-height: 32px;
+  --separator-gap: 6px;
   --results-h-pad: 6px;
+  --results-empty-height: 20px;
   --results-bottom-pad: 12px;
+  --keyboard-hints-height: 28px;
+  --panel-min-height: 118px;
   --max-visible-rows: 7;
 
   /* Typography */
@@ -122,6 +126,9 @@ body {
 }
 
 .panel__content {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--panel-min-height);
   overflow: hidden;
   border-radius: var(--panel-radius);
   -webkit-mask-image: -webkit-radial-gradient(white, black);
@@ -161,6 +168,7 @@ body {
 
 /* Search bar */
 .search-bar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   height: var(--search-height);
@@ -280,13 +288,16 @@ body {
 /* Separator — removed per No-Line Rule; spacing gap handles separation */
 .separator {
   height: 0;
-  margin: 6px 0 0;
+  margin: var(--separator-gap) 0 0;
   position: relative;
   z-index: 3;
+  flex: 0 0 auto;
 }
 
 /* Results */
 .results {
+  flex: 0 0 auto;
+  min-height: var(--results-empty-height);
   padding: 8px var(--results-h-pad) var(--results-bottom-pad);
   max-height: calc(var(--max-visible-rows) * var(--row-h-closed) + var(--results-bottom-pad));
   overflow-y: auto;
@@ -436,6 +447,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.row__path mark {
+  background: var(--mark-bg);
+  color: var(--mark-color);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .row__activity--tool,
 .row__activity--fileEdit {
   color: var(--activity-cyan);
@@ -503,6 +521,7 @@ body {
 
 /* Keyboard hints footer */
 .keyboard-hints {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
