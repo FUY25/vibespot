@@ -24,12 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var indexer: Indexer?
     private var sessionCountTimer: Timer?
     private var runtimeServicesStarted = false
+    private let sessionSourceLocator = SessionSourceLocator()
+    private var sessionSourceResolution: SessionSourceResolution
 
     override init() {
         self.runtimeBehavior = .automatic
         self.settingsStore = SettingsStore()
         self.launchAtLoginManager = LaunchAtLoginManager()
         self.settings = settingsStore.load()
+        self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
     }
 
@@ -42,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsStore = settingsStore
         self.launchAtLoginManager = launchAtLoginManager
         self.settings = settingsStore.load()
+        self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
     }
 
@@ -231,11 +235,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applySettings(_ newSettings: AppSettings) {
+        let previousSettings = settings
+        let previousSourceResolution = sessionSourceResolution
+        let newSourceResolution = sessionSourceLocator.resolve(for: newSettings)
+        let changeSet = AppSettingsChangeSet(
+            oldSettings: previousSettings,
+            newSettings: newSettings,
+            oldSessionSourceResolution: previousSourceResolution,
+            newSessionSourceResolution: newSourceResolution
+        )
+
         settings = newSettings
-        applyAppearance(for: newSettings.theme)
-        searchPanelController?.applySettings(newSettings)
-        syncLaunchAtLogin()
-        rebuildHotkeyManagerIfNeeded()
+        sessionSourceResolution = newSourceResolution
+
+        if changeSet.themeChanged {
+            applyAppearance(for: newSettings.theme)
+        }
+        if changeSet.historyModeChanged {
+            searchPanelController?.applySettings(newSettings)
+        }
+        preferencesWindowController?.syncSettings(newSettings)
+
+        if changeSet.sourceFingerprintChanged {
+            reconfigureIndexerForSessionSourceChange()
+            searchPanelController?.applySessionSourceResolution(newSourceResolution)
+        }
+
+        if changeSet.launchAtLoginChanged {
+            syncLaunchAtLogin()
+        }
+        if changeSet.hotkeyChanged {
+            rebuildHotkeyManagerIfNeeded()
+        }
+    }
+
+    private func applyHistoryMode(_ historyMode: SearchHistoryMode) {
+        guard settings.historyMode != historyMode else { return }
+
+        settings.historyMode = historyMode
+        settingsStore.save(settings)
+        searchPanelController?.applySettings(settings)
+        preferencesWindowController?.syncSettings(settings)
+    }
+
+    private func reconfigureIndexerForSessionSourceChange() {
+        guard runtimeServicesStarted, let sessionIndex else { return }
+
+        try? sessionIndex.clearAllIndexedSessions()
+        indexer?.stop()
+        let rebuiltIndexer = Indexer(sessionIndex: sessionIndex, sourceResolution: sessionSourceResolution)
+        indexer = rebuiltIndexer
+        rebuiltIndexer.start()
+        refreshStatusItemTitle()
     }
 
     private func rebuildHotkeyManagerIfNeeded() {
@@ -258,7 +309,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             theme: .light,
             historyMode: settings.historyMode,
             launchAtLogin: settings.launchAtLogin,
-            onboardingCompleted: settings.onboardingCompleted
+            onboardingCompleted: settings.onboardingCompleted,
+            sessionSourceConfiguration: settings.sessionSourceConfiguration
         ))
         settingsStore.save(settings)
     }
@@ -270,7 +322,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             theme: .dark,
             historyMode: settings.historyMode,
             launchAtLogin: settings.launchAtLogin,
-            onboardingCompleted: settings.onboardingCompleted
+            onboardingCompleted: settings.onboardingCompleted,
+            sessionSourceConfiguration: settings.sessionSourceConfiguration
         ))
         settingsStore.save(settings)
     }
@@ -282,7 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             theme: .system,
             historyMode: settings.historyMode,
             launchAtLogin: settings.launchAtLogin,
-            onboardingCompleted: settings.onboardingCompleted
+            onboardingCompleted: settings.onboardingCompleted,
+            sessionSourceConfiguration: settings.sessionSourceConfiguration
         ))
         settingsStore.save(settings)
     }
@@ -316,17 +370,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let sessionIndex = try makeSessionIndex()
-            let panelController = SearchPanelController()
+            let panelController = SearchPanelController(sessionSourceResolution: sessionSourceResolution)
             panelController.applySettings(settings)
             panelController.sessionIndex = sessionIndex
             panelController.onSelect = { result in
                 Self.routeSelection(result)
             }
+            panelController.onHistoryModeChanged = { [weak self] historyMode in
+                guard let self else { return }
+                self.applyHistoryMode(historyMode)
+            }
 
             let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
                 self?.togglePanel(nil)
             }
-            let indexer = Indexer(sessionIndex: sessionIndex)
+            let indexer = Indexer(sessionIndex: sessionIndex, sourceResolution: sessionSourceResolution)
 
             self.sessionIndex = sessionIndex
             self.searchPanelController = panelController
@@ -346,6 +404,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     var configuredHotkeyBinding: HotkeyBinding {
         settings.hotkeyBinding
+    }
+
+    var currentSessionSourceFingerprintForTesting: String {
+        sessionSourceResolution.effectiveFingerprint
+    }
+
+    func applyHistoryModeForTesting(_ historyMode: SearchHistoryMode) {
+        applyHistoryMode(historyMode)
     }
 
     private func startSessionCountUpdates() {
