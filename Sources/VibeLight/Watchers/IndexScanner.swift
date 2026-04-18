@@ -315,3 +315,10 @@ struct IndexScanner {
         return currentMtime != expected
     }
 }
+
+extension IndexScanner {
+    static func buildFullScan(sessionIndex: SessionIndex, sourceResolution: SessionSourceResolution) throws {
+        var scanner = IndexScanner(sessionIndex: sessionIndex, sourceResolution: sourceResolution)
+        scanner.performFullScan()
+    }
+}

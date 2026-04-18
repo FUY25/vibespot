@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindowController: OnboardingWindowController?
     private var indexer: Indexer?
     private var sessionCountTimer: Timer?
+    private var sourceSwitchTask: Task<Void, Never>?
+    private var sourceSwitchGeneration = 0
     private var runtimeServicesStarted = false
     private let sessionSourceLocator = SessionSourceLocator()
     private var sessionSourceResolution: SessionSourceResolution
@@ -181,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func cleanupRuntimeServices() {
+        sourceSwitchTask?.cancel()
+        sourceSwitchTask = nil
         sessionCountTimer?.invalidate()
         sessionCountTimer = nil
 
@@ -258,7 +262,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if changeSet.sourceFingerprintChanged {
             reconfigureIndexerForSessionSourceChange()
-            searchPanelController?.applySessionSourceResolution(newSourceResolution)
         }
 
         if changeSet.launchAtLoginChanged {
@@ -279,14 +282,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func reconfigureIndexerForSessionSourceChange() {
-        guard runtimeServicesStarted, let sessionIndex else { return }
+        guard runtimeServicesStarted else { return }
 
-        try? sessionIndex.clearAllIndexedSessions()
-        indexer?.stop()
-        let rebuiltIndexer = Indexer(sessionIndex: sessionIndex, sourceResolution: sessionSourceResolution)
-        indexer = rebuiltIndexer
-        rebuiltIndexer.start()
-        refreshStatusItemTitle()
+        sourceSwitchTask?.cancel()
+        sourceSwitchGeneration += 1
+        let generation = sourceSwitchGeneration
+        let targetResolution = sessionSourceResolution
+
+        sourceSwitchTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                let coordinator = try SourceSwitchCoordinator(workspace: Self.makeSessionIndexWorkspace())
+                try await coordinator.switchToSource(targetResolution) { readyIndex in
+                    guard let self else { return }
+                    guard self.runtimeServicesStarted else { return }
+                    guard generation == self.sourceSwitchGeneration else { return }
+                    guard self.sessionSourceResolution == targetResolution else { return }
+
+                    self.indexer?.stop()
+
+                    let rebuiltIndexer = Indexer(sessionIndex: readyIndex, sourceResolution: targetResolution)
+                    self.sessionIndex = readyIndex
+                    self.searchPanelController?.sessionIndex = readyIndex
+                    self.searchPanelController?.applySessionSourceResolution(targetResolution)
+                    self.indexer = rebuiltIndexer
+
+                    rebuiltIndexer.start()
+                    self.refreshStatusItemTitle()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                print("AppDelegate failed to switch session sources: \(error)")
+            }
+
+            await MainActor.run { [weak self] in
+                guard let self, generation == self.sourceSwitchGeneration else { return }
+                self.sourceSwitchTask = nil
+            }
+        }
     }
 
     private func rebuildHotkeyManagerIfNeeded() {
@@ -482,6 +515,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeSessionIndex() throws -> SessionIndex {
+        let dbURL = try Self.makeSessionIndexWorkspace()
+            .activeDatabaseURL(for: sessionSourceResolution.effectiveFingerprint)
+        return try SessionIndex(dbPath: dbURL.path)
+    }
+
+    nonisolated private static func makeSessionIndexWorkspace() throws -> SessionIndexWorkspace {
         let fileManager = FileManager.default
         let applicationSupportURL = try fileManager.url(
             for: .applicationSupportDirectory,
@@ -495,7 +534,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             withIntermediateDirectories: true,
             attributes: nil
         )
-        let dbURL = flareSupportURL.appendingPathComponent("index.sqlite3", isDirectory: false)
-        return try SessionIndex(dbPath: dbURL.path)
+        let indexesURL = flareSupportURL.appendingPathComponent("Indexes", isDirectory: true)
+        try fileManager.createDirectory(
+            at: indexesURL,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        let legacyDatabaseURL = flareSupportURL.appendingPathComponent("index.sqlite3", isDirectory: false)
+        return SessionIndexWorkspace(
+            rootDirectoryURL: indexesURL,
+            legacyDatabaseURL: legacyDatabaseURL,
+            fileManager: fileManager
+        )
     }
 }
