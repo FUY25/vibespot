@@ -327,6 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let rebuiltIndexer = Indexer(sessionIndex: readyIndex, sourceResolution: targetResolution)
                     self.settings = targetSettings
                     self.sessionSourceResolution = targetResolution
+                    self.settingsStore.save(self.settings)
                     self.sessionIndex = readyIndex
                     self.searchPanelController?.sessionIndex = readyIndex
                     self.searchPanelController?.applySessionSourceResolution(targetResolution)
@@ -338,6 +339,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
+                await MainActor.run { [weak self] in
+                    guard let self, generation == self.sourceSwitchGeneration else { return }
+                    self.settingsStore.save(self.settings)
+                }
                 print("AppDelegate failed to switch session sources: \(error)")
             }
 

@@ -42,10 +42,13 @@ struct SourceSwitchCoordinatorTests {
             codex: ToolSessionSourceConfiguration(mode: .custom, customRoot: nextCodexRoot)
         )
 
+        // Preferences persists first, then invokes AppDelegate.
+        store.save(newSettings)
         delegate.applySettingsForTesting(newSettings)
         await delegate.waitForSourceSwitchForTesting()
 
         #expect(delegate.currentSessionSourceFingerprintForTesting == originalFingerprint)
+        #expect(store.load().sessionSourceConfiguration == initialSettings.sessionSourceConfiguration)
     }
 
     @MainActor
