@@ -109,6 +109,42 @@ struct PreferencesWindowControllerTests {
         #expect(controller.settingsStoreForTesting.load().sessionSourceConfiguration == settings.sessionSourceConfiguration)
     }
 
+    @Test("applying invalid custom source with automatic fallback persists automatic state")
+    func applyingInvalidCustomSourceWithAutomaticFallbackPersistsAutomaticState() throws {
+        let applyRecorder = ApplyRecorder()
+        let autoHome = try makeAutomaticHome()
+        let controller = makeController(
+            sessionSourceLocator: SessionSourceLocator(homeDirectoryPath: autoHome),
+            onApply: applyRecorder.record
+        )
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        let applyButton = try #require(findButton(titled: "Apply", in: window.contentView))
+
+        controller.updateSourceDraftForTesting { draft in
+            draft.claude.mode = .custom
+            draft.claude.customRoot = "/tmp/missing-claude-\(UUID().uuidString)"
+        }
+
+        let fallbackLabel = try #require(findStaticText(containing: "fallback", in: window.contentView))
+        #expect(fallbackLabel.stringValue.localizedCaseInsensitiveContains("automatic"))
+        #expect(applyButton.isEnabled)
+
+        applyButton.performClick(nil)
+
+        let appliedSettings = try #require(applyRecorder.appliedSettings.last)
+        #expect(appliedSettings.sessionSourceConfiguration.claude.mode == .automatic)
+        #expect(appliedSettings.sessionSourceConfiguration.claude.customRoot.isEmpty)
+        #expect(appliedSettings.sessionSourceConfiguration.codex == AppSettings.default.sessionSourceConfiguration.codex)
+
+        let persistedSettings = controller.settingsStoreForTesting.load()
+        #expect(persistedSettings.sessionSourceConfiguration == appliedSettings.sessionSourceConfiguration)
+
+        let statusLabel = try #require(findStaticText(containing: "fallback", in: window.contentView))
+        #expect(statusLabel.stringValue.localizedCaseInsensitiveContains("applied"))
+    }
+
     @Test("single page preferences shows build info without sidebar tabs")
     func singlePagePreferencesShowsBuildInfoWithoutSidebarTabs() throws {
         let controller = makeController()
@@ -174,6 +210,39 @@ struct PreferencesWindowControllerTests {
             attributes: nil
         )
         return root.path
+    }
+
+    private func makeAutomaticHome() throws -> String {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "preferences-auto-home-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+
+        let claudeRoot = home.appendingPathComponent(".claude", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: claudeRoot.appendingPathComponent("projects", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: claudeRoot.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let codexRoot = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: codexRoot.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(
+            atPath: codexRoot.appendingPathComponent("state_5.sqlite").path,
+            contents: Data(),
+            attributes: nil
+        )
+
+        return home.path
     }
 
     private func findButton(titled title: String, in view: NSView?) -> NSButton? {

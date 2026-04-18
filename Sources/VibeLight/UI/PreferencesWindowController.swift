@@ -673,7 +673,7 @@ final class PreferencesWindowController: NSWindowController {
                 return "Custom root not selected"
             }
             if resolvedSource.status == .fallbackToAutomatic {
-                return "Invalid custom root, fallback available: \(compactPath(resolvedSource.rootPath))"
+                return "Invalid custom root. Automatic fallback available: \(compactPath(resolvedSource.rootPath))"
             }
             return "Invalid custom root. No fallback available."
         }
@@ -803,16 +803,35 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func applySourceChanges() {
-        let resolution = sessionSourceLocator.resolve(for: stagedSourceSettings())
+        let stagedSettings = stagedSourceSettings()
+        let resolution = sessionSourceLocator.resolve(for: stagedSettings)
         guard sourceDraft.isDirty(comparedTo: settings), sourceWarningMessage(for: resolution) == nil else {
             statusMessage = "Choose valid source settings before applying."
             loadControls()
             return
         }
 
-        settings.sessionSourceConfiguration = sourceDraft.sessionSourceConfiguration
+        let fallbackTools = sourceDraft.toolsUsingAutomaticFallback(for: resolution)
+        let normalizedDraft = sourceDraft.normalized(for: resolution)
+
+        settings.sessionSourceConfiguration = normalizedDraft.sessionSourceConfiguration
         sourceDraft = PreferencesSourceDraft(settings: settings)
-        saveSettings(status: "Source settings applied")
+        saveSettings(status: sourceAppliedStatusMessage(for: fallbackTools))
+    }
+
+    private func sourceAppliedStatusMessage(for fallbackTools: [String]) -> String {
+        guard fallbackTools.isEmpty == false else {
+            return "Source settings applied"
+        }
+
+        let toolSummary: String
+        if fallbackTools.count == 2 {
+            toolSummary = "Claude and Codex"
+        } else {
+            toolSummary = fallbackTools[0]
+        }
+
+        return "Source settings applied with automatic fallback for \(toolSummary)."
     }
 
     @objc private func changeShortcutAction() {
