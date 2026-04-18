@@ -872,6 +872,16 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func updateGitBranch(sessionId: String, gitBranch: String) throws {
+        try runStatement(
+            "UPDATE sessions SET git_branch = ?1, updated_at = ?2 WHERE id = ?3"
+        ) { statement in
+            try statement.bind(index: 1, text: gitBranch)
+            try statement.bind(index: 2, double: Date().timeIntervalSince1970)
+            try statement.bind(index: 3, text: sessionId)
+        }
+    }
+
     func updateLastUserPrompt(sessionId: String, prompt: String) throws {
         try runStatement(
             "UPDATE sessions SET last_user_prompt = ?1 WHERE id = ?2"
@@ -892,6 +902,18 @@ final class SessionIndex: @unchecked Sendable {
             }
         )
         return rows.first
+    }
+
+    func sessionIDs(forTool tool: String) throws -> [String] {
+        try db.query(
+            "SELECT id FROM sessions WHERE tool = ?1",
+            bind: { statement in
+                try statement.bind(index: 1, text: tool)
+            },
+            map: { statement in
+                textColumn(statement, index: 0)
+            }
+        )
     }
 
     /// Returns sessions whose title matches their project_name, is "Untitled", or is empty.

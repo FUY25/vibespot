@@ -1,8 +1,9 @@
 import Foundation
 import CoreServices
 
-@MainActor
 final class FileWatcher {
+    static let defaultCallbackQueueLabel = "ai.vibelight.file-watcher"
+
     private final class CallbackContext {
         let onChange: @Sendable ([String]) -> Void
 
@@ -11,13 +12,19 @@ final class FileWatcher {
         }
     }
 
-    nonisolated(unsafe) private var stream: FSEventStreamRef?
-    nonisolated(unsafe) private var callbackContext: Unmanaged<CallbackContext>?
+    private var stream: FSEventStreamRef?
+    private var callbackContext: Unmanaged<CallbackContext>?
     private let paths: [String]
+    private let callbackQueue: DispatchQueue
     private let onChange: @Sendable ([String]) -> Void
 
-    init(paths: [String], onChange: @escaping @Sendable ([String]) -> Void) {
+    init(
+        paths: [String],
+        callbackQueue: DispatchQueue = DispatchQueue(label: FileWatcher.defaultCallbackQueueLabel, qos: .utility),
+        onChange: @escaping @Sendable ([String]) -> Void
+    ) {
         self.paths = paths
+        self.callbackQueue = callbackQueue
         self.onChange = onChange
     }
 
@@ -60,7 +67,7 @@ final class FileWatcher {
         )
 
         if let stream = stream {
-            FSEventStreamSetDispatchQueue(stream, .main)
+            FSEventStreamSetDispatchQueue(stream, callbackQueue)
             FSEventStreamStart(stream)
         } else {
             callbackContext.release()

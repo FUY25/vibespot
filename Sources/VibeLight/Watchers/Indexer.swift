@@ -1,10 +1,17 @@
 import Foundation
 
-@MainActor
-final class Indexer {
-    let sessionIndex: SessionIndex
+final class Indexer: @unchecked Sendable {
+    struct CodexMetadataRefreshPlan: Sendable, Equatable {
+        var refreshTitles = false
+        var refreshGitBranches = false
+        var forceFullTranscriptReindex = false
+    }
 
-    private let homeDirectoryPath: String
+    static let changeHandlingQueueLabel = "ai.vibelight.indexer.change-handling"
+
+    let sessionIndex: SessionIndex
+    private let sourceResolution: SessionSourceResolution
+    private let changeHandlingQueue: DispatchQueue
     private var fileWatcher: FileWatcher?
     private var refreshTimer: Timer?
     private var titleSweepTimer: Timer?
@@ -17,21 +24,95 @@ final class Indexer {
 
     init(
         sessionIndex: SessionIndex,
-        homeDirectoryPath: String = FileManager.default.homeDirectoryForCurrentUser.path
+        sourceResolution: SessionSourceResolution = SessionSourceLocator().resolve(for: AppSettings.default),
+        changeHandlingQueue: DispatchQueue = DispatchQueue(label: Indexer.changeHandlingQueueLabel, qos: .utility)
     ) {
         self.sessionIndex = sessionIndex
-        self.homeDirectoryPath = homeDirectoryPath
+        self.sourceResolution = sourceResolution
+        self.changeHandlingQueue = changeHandlingQueue
+    }
+
+    convenience init(
+        sessionIndex: SessionIndex,
+        homeDirectoryPath: String
+    ) {
+        let sessionSourceResolution = SessionSourceLocator(homeDirectoryPath: homeDirectoryPath).resolve(for: AppSettings.default)
+        self.init(sessionIndex: sessionIndex, sourceResolution: sessionSourceResolution)
+    }
+
+    static func shouldRefreshLiveSessions(
+        forChangedPaths paths: [String],
+        sourceResolution: SessionSourceResolution? = nil
+    ) -> Bool {
+        guard let resolvedSource = sourceResolution else {
+            return paths.contains { path in
+                if path.hasSuffix(".json") && (path.contains("/.claude/sessions/") || path.hasSuffix("/.claude/sessions")) {
+                    return true
+                }
+                if path.hasSuffix(".jsonl"), path.contains("/.claude/projects/") {
+                    return true
+                }
+                if path.hasSuffix(".jsonl"), path.contains("/.codex/sessions/") {
+                    return true
+                }
+                return false
+            }
+        }
+
+        return paths.contains { path in
+            if path.hasSuffix(".json"), isUnderClaudeSessionsPath(path, for: resolvedSource) {
+                return true
+            }
+            if path.hasSuffix(".jsonl"), isUnderClaudeProjectsPath(path, for: resolvedSource) {
+                return true
+            }
+            if path.hasSuffix(".jsonl"), isUnderCodexSessionsPath(path, for: resolvedSource) {
+                return true
+            }
+            return false
+        }
+    }
+
+    static func codexMetadataRefreshPlan(
+        forChangedPaths paths: [String],
+        sourceResolution: SessionSourceResolution? = nil
+    ) -> CodexMetadataRefreshPlan {
+        var plan = CodexMetadataRefreshPlan()
+
+        for path in paths {
+            let isUnderCodexRoot: Bool
+            if let sourceResolution {
+                isUnderCodexRoot = isUnderCodexRootPath(path, for: sourceResolution)
+            } else {
+                isUnderCodexRoot = path.contains("/.codex/")
+            }
+
+            guard isUnderCodexRoot else {
+                continue
+            }
+
+            if path.hasSuffix("/session_index.jsonl") {
+                plan.refreshTitles = true
+            }
+
+            if path.hasSuffix("/state_5.sqlite") {
+                plan.refreshGitBranches = true
+            }
+        }
+
+        return plan
     }
 
     func start() {
         stop()
 
         let sessionIndex = sessionIndex
-        let homeDirectoryPath = homeDirectoryPath
+        let sourceResolution = sourceResolution
+        let changeHandlingQueue = self.changeHandlingQueue
         startupScanTask = Task.detached(priority: .utility) { [weak self] in
             var scanner = IndexScanner(
                 sessionIndex: sessionIndex,
-                homeDirectoryPath: homeDirectoryPath
+                sourceResolution: sourceResolution
             )
             scanner.performFullScan()
 
@@ -39,19 +120,19 @@ final class Indexer {
                 return
             }
 
-            await MainActor.run { [weak self] in
+            changeHandlingQueue.async { [weak self] in
                 self?.refreshLiveSessions()
             }
         }
 
         let watchPaths = [
-            homeDirectoryPath + "/.claude",
-            homeDirectoryPath + "/.codex",
+            sourceResolution.claudeRootPath,
+            sourceResolution.codexRootPath,
         ].filter { FileManager.default.fileExists(atPath: $0) }
 
         if !watchPaths.isEmpty {
             fileWatcher = FileWatcher(paths: watchPaths) { [weak self] changedPaths in
-                Task { @MainActor [weak self] in
+                changeHandlingQueue.async { [weak self] in
                     self?.handleChanges(changedPaths)
                 }
             }
@@ -59,14 +140,14 @@ final class Indexer {
         }
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            changeHandlingQueue.async { [weak self] in
                 self?.refreshLiveSessions()
             }
         }
 
         // Periodic title improvement sweep every 60s
         titleSweepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
+            changeHandlingQueue.async { [weak self] in
                 self?.runTitleSweep()
             }
         }
@@ -89,14 +170,14 @@ final class Indexer {
     func performFullScan() {
         var scanner = IndexScanner(
             sessionIndex: sessionIndex,
-            homeDirectoryPath: homeDirectoryPath
+            sourceResolution: sourceResolution
         )
         scanner.performFullScan()
         refreshLiveSessions()
     }
 
     private func scanClaudeSessions() {
-        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        let projectsPath = sourceResolution.claudeProjectsPath
         let fileManager = FileManager.default
 
         guard let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) else {
@@ -243,10 +324,10 @@ final class Indexer {
     }
 
     private func scanCodexSessions() {
-        codexTitleMap = IndexingHelpers.loadCodexTitleMap(homeDirectoryPath: homeDirectoryPath)
-        let codexGitBranchMap = CodexStateDB().gitBranchMap()
+        codexTitleMap = IndexingHelpers.loadCodexTitleMap(codexRootPath: sourceResolution.codexRootPath)
+        let codexGitBranchMap = CodexStateDB(path: sourceResolution.codexStatePath).gitBranchMap()
 
-        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
+        let sessionsPath = sourceResolution.codexSessionsPath
         let fileManager = FileManager.default
 
         guard
@@ -347,7 +428,7 @@ final class Indexer {
 
     /// Given a list of (sessionId, pid, startedAt) tuples, returns session IDs
     /// that should be marked "closed" because a newer session shares their PID.
-    nonisolated static func sessionIDsToCloseByPID(
+    static func sessionIDsToCloseByPID(
         sessions: [(sessionId: String, pid: Int, startedAt: Date)]
     ) -> [String] {
         var byPID: [Int: [(sessionId: String, startedAt: Date)]] = [:]
@@ -365,7 +446,7 @@ final class Indexer {
         return staleIDs
     }
 
-    nonisolated static func dedupTuplesFromAliveSessions(
+    static func dedupTuplesFromAliveSessions(
         aliveSessionsByID: [String: LiveSession],
         startedAtBySessionID: [String: Date]
     ) -> [(sessionId: String, pid: Int, startedAt: Date)] {
@@ -384,7 +465,10 @@ final class Indexer {
 
     private func refreshLiveSessions() {
         let now = Date()
-        let liveSessions = LiveSessionRegistry.scan()
+        let liveSessions = LiveSessionRegistry.scan(
+            claudeSessionsPath: sourceResolution.claudeSessionsPath,
+            codexStatePath: sourceResolution.codexStatePath
+        )
         let aliveSessionsByID = Dictionary(
             liveSessions
                 .filter(\.isAlive)
@@ -504,25 +588,27 @@ final class Indexer {
     // MARK: - Change handling
 
     private func handleChanges(_ paths: [String]) {
-        var needsLiveRefresh = Self.shouldRefreshLiveSessions(forChangedPaths: paths)
-        var needsCodexReindex = false
+        var needsLiveRefresh = shouldRefreshLiveSessions(forChangedPaths: paths)
+        let codexMetadataRefreshPlan = Self.codexMetadataRefreshPlan(
+            forChangedPaths: paths,
+            sourceResolution: sourceResolution
+        )
         var claudeSessionsIndexPaths: [String] = []
         var claudeSessionPaths: [String] = []
         var codexSessionPaths: [String] = []
 
         for path in paths {
-            if path.contains("/.claude/sessions/"), path.hasSuffix(".json") {
+            if isUnderClaudeSessionsPath(path), path.hasSuffix(".json") {
                 needsLiveRefresh = true
                 continue
             }
 
-            if path.hasSuffix("/sessions-index.json"), path.contains("/.claude/projects/") {
+            if path.hasSuffix("/sessions-index.json"), isUnderClaudeProjectsPath(path) {
                 claudeSessionsIndexPaths.append(path)
                 continue
             }
 
-            if path.contains("/.codex/"), (path.hasSuffix("/session_index.jsonl") || path.hasSuffix("/state_5.sqlite")) {
-                needsCodexReindex = true
+            if isUnderCodexRootPath(path), (path.hasSuffix("/session_index.jsonl") || path.hasSuffix("/state_5.sqlite")) {
                 continue
             }
 
@@ -530,9 +616,9 @@ final class Indexer {
                 continue
             }
 
-            if path.contains("/.claude/projects/") {
+            if isUnderClaudeProjectsPath(path) {
                 claudeSessionPaths.append(path)
-            } else if path.contains("/.codex/sessions/") {
+            } else if isUnderCodexSessionsPath(path) {
                 codexSessionPaths.append(path)
             }
         }
@@ -545,9 +631,12 @@ final class Indexer {
             reindexClaudeSessionsIndex(at: path)
         }
 
-        if needsCodexReindex {
-            codexTitleMap = IndexingHelpers.loadCodexTitleMap(homeDirectoryPath: homeDirectoryPath)
-            reindexAllCodexSessionFiles()
+        if codexMetadataRefreshPlan.refreshTitles {
+            refreshCodexTitles()
+        }
+
+        if codexMetadataRefreshPlan.refreshGitBranches {
+            refreshCodexGitBranches()
         }
 
         for path in claudeSessionPaths {
@@ -555,7 +644,7 @@ final class Indexer {
         }
 
         if !codexSessionPaths.isEmpty {
-            let codexGitBranchMap = CodexStateDB().gitBranchMap()
+            let codexGitBranchMap = CodexStateDB(path: sourceResolution.codexStatePath).gitBranchMap()
             for path in codexSessionPaths {
                 processedFiles.remove(path)
                 indexCodexSessionFile(
@@ -567,19 +656,43 @@ final class Indexer {
         }
     }
 
-    nonisolated static func shouldRefreshLiveSessions(forChangedPaths paths: [String]) -> Bool {
-        for path in paths {
-            if path.contains("/.claude/sessions/"), path.hasSuffix(".json") {
-                return true
-            }
-            if path.contains("/.claude/projects/"), path.hasSuffix(".jsonl") {
-                return true
-            }
-            if path.contains("/.codex/sessions/"), path.hasSuffix(".jsonl") {
-                return true
-            }
-        }
-        return false
+    private func shouldRefreshLiveSessions(forChangedPaths paths: [String]) -> Bool {
+        return Self.shouldRefreshLiveSessions(
+            forChangedPaths: paths,
+            sourceResolution: sourceResolution
+        )
+    }
+
+    private static func isUnderClaudeSessionsPath(_ path: String, for sourceResolution: SessionSourceResolution) -> Bool {
+        return path == sourceResolution.claudeSessionsPath || path.hasPrefix(sourceResolution.claudeSessionsPath + "/")
+    }
+
+    private static func isUnderClaudeProjectsPath(_ path: String, for sourceResolution: SessionSourceResolution) -> Bool {
+        return path == sourceResolution.claudeProjectsPath || path.hasPrefix(sourceResolution.claudeProjectsPath + "/")
+    }
+
+    private static func isUnderCodexSessionsPath(_ path: String, for sourceResolution: SessionSourceResolution) -> Bool {
+        return path == sourceResolution.codexSessionsPath || path.hasPrefix(sourceResolution.codexSessionsPath + "/")
+    }
+
+    private static func isUnderCodexRootPath(_ path: String, for sourceResolution: SessionSourceResolution) -> Bool {
+        return path == sourceResolution.codexRootPath || path.hasPrefix(sourceResolution.codexRootPath + "/")
+    }
+
+    private func isUnderClaudeSessionsPath(_ path: String) -> Bool {
+        return path == sourceResolution.claudeSessionsPath || path.hasPrefix(sourceResolution.claudeSessionsPath + "/")
+    }
+
+    private func isUnderClaudeProjectsPath(_ path: String) -> Bool {
+        return path == sourceResolution.claudeProjectsPath || path.hasPrefix(sourceResolution.claudeProjectsPath + "/")
+    }
+
+    private func isUnderCodexRootPath(_ path: String) -> Bool {
+        return path == sourceResolution.codexRootPath || path.hasPrefix(sourceResolution.codexRootPath + "/")
+    }
+
+    private func isUnderCodexSessionsPath(_ path: String) -> Bool {
+        return path == sourceResolution.codexSessionsPath || path.hasPrefix(sourceResolution.codexSessionsPath + "/")
     }
 
     private func reindexClaudeSessionsIndex(at path: String) {
@@ -611,31 +724,6 @@ final class Indexer {
         }
     }
 
-    private func reindexAllCodexSessionFiles() {
-        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
-        let fileManager = FileManager.default
-        let codexGitBranchMap = CodexStateDB().gitBranchMap()
-
-        guard
-            let enumerator = fileManager.enumerator(
-                at: URL(fileURLWithPath: sessionsPath),
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            )
-        else {
-            return
-        }
-
-        for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-            processedFiles.remove(fileURL.path)
-            indexCodexSessionFile(
-                path: fileURL.path,
-                titleMap: codexTitleMap,
-                gitBranchMap: codexGitBranchMap
-            )
-        }
-    }
-
     private func reindexClaudeSessionFile(at path: String) {
         let fileURL = URL(fileURLWithPath: path)
         let sessionId = fileURL.deletingPathExtension().lastPathComponent
@@ -660,13 +748,42 @@ final class Indexer {
         )
     }
 
+    private func refreshCodexTitles() {
+        let refreshedTitleMap = IndexingHelpers.loadCodexTitleMap(codexRootPath: sourceResolution.codexRootPath)
+        codexTitleMap = refreshedTitleMap
+
+        guard let codexSessionIDs = try? sessionIndex.sessionIDs(forTool: "codex") else {
+            return
+        }
+
+        for sessionID in codexSessionIDs {
+            guard let refreshedTitle = refreshedTitleMap[sessionID] else {
+                continue
+            }
+
+            try? sessionIndex.updateTitle(sessionId: sessionID, title: refreshedTitle)
+        }
+    }
+
+    private func refreshCodexGitBranches() {
+        let gitBranchMap = CodexStateDB(path: sourceResolution.codexStatePath).gitBranchMap()
+
+        guard let codexSessionIDs = try? sessionIndex.sessionIDs(forTool: "codex") else {
+            return
+        }
+
+        for sessionID in codexSessionIDs {
+            try? sessionIndex.updateGitBranch(sessionId: sessionID, gitBranch: gitBranchMap[sessionID] ?? "")
+        }
+    }
+
     // MARK: - Title Sweep
 
     /// Periodically re-checks sessions with weak titles (project name, "Untitled", empty)
     /// and attempts to find better titles from JSONL tails and external title sources.
     private func runTitleSweep() {
         // Refresh the Codex title map from session_index.jsonl (may have new entries)
-        let freshCodexTitleMap = IndexingHelpers.loadCodexTitleMap(homeDirectoryPath: homeDirectoryPath)
+        let freshCodexTitleMap = IndexingHelpers.loadCodexTitleMap(codexRootPath: sourceResolution.codexRootPath)
         if !freshCodexTitleMap.isEmpty {
             codexTitleMap.merge(freshCodexTitleMap) { _, new in new }
         }
@@ -679,6 +796,7 @@ final class Indexer {
 
         let sessionIndex = sessionIndex
         let codexTitleMap = codexTitleMap
+        let sourceResolution = sourceResolution
 
         Task.detached(priority: .utility) {
             for session in weakSessions {
@@ -698,7 +816,7 @@ final class Indexer {
                 if betterTitle == nil {
                     let fileURL = Self.findSessionFileStatic(
                         sessionId: session.sessionId,
-                        homeDirectoryPath: FileManager.default.homeDirectoryForCurrentUser.path
+                        sourceResolution: sourceResolution
                     )
                     if let fileURL {
                         betterTitle = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
@@ -715,7 +833,7 @@ final class Indexer {
     /// Loads Claude session summaries from all sessions-index.json files,
     /// filtering out "New Conversation" and firstPrompt fallbacks.
     private func loadClaudeSummaries() -> [String: String] {
-        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        let projectsPath = sourceResolution.claudeProjectsPath
         let fm = FileManager.default
         guard let dirs = try? fm.contentsOfDirectory(atPath: projectsPath) else { return [:] }
 
@@ -777,7 +895,7 @@ final class Indexer {
     }
 
     /// Reads the tail of a session file and returns the type of the last JSONL entry.
-    nonisolated static func detectLastEntryType(fileURL: URL) -> String? {
+    static func detectLastEntryType(fileURL: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
         defer { try? handle.close() }
 
@@ -827,7 +945,7 @@ final class Indexer {
                 && now.timeIntervalSince(sessionFileLookupMissAt[$0] ?? .distantPast) >= lookupCooldown
         }
         if !missingClaudeIDs.isEmpty {
-            let projectsPath = homeDirectoryPath + "/.claude/projects"
+            let projectsPath = sourceResolution.claudeProjectsPath
             if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
                 for encodedProjectPath in projectDirectories {
                     let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
@@ -854,7 +972,7 @@ final class Indexer {
         }
         if !missingCodexIDs.isEmpty {
             let missingSet = Set(missingCodexIDs)
-            let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+            let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
             if let enumerator = fileManager.enumerator(
                 at: codexRoot,
                 includingPropertiesForKeys: [.isRegularFileKey],
@@ -888,7 +1006,7 @@ final class Indexer {
         }
 
         let fileManager = FileManager.default
-        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        let projectsPath = sourceResolution.claudeProjectsPath
         if let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) {
             for encodedProjectPath in projectDirectories {
                 let directoryPath = (projectsPath as NSString).appendingPathComponent(encodedProjectPath)
@@ -904,7 +1022,7 @@ final class Indexer {
             }
         }
 
-        let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+        let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
         if let enumerator = fileManager.enumerator(
             at: codexRoot,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -927,10 +1045,13 @@ final class Indexer {
     }
 
     /// Thread-safe, uncached file lookup for background title sweeps.
-    nonisolated static func findSessionFileStatic(sessionId: String, homeDirectoryPath: String) -> URL? {
+    static func findSessionFileStatic(
+        sessionId: String,
+        sourceResolution: SessionSourceResolution
+    ) -> URL? {
         let fm = FileManager.default
 
-        let claudeProjectsPath = homeDirectoryPath + "/.claude/projects"
+        let claudeProjectsPath = sourceResolution.claudeProjectsPath
         if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
             for projectDir in projectDirs {
                 let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
@@ -938,7 +1059,7 @@ final class Indexer {
             }
         }
 
-        let codexRoot = URL(fileURLWithPath: homeDirectoryPath + "/.codex/sessions", isDirectory: true)
+        let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
         if let enumerator = fm.enumerator(
             at: codexRoot,
             includingPropertiesForKeys: [.isRegularFileKey],
