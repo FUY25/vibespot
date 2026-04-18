@@ -2,14 +2,14 @@ import Foundation
 
 struct IndexScanner {
     let sessionIndex: SessionIndex
-    let homeDirectoryPath: String
+    let sourceResolution: SessionSourceResolution
 
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
 
-    init(sessionIndex: SessionIndex, homeDirectoryPath: String) {
+    init(sessionIndex: SessionIndex, sourceResolution: SessionSourceResolution) {
         self.sessionIndex = sessionIndex
-        self.homeDirectoryPath = homeDirectoryPath
+        self.sourceResolution = sourceResolution
     }
 
     mutating func performFullScan() {
@@ -27,7 +27,7 @@ struct IndexScanner {
         guard !Task.isCancelled else {
             return
         }
-        let projectsPath = homeDirectoryPath + "/.claude/projects"
+        let projectsPath = sourceResolution.claudeProjectsPath
         let fileManager = FileManager.default
 
         guard let projectDirectories = try? fileManager.contentsOfDirectory(atPath: projectsPath) else {
@@ -94,10 +94,10 @@ struct IndexScanner {
         guard !Task.isCancelled else {
             return
         }
-        codexTitleMap = IndexingHelpers.loadCodexTitleMap(homeDirectoryPath: homeDirectoryPath)
-        let codexGitBranchMap = CodexStateDB().gitBranchMap()
+        codexTitleMap = IndexingHelpers.loadCodexTitleMap(codexRootPath: sourceResolution.codexRootPath)
+        let codexGitBranchMap = CodexStateDB(path: sourceResolution.codexStatePath).gitBranchMap()
 
-        let sessionsPath = homeDirectoryPath + "/.codex/sessions"
+        let sessionsPath = sourceResolution.codexSessionsPath
         let fileManager = FileManager.default
 
         guard
@@ -184,6 +184,7 @@ struct IndexScanner {
             if let telemetry {
                 try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
             }
+            persistIndexedFileState(sessionId: sessionId, path: path, lastMtime: mtime)
             return
         }
 
@@ -225,6 +226,7 @@ struct IndexScanner {
             )
         }
         try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(sessionId: sessionId, path: path, lastMtime: mtime)
     }
 
     private mutating func indexCodexSessionFile(
@@ -269,6 +271,14 @@ struct IndexScanner {
         }
         let mtime = parseStartMtime ?? IndexingHelpers.fileMtime(at: path)
 
+        if messages.isEmpty {
+            if let telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
+            persistIndexedFileState(sessionId: sessionId, path: path, lastMtime: mtime)
+            return
+        }
+
         let title = IndexingHelpers.bestSessionTitle(
             externalTitle: titleMap[sessionId],
             messages: messages
@@ -303,6 +313,29 @@ struct IndexScanner {
             )
         }
         try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(sessionId: sessionId, path: path, lastMtime: mtime)
+    }
+
+    private func persistIndexedFileState(sessionId: String, path: String, lastMtime: Date?) {
+        try? sessionIndex.upsertIndexedFileState(
+            IndexedFileState(
+                sessionId: sessionId,
+                filePath: path,
+                lastOffset: fileSize(at: path) ?? 0,
+                lastSize: fileSize(at: path) ?? 0,
+                lastMtime: lastMtime
+            )
+        )
+    }
+
+    private func fileSize(at path: String) -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attributes[.size] as? NSNumber
+        else {
+            return nil
+        }
+
+        return size.uint64Value
     }
 
     private func fileMtimeDidChange(at path: String, expected: Date?) -> Bool {

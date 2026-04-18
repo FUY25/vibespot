@@ -188,6 +188,54 @@ func testParseSessionJSONLCapturesTelemetryFromUsageOnlyAssistantTurnWithoutCrea
 }
 
 @Test
+func testParseSessionJSONLFromByteOffsetReadsOnlyAppendedRecords() throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ClaudeParserTests-\(UUID().uuidString)", isDirectory: true)
+    let fixtureURL = tempDirectory.appendingPathComponent("incremental.jsonl")
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+    let original = #"{"type":"user","timestamp":"2026-03-28T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"first"}]}}"#
+    try original.write(to: fixtureURL, atomically: true, encoding: .utf8)
+    let originalLength = UInt64(try Data(contentsOf: fixtureURL).count)
+
+    let appended = [
+        original,
+        #"{"type":"assistant","timestamp":"2026-03-28T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"second"}]}}"#,
+    ].joined(separator: "\n")
+    try appended.write(to: fixtureURL, atomically: true, encoding: .utf8)
+
+    let parsed = try ClaudeParser.parseSessionFile(url: fixtureURL, startingAtOffset: originalLength)
+
+    #expect(parsed.requiresFullRebuild == false)
+    #expect(parsed.messages.count == 1)
+    #expect(parsed.messages[0].role == "assistant")
+    #expect(parsed.messages[0].content == "second")
+}
+
+@Test
+func testParseSessionJSONLFromMisalignedByteOffsetRequestsFullRebuild() throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ClaudeParserTests-\(UUID().uuidString)", isDirectory: true)
+    let fixtureURL = tempDirectory.appendingPathComponent("incremental-misaligned.jsonl")
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+
+    let contents = [
+        #"{"type":"user","timestamp":"2026-03-28T10:00:00Z","message":{"role":"user","content":[{"type":"text","text":"first"}]}}"#,
+        #"{"type":"assistant","timestamp":"2026-03-28T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"second"}]}}"#,
+    ].joined(separator: "\n")
+    try contents.write(to: fixtureURL, atomically: true, encoding: .utf8)
+
+    let parsed = try ClaudeParser.parseSessionFile(url: fixtureURL, startingAtOffset: 1)
+
+    #expect(parsed.requiresFullRebuild == true)
+    #expect(parsed.messages.isEmpty)
+}
+
+@Test
 func testParseSessionsIndex() throws {
     let fixtureURL = try #require(
         Bundle.module.url(forResource: "sessions_index", withExtension: "json", subdirectory: "Fixtures")

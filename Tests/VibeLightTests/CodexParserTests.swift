@@ -143,6 +143,39 @@ func testParseCodexSessionFileKeepsLatestUsableTelemetryWhenLaterTokenCountIsInc
     #expect(parsedTelemetry.lastContextSampleAt == formatter.date(from: "2026-01-14T10:06:16.000Z"))
 }
 
+@Test
+func testParseCodexSessionFileFromByteOffsetReadsOnlyAppendedRecords() throws {
+    let fixtureURL = try writeTemporaryCodexSession(lines: [
+        #"{"timestamp":"2026-01-14T10:06:14.970Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#,
+    ])
+    let originalLength = UInt64(try Data(contentsOf: fixtureURL).count)
+
+    try [
+        #"{"timestamp":"2026-01-14T10:06:14.970Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#,
+        #"{"timestamp":"2026-01-14T10:06:15.970Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}"#,
+    ].joined(separator: "\n").write(to: fixtureURL, atomically: true, encoding: .utf8)
+
+    let parsed = try CodexParser.parseSessionFile(url: fixtureURL, startingAtOffset: originalLength)
+
+    #expect(parsed.requiresFullRebuild == false)
+    #expect(parsed.messages.count == 1)
+    #expect(parsed.messages[0].role == "assistant")
+    #expect(parsed.messages[0].content == "second")
+}
+
+@Test
+func testParseCodexSessionFileFromMisalignedByteOffsetRequestsFullRebuild() throws {
+    let fixtureURL = try writeTemporaryCodexSession(lines: [
+        #"{"timestamp":"2026-01-14T10:06:14.970Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]}}"#,
+        #"{"timestamp":"2026-01-14T10:06:15.970Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"second"}]}}"#,
+    ])
+
+    let parsed = try CodexParser.parseSessionFile(url: fixtureURL, startingAtOffset: 1)
+
+    #expect(parsed.requiresFullRebuild == true)
+    #expect(parsed.messages.isEmpty)
+}
+
 private func writeTemporaryCodexSession(lines: [String]) throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

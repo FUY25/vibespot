@@ -233,6 +233,43 @@ func testReplacingTranscriptContentTwiceDoesNotDuplicateTranscriptRows() throws 
 }
 
 @Test
+func testAppendingTranscriptEntriesDoesNotRewriteExistingRows() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let now = Date()
+    try index.appendTranscripts(sessionId: "s1", entries: [
+        ("user", "first", now),
+        ("assistant", "second", now.addingTimeInterval(1)),
+    ])
+    try index.appendTranscripts(sessionId: "s1", entries: [
+        ("user", "third", now.addingTimeInterval(2)),
+    ])
+
+    #expect(try transcriptRowCount(dbPath: dbPath, sessionId: "s1") == 3)
+}
+
+@Test
+func testIndexedFileStateRoundTripsAndClearsWithIndexReset() throws {
+    let (index, dbPath) = try makeTestIndex()
+    defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+    let state = IndexedFileState(
+        sessionId: "s1",
+        filePath: "/tmp/session.jsonl",
+        lastOffset: 128,
+        lastSize: 128,
+        lastMtime: Date(timeIntervalSince1970: 1234)
+    )
+
+    try index.upsertIndexedFileState(state)
+    #expect(try index.indexedFileState(sessionId: "s1") == state)
+
+    try index.clearAllIndexedSessions()
+    #expect(try index.indexedFileState(sessionId: "s1") == nil)
+}
+
+@Test
 func testReplaceTranscriptsRollsBackWhenReplacementFails() throws {
     let (index, dbPath) = try makeTestIndex()
     defer { try? FileManager.default.removeItem(atPath: dbPath) }

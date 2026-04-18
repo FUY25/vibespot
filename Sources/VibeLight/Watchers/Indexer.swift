@@ -333,58 +333,38 @@ final class Indexer: @unchecked Sendable {
             return
         }
         let mtime = IndexingHelpers.fileMtime(at: path)
+        let currentSize = fileSize(at: path)
 
         let url = URL(fileURLWithPath: path)
         sessionFileLocator.record(sessionID: sessionId, fileURL: url)
-        guard let (messages, telemetry) = try? ClaudeParser.parseSessionFile(url: url) else {
+
+        if let state = try? sessionIndex.indexedFileState(sessionId: sessionId),
+           let currentSize,
+           applyIncrementalClaudeSessionFile(
+                state: state,
+                url: url,
+                path: path,
+                sessionId: sessionId,
+                projectPath: projectPath,
+                projectName: projectName,
+                preferredTitle: preferredTitle,
+                preferredFirstPrompt: preferredFirstPrompt,
+                currentSize: currentSize,
+                mtime: mtime
+           ) {
             return
         }
 
-        if messages.isEmpty {
-            if let telemetry {
-                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
-            }
-            return
-        }
-
-        let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
-        let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
-        let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
-        let title = IndexingHelpers.bestSessionTitle(
-            externalTitle: preferredTitle,
-            firstPromptHint: preferredFirstPrompt,
-            messages: messages
+        rebuildClaudeSessionFile(
+            url: url,
+            path: path,
+            sessionId: sessionId,
+            projectPath: projectPath,
+            projectName: projectName,
+            preferredTitle: preferredTitle,
+            preferredFirstPrompt: preferredFirstPrompt,
+            mtime: mtime
         )
-        let startedAt = messages.first?.timestamp ?? .distantPast
-        let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
-
-        try? sessionIndex.upsertSession(
-            id: sessionId,
-            tool: "claude",
-            title: SessionIndex.cleanTitle(title),
-            project: cwd,
-            projectName: resolvedProjectName,
-            gitBranch: gitBranch,
-            status: "closed",
-            startedAt: startedAt,
-            pid: nil,
-            tokenCount: metrics.tokenCount,
-            lastActivityAt: metrics.lastActivityAt,
-            lastFileModification: metrics.lastFileModification,
-            lastEntryType: metrics.lastEntryType,
-            activityPreview: metrics.activityPreview,
-            lastIndexedMtime: mtime,
-            telemetry: telemetry
-        )
-
-        let transcriptEntries = messages.map { message in
-            (
-                role: message.role,
-                content: IndexingHelpers.searchableContent(from: message),
-                timestamp: message.timestamp
-            )
-        }
-        try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
     }
 
     private func scanCodexSessions() {
@@ -435,24 +415,256 @@ final class Indexer: @unchecked Sendable {
         }
 
         let url = URL(fileURLWithPath: path)
-        guard let (meta, messages, telemetry) = try? CodexParser.parseSessionFile(url: url) else {
+        let mtime = IndexingHelpers.fileMtime(at: path)
+        let currentSize = fileSize(at: path)
+        let sessionIdFromPath = IndexingHelpers.codexSessionIDFromPath(path)
+
+        if let sessionIdFromPath {
+            sessionFileLocator.record(sessionID: sessionIdFromPath, fileURL: url)
+            if IndexingHelpers.shouldSkipFile(path: path, sessionId: sessionIdFromPath, sessionIndex: sessionIndex) {
+                return
+            }
+
+            if let state = try? sessionIndex.indexedFileState(sessionId: sessionIdFromPath),
+               let currentSize,
+               applyIncrementalCodexSessionFile(
+                    state: state,
+                    url: url,
+                    path: path,
+                    sessionId: sessionIdFromPath,
+                    titleMap: titleMap,
+                    gitBranchMap: gitBranchMap,
+                    currentSize: currentSize,
+                    mtime: mtime
+               ) {
+                return
+            }
+        }
+
+        guard let parsed = try? CodexParser.parseSessionFile(url: url, startingAtOffset: 0) else {
             return
         }
-        if meta?.isSubagent == true {
+        if parsed.meta?.isSubagent == true {
             return
         }
 
-        let metaID = meta?.id.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let sessionId = metaID.isEmpty ? messages.compactMap(\.sessionId).first : metaID
+        let metaID = parsed.meta?.id.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sessionId = metaID.isEmpty ? (sessionIdFromPath ?? parsed.messages.compactMap(\.sessionId).first) : metaID
         guard let sessionId, !sessionId.isEmpty else {
             return
         }
         sessionFileLocator.record(sessionID: sessionId, fileURL: url)
-        if IndexingHelpers.shouldSkipFile(path: path, sessionId: sessionId, sessionIndex: sessionIndex) {
+        if sessionIdFromPath == nil,
+           IndexingHelpers.shouldSkipFile(path: path, sessionId: sessionId, sessionIndex: sessionIndex) {
             return
         }
-        let mtime = IndexingHelpers.fileMtime(at: path)
 
+        if parsed.messages.isEmpty {
+            if let telemetry = parsed.telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
+            persistIndexedFileState(
+                sessionId: sessionId,
+                path: path,
+                lastOffset: parsed.nextOffset,
+                lastSize: parsed.nextOffset,
+                lastMtime: mtime
+            )
+            return
+        }
+
+        rebuildCodexSessionFile(
+            meta: parsed.meta,
+            messages: parsed.messages,
+            telemetry: parsed.telemetry,
+            url: url,
+            path: path,
+            sessionId: sessionId,
+            titleMap: titleMap,
+            gitBranchMap: gitBranchMap,
+            indexedSize: parsed.nextOffset,
+            mtime: mtime
+        )
+    }
+
+    private func rebuildClaudeSessionFile(
+        url: URL,
+        path: String,
+        sessionId: String,
+        projectPath: String,
+        projectName: String,
+        preferredTitle: String?,
+        preferredFirstPrompt: String?,
+        mtime: Date?
+    ) {
+        guard let parsed = try? ClaudeParser.parseSessionFile(url: url, startingAtOffset: 0) else {
+            return
+        }
+        let messages = parsed.messages
+        let telemetry = parsed.telemetry
+
+        if messages.isEmpty {
+            if let telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
+            persistIndexedFileState(
+                sessionId: sessionId,
+                path: path,
+                lastOffset: parsed.nextOffset,
+                lastSize: parsed.nextOffset,
+                lastMtime: mtime
+            )
+            return
+        }
+
+        let cwd = messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? projectPath
+        let resolvedProjectName = cwd.isEmpty ? projectName : (cwd as NSString).lastPathComponent
+        let gitBranch = messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? ""
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: preferredTitle,
+            firstPromptHint: preferredFirstPrompt,
+            messages: messages
+        )
+        let startedAt = messages.first?.timestamp ?? .distantPast
+        let metrics = IndexingHelpers.sessionMetrics(from: messages, filePath: path)
+
+        try? sessionIndex.upsertSession(
+            id: sessionId,
+            tool: "claude",
+            title: SessionIndex.cleanTitle(title),
+            project: cwd,
+            projectName: resolvedProjectName,
+            gitBranch: gitBranch,
+            status: "closed",
+            startedAt: startedAt,
+            pid: nil,
+            tokenCount: metrics.tokenCount,
+            lastActivityAt: metrics.lastActivityAt,
+            lastFileModification: metrics.lastFileModification,
+            lastEntryType: metrics.lastEntryType,
+            activityPreview: metrics.activityPreview,
+            lastIndexedMtime: mtime,
+            telemetry: telemetry
+        )
+
+        let transcriptEntries = messages.map { message in
+            (
+                role: message.role,
+                content: IndexingHelpers.searchableContent(from: message),
+                timestamp: message.timestamp
+            )
+        }
+        try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(
+            sessionId: sessionId,
+            path: path,
+            lastOffset: parsed.nextOffset,
+            lastSize: parsed.nextOffset,
+            lastMtime: mtime
+        )
+    }
+
+    private func applyIncrementalClaudeSessionFile(
+        state: IndexedFileState,
+        url: URL,
+        path: String,
+        sessionId: String,
+        projectPath: String,
+        projectName: String,
+        preferredTitle: String?,
+        preferredFirstPrompt: String?,
+        currentSize: UInt64,
+        mtime: Date?
+    ) -> Bool {
+        guard state.filePath == path, currentSize > state.lastSize else {
+            return false
+        }
+
+        guard let incremental = try? ClaudeParser.parseSessionFile(url: url, startingAtOffset: state.lastOffset) else {
+            return false
+        }
+        guard !incremental.requiresFullRebuild else {
+            return false
+        }
+
+        if incremental.messages.isEmpty {
+            if let telemetry = incremental.telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
+            persistIndexedFileState(
+                sessionId: sessionId,
+                path: path,
+                lastOffset: incremental.nextOffset,
+                lastSize: incremental.nextOffset,
+                lastMtime: mtime
+            )
+            return true
+        }
+
+        guard let existing = try? sessionIndex.results(matchingSessionIDs: [sessionId]).first else {
+            return false
+        }
+
+        let cwd = incremental.messages.lazy.compactMap(\.cwd).first(where: { !$0.isEmpty }) ?? existing.project.nonEmpty ?? projectPath
+        let resolvedProjectName = cwd.isEmpty ? existing.projectName.nonEmpty ?? projectName : (cwd as NSString).lastPathComponent
+        let gitBranch = incremental.messages.lazy.compactMap(\.gitBranch).first(where: { !$0.isEmpty }) ?? existing.gitBranch
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: preferredTitle ?? existing.title,
+            firstPromptHint: preferredFirstPrompt,
+            messages: incremental.messages
+        )
+        let metrics = IndexingHelpers.sessionMetrics(from: incremental.messages, filePath: path)
+        let lastEntryType = Self.detectLastEntryType(fileURL: url)
+
+        try? sessionIndex.upsertSession(
+            id: sessionId,
+            tool: "claude",
+            title: SessionIndex.cleanTitle(title),
+            project: cwd,
+            projectName: resolvedProjectName,
+            gitBranch: gitBranch,
+            status: existing.status,
+            startedAt: existing.startedAt,
+            pid: existing.pid,
+            tokenCount: existing.tokenCount + metrics.tokenCount,
+            lastActivityAt: incremental.messages.last?.timestamp ?? existing.lastActivityAt,
+            lastFileModification: mtime ?? existing.lastActivityAt,
+            lastEntryType: lastEntryType,
+            activityPreview: metrics.activityPreview,
+            lastIndexedMtime: mtime,
+            telemetry: incremental.telemetry
+        )
+
+        let transcriptEntries = incremental.messages.map { message in
+            (
+                role: message.role,
+                content: IndexingHelpers.searchableContent(from: message),
+                timestamp: message.timestamp
+            )
+        }
+        try? sessionIndex.appendTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(
+            sessionId: sessionId,
+            path: path,
+            lastOffset: incremental.nextOffset,
+            lastSize: incremental.nextOffset,
+            lastMtime: mtime
+        )
+        return true
+    }
+
+    private func rebuildCodexSessionFile(
+        meta: CodexSessionMeta?,
+        messages: [ParsedMessage],
+        telemetry: SessionContextTelemetry?,
+        url: URL,
+        path: String,
+        sessionId: String,
+        titleMap: [String: String],
+        gitBranchMap: [String: String],
+        indexedSize: UInt64,
+        mtime: Date?
+    ) {
         let title = IndexingHelpers.bestSessionTitle(
             externalTitle: titleMap[sessionId],
             messages: messages
@@ -487,6 +699,126 @@ final class Indexer: @unchecked Sendable {
             )
         }
         try? sessionIndex.replaceTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(
+            sessionId: sessionId,
+            path: path,
+            lastOffset: indexedSize,
+            lastSize: indexedSize,
+            lastMtime: mtime
+        )
+    }
+
+    private func applyIncrementalCodexSessionFile(
+        state: IndexedFileState,
+        url: URL,
+        path: String,
+        sessionId: String,
+        titleMap: [String: String],
+        gitBranchMap: [String: String],
+        currentSize: UInt64,
+        mtime: Date?
+    ) -> Bool {
+        guard state.filePath == path, currentSize > state.lastSize else {
+            return false
+        }
+
+        guard let incremental = try? CodexParser.parseSessionFile(url: url, startingAtOffset: state.lastOffset) else {
+            return false
+        }
+        guard !incremental.requiresFullRebuild else {
+            return false
+        }
+
+        if incremental.messages.isEmpty {
+            if let telemetry = incremental.telemetry {
+                try? sessionIndex.updateTelemetry(sessionId: sessionId, telemetry: telemetry, lastIndexedMtime: mtime)
+            }
+            persistIndexedFileState(
+                sessionId: sessionId,
+                path: path,
+                lastOffset: incremental.nextOffset,
+                lastSize: incremental.nextOffset,
+                lastMtime: mtime
+            )
+            return true
+        }
+
+        guard let existing = try? sessionIndex.results(matchingSessionIDs: [sessionId]).first else {
+            return false
+        }
+
+        let title = IndexingHelpers.bestSessionTitle(
+            externalTitle: titleMap[sessionId] ?? existing.title,
+            messages: incremental.messages
+        )
+        let cwd = (incremental.meta?.cwd ?? incremental.messages.compactMap(\.cwd).first ?? existing.project)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let metrics = IndexingHelpers.sessionMetrics(from: incremental.messages, filePath: path)
+        let lastEntryType = Self.detectLastEntryType(fileURL: url)
+
+        try? sessionIndex.upsertSession(
+            id: sessionId,
+            tool: "codex",
+            title: SessionIndex.cleanTitle(title),
+            project: cwd,
+            projectName: cwd.isEmpty ? existing.projectName : (cwd as NSString).lastPathComponent,
+            gitBranch: gitBranchMap[sessionId] ?? existing.gitBranch,
+            status: existing.status,
+            startedAt: existing.startedAt,
+            pid: existing.pid,
+            tokenCount: existing.tokenCount + metrics.tokenCount,
+            lastActivityAt: incremental.messages.last?.timestamp ?? existing.lastActivityAt,
+            lastFileModification: mtime ?? existing.lastActivityAt,
+            lastEntryType: lastEntryType,
+            activityPreview: metrics.activityPreview,
+            lastIndexedMtime: mtime,
+            telemetry: incremental.telemetry
+        )
+
+        let transcriptEntries = incremental.messages.map { message in
+            (
+                role: message.role,
+                content: IndexingHelpers.searchableContent(from: message),
+                timestamp: message.timestamp
+            )
+        }
+        try? sessionIndex.appendTranscripts(sessionId: sessionId, entries: transcriptEntries)
+        persistIndexedFileState(
+            sessionId: sessionId,
+            path: path,
+            lastOffset: incremental.nextOffset,
+            lastSize: incremental.nextOffset,
+            lastMtime: mtime
+        )
+        return true
+    }
+
+    private func persistIndexedFileState(
+        sessionId: String,
+        path: String,
+        lastOffset: UInt64,
+        lastSize: UInt64,
+        lastMtime: Date?
+    ) {
+        try? sessionIndex.upsertIndexedFileState(
+            IndexedFileState(
+                sessionId: sessionId,
+                filePath: path,
+                lastOffset: lastOffset,
+                lastSize: lastSize,
+                lastMtime: lastMtime
+            )
+        )
+    }
+
+    private func fileSize(at path: String) -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attributes[.size] as? NSNumber
+        else {
+            return nil
+        }
+
+        return size.uint64Value
     }
 
     // MARK: - Live sessions

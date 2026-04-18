@@ -1,5 +1,13 @@
 import Foundation
 
+struct CodexIncrementalParseResult: Sendable {
+    let meta: CodexSessionMeta?
+    let messages: [ParsedMessage]
+    let telemetry: SessionContextTelemetry?
+    let nextOffset: UInt64
+    let requiresFullRebuild: Bool
+}
+
 enum CodexParser {
     static func parseSessionIndex(url: URL) throws -> [ParsedSessionMeta] {
         let text = try String(contentsOf: url, encoding: .utf8)
@@ -40,6 +48,78 @@ enum CodexParser {
             return (nil, [], nil)
         }
 
+        return parseSessionText(text)
+    }
+
+    static func parseSessionFile(
+        url: URL,
+        startingAtOffset offset: UInt64
+    ) throws -> CodexIncrementalParseResult {
+        let data = try Data(contentsOf: url)
+        let fileLength = UInt64(data.count)
+
+        guard offset <= fileLength else {
+            return CodexIncrementalParseResult(
+                meta: nil,
+                messages: [],
+                telemetry: nil,
+                nextOffset: fileLength,
+                requiresFullRebuild: true
+            )
+        }
+
+        guard offset < fileLength else {
+            return CodexIncrementalParseResult(
+                meta: nil,
+                messages: [],
+                telemetry: nil,
+                nextOffset: fileLength,
+                requiresFullRebuild: false
+            )
+        }
+
+        let safeOffset = Int(offset)
+        let startIndex = data.index(data.startIndex, offsetBy: safeOffset)
+        if safeOffset > 0 {
+            let previousByte = data[data.index(before: startIndex)]
+            let currentByte = data[startIndex]
+            let startsAtLineBoundary = previousByte == 0x0A || previousByte == 0x0D || currentByte == 0x0A || currentByte == 0x0D
+            if !startsAtLineBoundary {
+                return CodexIncrementalParseResult(
+                    meta: nil,
+                    messages: [],
+                    telemetry: nil,
+                    nextOffset: fileLength,
+                    requiresFullRebuild: true
+                )
+            }
+        }
+
+        guard let text = String(data: data[startIndex...], encoding: .utf8) else {
+            return CodexIncrementalParseResult(
+                meta: nil,
+                messages: [],
+                telemetry: nil,
+                nextOffset: fileLength,
+                requiresFullRebuild: true
+            )
+        }
+
+        let parsed = parseSessionText(text)
+        return CodexIncrementalParseResult(
+            meta: parsed.meta,
+            messages: parsed.messages,
+            telemetry: parsed.telemetry,
+            nextOffset: fileLength,
+            requiresFullRebuild: false
+        )
+    }
+
+    private static func parseSessionText(_ text: String) -> (
+        meta: CodexSessionMeta?,
+        messages: [ParsedMessage],
+        telemetry: SessionContextTelemetry?
+    ) {
         var meta: CodexSessionMeta?
         var messages: [ParsedMessage] = []
         var latestModel: String?

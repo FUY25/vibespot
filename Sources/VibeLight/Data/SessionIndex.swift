@@ -80,6 +80,14 @@ struct SearchResult: Sendable {
     }
 }
 
+struct IndexedFileState: Equatable, Sendable {
+    let sessionId: String
+    let filePath: String
+    let lastOffset: UInt64
+    let lastSize: UInt64
+    let lastMtime: Date?
+}
+
 final class SessionIndex: @unchecked Sendable {
     private let db: Database
 
@@ -146,6 +154,16 @@ final class SessionIndex: @unchecked Sendable {
 
         try db.execute("""
             CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)
+        """)
+
+        try db.execute("""
+            CREATE TABLE IF NOT EXISTS indexed_files (
+                session_id TEXT PRIMARY KEY,
+                file_path TEXT NOT NULL,
+                last_offset INTEGER NOT NULL,
+                last_size INTEGER NOT NULL,
+                last_mtime REAL
+            )
         """)
     }
 
@@ -386,10 +404,32 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func appendTranscripts(
+        sessionId: String,
+        entries: [(role: String, content: String, timestamp: Date)]
+    ) throws {
+        guard !entries.isEmpty else {
+            return
+        }
+
+        let sql = "INSERT INTO transcripts (session_id, role, content, timestamp_str) VALUES (?1, ?2, ?3, ?4)"
+        try db.transaction {
+            for entry in entries {
+                try runStatement(sql) { statement in
+                    try statement.bind(index: 1, text: sessionId)
+                    try statement.bind(index: 2, text: entry.role)
+                    try statement.bind(index: 3, text: entry.content)
+                    try statement.bind(index: 4, text: makeTimestampString(from: entry.timestamp))
+                }
+            }
+        }
+    }
+
     func clearAllIndexedSessions() throws {
         try db.transaction {
             try runStatement("DELETE FROM transcripts") { _ in }
             try runStatement("DELETE FROM sessions") { _ in }
+            try runStatement("DELETE FROM indexed_files") { _ in }
         }
     }
 
@@ -730,6 +770,51 @@ final class SessionIndex: @unchecked Sendable {
             }
         )
         return results.first ?? nil
+    }
+
+    func indexedFileState(sessionId: String) throws -> IndexedFileState? {
+        let rows = try db.query(
+            "SELECT session_id, file_path, last_offset, last_size, last_mtime FROM indexed_files WHERE session_id = ?1",
+            bind: { statement in
+                try statement.bind(index: 1, text: sessionId)
+            },
+            map: { statement in
+                IndexedFileState(
+                    sessionId: textColumn(statement, index: 0),
+                    filePath: textColumn(statement, index: 1),
+                    lastOffset: UInt64(sqlite3_column_int64(statement, 2)),
+                    lastSize: UInt64(sqlite3_column_int64(statement, 3)),
+                    lastMtime: sqlite3_column_type(statement, 4) == SQLITE_NULL
+                        ? nil
+                        : Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                )
+            }
+        )
+        return rows.first
+    }
+
+    func upsertIndexedFileState(_ state: IndexedFileState) throws {
+        try runStatement(
+            """
+            INSERT INTO indexed_files (session_id, file_path, last_offset, last_size, last_mtime)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(session_id) DO UPDATE SET
+                file_path = excluded.file_path,
+                last_offset = excluded.last_offset,
+                last_size = excluded.last_size,
+                last_mtime = excluded.last_mtime
+            """
+        ) { statement in
+            try statement.bind(index: 1, text: state.sessionId)
+            try statement.bind(index: 2, text: state.filePath)
+            try statement.bind(index: 3, int: Int64(state.lastOffset))
+            try statement.bind(index: 4, int: Int64(state.lastSize))
+            if let lastMtime = state.lastMtime {
+                try statement.bind(index: 5, double: lastMtime.timeIntervalSince1970)
+            } else {
+                try statement.bindNull(index: 5)
+            }
+        }
     }
 
     func updateStatus(sessionId: String, status: String) throws {
