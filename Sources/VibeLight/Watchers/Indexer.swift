@@ -12,15 +12,21 @@ final class Indexer: @unchecked Sendable {
     let sessionIndex: SessionIndex
     private let sourceResolution: SessionSourceResolution
     private let changeHandlingQueue: DispatchQueue
+    private let changeHandlingQueueSpecificKey = DispatchSpecificKey<Void>()
+    private let generationLock = NSLock()
     private var fileWatcher: FileWatcher?
     private var refreshTimer: Timer?
-    private var titleSweepTimer: Timer?
     private var startupScanTask: Task<Void, Never>?
+    private var activeGeneration: UInt64 = 0
     private var processedFiles: Set<String> = []
     private var codexTitleMap: [String: String] = [:]
     private var sessionFileURLCache: [String: URL] = [:]
     private var sessionFileLookupMissAt: [String: Date] = [:]
     private var lastTailReadMtimeBySessionId: [String: Date] = [:]
+
+#if DEBUG
+    var onPerformFullScanForTesting: (@Sendable () -> Void)?
+#endif
 
     init(
         sessionIndex: SessionIndex,
@@ -30,6 +36,7 @@ final class Indexer: @unchecked Sendable {
         self.sessionIndex = sessionIndex
         self.sourceResolution = sourceResolution
         self.changeHandlingQueue = changeHandlingQueue
+        self.changeHandlingQueue.setSpecific(key: changeHandlingQueueSpecificKey, value: ())
     }
 
     convenience init(
@@ -95,7 +102,7 @@ final class Indexer: @unchecked Sendable {
                 plan.refreshTitles = true
             }
 
-            if path.hasSuffix("/state_5.sqlite") {
+            if isCodexStateMetadataPath(path) {
                 plan.refreshGitBranches = true
             }
         }
@@ -103,12 +110,69 @@ final class Indexer: @unchecked Sendable {
         return plan
     }
 
+    private static func isCodexStateMetadataPath(_ path: String) -> Bool {
+        return path.hasSuffix("/state_5.sqlite")
+            || path.hasSuffix("/state_5.sqlite-wal")
+            || path.hasSuffix("/state_5.sqlite-shm")
+            || path.hasSuffix("/state_5.sqlite-journal")
+    }
+
+    private func performOnChangeHandlingQueueSync<T>(_ operation: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: changeHandlingQueueSpecificKey) != nil {
+            return operation()
+        }
+
+        return changeHandlingQueue.sync(execute: operation)
+    }
+
+    private func nextGeneration() -> UInt64 {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        activeGeneration += 1
+        return activeGeneration
+    }
+
+    private func isCurrentGeneration(_ generation: UInt64) -> Bool {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        return activeGeneration == generation
+    }
+
+    private func currentGeneration() -> UInt64 {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        return activeGeneration
+    }
+
+    private func enqueueChangeHandling(
+        generation: UInt64,
+        operation: @escaping @Sendable (Indexer) -> Void
+    ) {
+        changeHandlingQueue.async { [weak self] in
+            guard let self, self.isCurrentGeneration(generation) else {
+                return
+            }
+
+            operation(self)
+        }
+    }
+
+#if DEBUG
+    func enqueueChangeHandlingForTesting(_ operation: @escaping @Sendable (Indexer) -> Void) {
+        enqueueChangeHandling(generation: currentGeneration(), operation: operation)
+    }
+
+    func waitForChangeHandlingQueueForTesting() {
+        performOnChangeHandlingQueueSync {}
+    }
+#endif
+
     func start() {
         stop()
+        let generation = nextGeneration()
 
         let sessionIndex = sessionIndex
         let sourceResolution = sourceResolution
-        let changeHandlingQueue = self.changeHandlingQueue
         startupScanTask = Task.detached(priority: .utility) { [weak self] in
             var scanner = IndexScanner(
                 sessionIndex: sessionIndex,
@@ -120,8 +184,8 @@ final class Indexer: @unchecked Sendable {
                 return
             }
 
-            changeHandlingQueue.async { [weak self] in
-                self?.refreshLiveSessions()
+            self?.enqueueChangeHandling(generation: generation) { indexer in
+                indexer.refreshLiveSessions()
             }
         }
 
@@ -132,28 +196,22 @@ final class Indexer: @unchecked Sendable {
 
         if !watchPaths.isEmpty {
             fileWatcher = FileWatcher(paths: watchPaths) { [weak self] changedPaths in
-                changeHandlingQueue.async { [weak self] in
-                    self?.handleChanges(changedPaths)
+                self?.enqueueChangeHandling(generation: generation) { indexer in
+                    indexer.handleChanges(changedPaths)
                 }
             }
             fileWatcher?.start()
         }
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            changeHandlingQueue.async { [weak self] in
-                self?.refreshLiveSessions()
-            }
-        }
-
-        // Periodic title improvement sweep every 60s
-        titleSweepTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
-            changeHandlingQueue.async { [weak self] in
-                self?.runTitleSweep()
+            self?.enqueueChangeHandling(generation: generation) { indexer in
+                indexer.refreshLiveSessions()
             }
         }
     }
 
     func stop() {
+        _ = nextGeneration()
         startupScanTask?.cancel()
         startupScanTask = nil
 
@@ -161,19 +219,23 @@ final class Indexer: @unchecked Sendable {
         fileWatcher = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
-        titleSweepTimer?.invalidate()
-        titleSweepTimer = nil
+        performOnChangeHandlingQueueSync {}
     }
 
     // MARK: - Full scan
 
     func performFullScan() {
-        var scanner = IndexScanner(
-            sessionIndex: sessionIndex,
-            sourceResolution: sourceResolution
-        )
-        scanner.performFullScan()
-        refreshLiveSessions()
+        performOnChangeHandlingQueueSync {
+#if DEBUG
+            onPerformFullScanForTesting?()
+#endif
+            var scanner = IndexScanner(
+                sessionIndex: sessionIndex,
+                sourceResolution: sourceResolution
+            )
+            scanner.performFullScan()
+            refreshLiveSessions()
+        }
     }
 
     private func scanClaudeSessions() {
@@ -608,7 +670,7 @@ final class Indexer: @unchecked Sendable {
                 continue
             }
 
-            if isUnderCodexRootPath(path), (path.hasSuffix("/session_index.jsonl") || path.hasSuffix("/state_5.sqlite")) {
+            if isUnderCodexRootPath(path), (path.hasSuffix("/session_index.jsonl") || Self.isCodexStateMetadataPath(path)) {
                 continue
             }
 
@@ -775,85 +837,6 @@ final class Indexer: @unchecked Sendable {
         for sessionID in codexSessionIDs {
             try? sessionIndex.updateGitBranch(sessionId: sessionID, gitBranch: gitBranchMap[sessionID] ?? "")
         }
-    }
-
-    // MARK: - Title Sweep
-
-    /// Periodically re-checks sessions with weak titles (project name, "Untitled", empty)
-    /// and attempts to find better titles from JSONL tails and external title sources.
-    private func runTitleSweep() {
-        // Refresh the Codex title map from session_index.jsonl (may have new entries)
-        let freshCodexTitleMap = IndexingHelpers.loadCodexTitleMap(codexRootPath: sourceResolution.codexRootPath)
-        if !freshCodexTitleMap.isEmpty {
-            codexTitleMap.merge(freshCodexTitleMap) { _, new in new }
-        }
-
-        // Load Claude summaries from all sessions-index.json files
-        let claudeSummaries = loadClaudeSummaries()
-
-        guard let weakSessions = try? sessionIndex.sessionsWithWeakTitles() else { return }
-        guard !weakSessions.isEmpty else { return }
-
-        let sessionIndex = sessionIndex
-        let codexTitleMap = codexTitleMap
-        let sourceResolution = sourceResolution
-
-        Task.detached(priority: .utility) {
-            for session in weakSessions {
-                var betterTitle: String?
-
-                // Source 1: Codex thread_name from session_index.jsonl
-                if session.tool == "codex" {
-                    betterTitle = codexTitleMap[session.sessionId]
-                }
-
-                // Source 2: Claude summary from sessions-index.json
-                if betterTitle == nil && session.tool == "claude" {
-                    betterTitle = claudeSummaries[session.sessionId]
-                }
-
-                // Source 3: Last user prompt from JSONL tail
-                if betterTitle == nil {
-                    let fileURL = Self.findSessionFileStatic(
-                        sessionId: session.sessionId,
-                        sourceResolution: sourceResolution
-                    )
-                    if let fileURL {
-                        betterTitle = TranscriptTailReader.extractLastUserPrompt(fileURL: fileURL)
-                    }
-                }
-
-                if let betterTitle, !betterTitle.isEmpty, betterTitle != session.projectName {
-                    try? sessionIndex.updateTitle(sessionId: session.sessionId, title: betterTitle)
-                }
-            }
-        }
-    }
-
-    /// Loads Claude session summaries from all sessions-index.json files,
-    /// filtering out "New Conversation" and firstPrompt fallbacks.
-    private func loadClaudeSummaries() -> [String: String] {
-        let projectsPath = sourceResolution.claudeProjectsPath
-        let fm = FileManager.default
-        guard let dirs = try? fm.contentsOfDirectory(atPath: projectsPath) else { return [:] }
-
-        var summaries: [String: String] = [:]
-        for dir in dirs {
-            let indexPath = (projectsPath as NSString).appendingPathComponent(dir)
-            let indexURL = URL(fileURLWithPath: indexPath).appendingPathComponent("sessions-index.json")
-            guard let metas = try? ClaudeParser.parseSessionsIndex(url: indexURL) else { continue }
-            for meta in metas {
-                let title = meta.title
-                // Only use if it differs from firstPrompt — means it's an AI summary
-                let isSmartTitle = meta.firstPrompt.map { title != $0 } ?? true
-                if isSmartTitle,
-                   !title.isEmpty,
-                   title != "Untitled" {
-                    summaries[meta.sessionId] = title
-                }
-            }
-        }
-        return summaries
     }
 
     // MARK: - Helpers
@@ -1044,36 +1027,4 @@ final class Indexer: @unchecked Sendable {
         return nil
     }
 
-    /// Thread-safe, uncached file lookup for background title sweeps.
-    static func findSessionFileStatic(
-        sessionId: String,
-        sourceResolution: SessionSourceResolution
-    ) -> URL? {
-        let fm = FileManager.default
-
-        let claudeProjectsPath = sourceResolution.claudeProjectsPath
-        if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
-            for projectDir in projectDirs {
-                let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
-                if fm.fileExists(atPath: path) { return URL(fileURLWithPath: path) }
-            }
-        }
-
-        let codexRoot = URL(fileURLWithPath: sourceResolution.codexSessionsPath, isDirectory: true)
-        if let enumerator = fm.enumerator(
-            at: codexRoot,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
-                let fileNameID = fileURL.deletingPathExtension().lastPathComponent
-                let candidateIDs = [fileNameID, IndexingHelpers.codexSessionIDFromPath(fileURL.path)].compactMap { $0 }
-                if candidateIDs.contains(sessionId) {
-                    return fileURL
-                }
-            }
-        }
-
-        return nil
-    }
 }
