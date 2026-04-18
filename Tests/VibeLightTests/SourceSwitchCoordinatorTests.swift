@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Flare
@@ -7,10 +8,10 @@ struct SourceSwitchCoordinatorTests {
     @MainActor
     @Test("app delegate keeps the current source fingerprint when staged switch fails")
     func appDelegateKeepsTheCurrentSourceFingerprintWhenStagedSwitchFails() async throws {
-        let currentClaudeRoot = try makeClaudeRoot(prefix: "app-delegate-current-claude")
-        let currentCodexRoot = try makeCodexRoot(prefix: "app-delegate-current-codex")
-        let nextClaudeRoot = try makeClaudeRoot(prefix: "app-delegate-next-claude")
-        let nextCodexRoot = try makeCodexRoot(prefix: "app-delegate-next-codex")
+        let currentClaudeRoot = try makeShortClaudeRoot(prefix: "vl-cur-claude")
+        let currentCodexRoot = try makeShortCodexRoot(prefix: "vl-cur-codex")
+        let nextClaudeRoot = try makeShortClaudeRoot(prefix: "vl-next-claude")
+        let nextCodexRoot = try makeShortCodexRoot(prefix: "vl-next-codex")
 
         let suiteName = "SourceSwitchCoordinatorTests.appDelegate.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -32,7 +33,9 @@ struct SourceSwitchCoordinatorTests {
                 throw SwitchFailure()
             }
         )
+        delegate.openPreferences()
         delegate.setRuntimeServicesStartedForTesting(true)
+        let preferencesWindow = try #require(delegate.preferencesWindowForTesting)
 
         let originalFingerprint = delegate.currentSessionSourceFingerprintForTesting
 
@@ -49,6 +52,8 @@ struct SourceSwitchCoordinatorTests {
 
         #expect(delegate.currentSessionSourceFingerprintForTesting == originalFingerprint)
         #expect(store.load().sessionSourceConfiguration == initialSettings.sessionSourceConfiguration)
+        #expect(findStaticText(containing: currentClaudeRoot, in: preferencesWindow.contentView) != nil)
+        #expect(findStaticText(containing: nextClaudeRoot, in: preferencesWindow.contentView) == nil)
     }
 
     @MainActor
@@ -213,6 +218,59 @@ struct SourceSwitchCoordinatorTests {
             attributes: nil
         )
         return root.path
+    }
+
+    private func makeShortClaudeRoot(prefix: String) throws -> String {
+        let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("\(prefix)-\(shortID())", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("projects", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        return root.path
+    }
+
+    private func makeShortCodexRoot(prefix: String) throws -> String {
+        let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("\(prefix)-\(shortID())", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("sessions", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(
+            atPath: root.appendingPathComponent("state_5.sqlite").path,
+            contents: Data(),
+            attributes: nil
+        )
+        return root.path
+    }
+
+    private func shortID() -> String {
+        String(UUID().uuidString.prefix(8))
+    }
+
+    @MainActor
+    private func findStaticText(containing text: String, in view: NSView?) -> NSTextField? {
+        guard let view else { return nil }
+        if let label = view as? NSTextField, label.stringValue.localizedCaseInsensitiveContains(text) {
+            return label
+        }
+
+        for subview in view.subviews {
+            if let label = findStaticText(containing: text, in: subview) {
+                return label
+            }
+        }
+
+        return nil
     }
 }
 

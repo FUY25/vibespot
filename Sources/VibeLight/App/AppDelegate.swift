@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.window?.isVisible == true
     }
 
+    var preferencesWindowForTesting: NSWindow? {
+        preferencesWindowController?.window
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -342,6 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await MainActor.run { [weak self] in
                     guard let self, generation == self.sourceSwitchGeneration else { return }
                     self.settingsStore.save(self.settings)
+                    self.preferencesWindowController?.syncSettings(self.settings)
                 }
                 print("AppDelegate failed to switch session sources: \(error)")
             }
