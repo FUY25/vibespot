@@ -19,6 +19,7 @@ struct AppSettings: Codable, Equatable, Sendable {
     var historyMode: SearchHistoryMode
     var launchAtLogin: Bool
     var onboardingCompleted: Bool
+    var sessionSourceConfiguration: SessionSourceConfiguration
 
     static let `default` = AppSettings(
         hotkeyKeyCode: UInt32(kVK_Space),
@@ -26,7 +27,8 @@ struct AppSettings: Codable, Equatable, Sendable {
         theme: .system,
         historyMode: .liveAndHistory,
         launchAtLogin: true,
-        onboardingCompleted: false
+        onboardingCompleted: false,
+        sessionSourceConfiguration: .default
     )
 
     init(
@@ -35,7 +37,8 @@ struct AppSettings: Codable, Equatable, Sendable {
         theme: AppTheme,
         historyMode: SearchHistoryMode,
         launchAtLogin: Bool,
-        onboardingCompleted: Bool
+        onboardingCompleted: Bool,
+        sessionSourceConfiguration: SessionSourceConfiguration
     ) {
         self.hotkeyKeyCode = hotkeyKeyCode
         self.hotkeyModifiers = hotkeyModifiers
@@ -43,6 +46,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         self.historyMode = historyMode
         self.launchAtLogin = launchAtLogin
         self.onboardingCompleted = onboardingCompleted
+        self.sessionSourceConfiguration = sessionSourceConfiguration
     }
 
     var hotkeyBinding: HotkeyBinding {
@@ -56,6 +60,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         case historyMode
         case launchAtLogin
         case onboardingCompleted
+        case sessionSourceConfiguration
     }
 
     init(from decoder: Decoder) throws {
@@ -72,5 +77,9 @@ struct AppSettings: Codable, Equatable, Sendable {
             ?? Self.default.launchAtLogin
         self.onboardingCompleted = try container.decodeIfPresent(Bool.self, forKey: .onboardingCompleted)
             ?? Self.default.onboardingCompleted
+        self.sessionSourceConfiguration = try container.decodeIfPresent(
+            SessionSourceConfiguration.self,
+            forKey: .sessionSourceConfiguration
+        ) ?? Self.default.sessionSourceConfiguration
     }
 }

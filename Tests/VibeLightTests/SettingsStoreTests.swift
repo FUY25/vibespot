@@ -30,6 +30,28 @@ struct SettingsStoreTests {
         #expect(reloaded == settings)
     }
 
+    @Test("persists independent Claude and Codex source settings")
+    func persistsIndependentClaudeAndCodexSourceSettings() {
+        let suite = UserDefaults(suiteName: "SettingsStoreTests.sources.\(UUID().uuidString)")!
+        let store = SettingsStore(defaults: suite)
+
+        let customClaudeRoot = "/tmp/claude-custom-\(UUID().uuidString)"
+        var settings = AppSettings.default
+        settings.sessionSourceConfiguration = SessionSourceConfiguration(
+            claude: ToolSessionSourceConfiguration(mode: .custom, customRoot: customClaudeRoot),
+            codex: ToolSessionSourceConfiguration(mode: .automatic, customRoot: "")
+        )
+
+        store.save(settings)
+
+        let reloaded = store.load()
+        #expect(reloaded.sessionSourceConfiguration.claude.mode == .custom)
+        #expect(reloaded.sessionSourceConfiguration.claude.customRoot == customClaudeRoot)
+        #expect(reloaded.sessionSourceConfiguration.codex.mode == .automatic)
+        #expect(reloaded.sessionSourceConfiguration.codex.customRoot.isEmpty)
+        #expect(reloaded.sessionSourceConfiguration == settings.sessionSourceConfiguration)
+    }
+
     @Test("migrates legacy keys")
     func migratesLegacyKeys() {
         let suite = UserDefaults(suiteName: "SettingsStoreTests.legacy.\(UUID().uuidString)")!
