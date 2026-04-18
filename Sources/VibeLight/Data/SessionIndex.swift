@@ -386,6 +386,13 @@ final class SessionIndex: @unchecked Sendable {
         }
     }
 
+    func clearAllIndexedSessions() throws {
+        try db.transaction {
+            try runStatement("DELETE FROM transcripts") { _ in }
+            try runStatement("DELETE FROM sessions") { _ in }
+        }
+    }
+
     func search(query: String, liveOnly: Bool = false) throws -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -612,6 +619,39 @@ final class SessionIndex: @unchecked Sendable {
 
     func search(query: String, includeHistory: Bool) throws -> [SearchResult] {
         try search(query: query, liveOnly: !includeHistory)
+    }
+
+    func results(matchingSessionIDs sessionIDs: [String]) throws -> [SearchResult] {
+        let orderedIDs = Array(Set(sessionIDs)).sorted()
+        guard !orderedIDs.isEmpty else {
+            return []
+        }
+
+        let placeholders = orderedIDs.enumerated()
+            .map { index, _ in "?\(index + 1)" }
+            .joined(separator: ", ")
+        let sql = """
+            SELECT
+                id, tool, title, project, project_name, git_branch, status, started_at, pid,
+                token_count, last_activity_at, last_file_mod, last_entry_type, activity_preview,
+                activity_preview_kind, NULL AS snippet, health_status, health_detail,
+                effective_model, context_window_tokens, context_used_estimate, context_percent_estimate,
+                context_confidence, context_source, last_context_sample_at, last_user_prompt
+            FROM sessions
+            WHERE id IN (\(placeholders))
+        """
+
+        let rows = try db.query(
+            sql,
+            bind: { statement in
+                for (offset, sessionID) in orderedIDs.enumerated() {
+                    try statement.bind(index: Int32(offset + 1), text: sessionID)
+                }
+            },
+            map: mapRow
+        )
+
+        return sortedSearchResults(rows)
     }
 
     func liveSessionCount() throws -> Int {

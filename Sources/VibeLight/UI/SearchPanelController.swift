@@ -16,6 +16,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     var onSelect: ((SearchResult) -> Void)?
     var onLaunchAction: ((String, String) -> Void)?
+    var onHistoryModeChanged: (@MainActor (SearchHistoryMode) -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
     var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
@@ -28,6 +29,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private let webBridge = WebBridge()
     private let searchDebouncer = Debouncer(delay: 0.08)
     private var visibleRefreshTimer: Timer?
+    private var sessionSourceResolution: SessionSourceResolution
 
     private var results: [SearchResult] = []
     private var deactivationObserver: NSObjectProtocol?
@@ -40,6 +42,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var pendingTheme: String?
     private var pendingResultsJSON: String?
     private var iconBaseURL: String?
+    private var lastSearchWasLiveOnly = true
 
     private static let panelWidth: CGFloat = 720
     private static let previewExtraWidth: CGFloat = 470
@@ -58,13 +61,16 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
     }()
 
-    override init() {
+    init(
+        sessionSourceResolution: SessionSourceResolution = SessionSourceLocator().resolve(for: AppSettings.default)
+    ) {
         self.panel = SearchPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.minPanelHeight),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        self.sessionSourceResolution = sessionSourceResolution
 
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
@@ -98,6 +104,14 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         refreshResults(query: lastSearchQuery ?? "")
     }
 
+    func applySessionSourceResolution(_ resolution: SessionSourceResolution) {
+        guard sessionSourceResolution != resolution else { return }
+        sessionSourceResolution = resolution
+        pendingResetAndFocus = true
+        requestResetAndFocus()
+        refreshResults(query: lastSearchQuery ?? "")
+    }
+
     func show() {
         searchDebouncer.cancel()
         isPreviewVisible = false
@@ -113,7 +127,6 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         pushTheme()
         pushMode()
         refreshResults(query: "")
-        startVisibleRefreshTimer()
     }
 
     func hide() {
@@ -193,6 +206,8 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     func webBridgeDidToggleMode(_ bridge: WebBridge) {
         isLiveOnlyMode.toggle()
+        let currentMode: SearchHistoryMode = isLiveOnlyMode ? .liveOnly : .liveAndHistory
+        onHistoryModeChanged?(currentMode)
         let fallbackQuery = lastSearchQuery ?? ""
         guard isWebViewReady else {
             refreshResults(query: fallbackQuery)
@@ -213,10 +228,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     // MARK: - Private
 
     private func findSessionFile(sessionId: String) -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let fm = FileManager.default
 
-        let claudeProjectsPath = home + "/.claude/projects"
+        let claudeProjectsPath = sessionSourceResolution.claudeProjectsPath
         if let projectDirs = try? fm.contentsOfDirectory(atPath: claudeProjectsPath) {
             for projectDir in projectDirs {
                 let path = "\(claudeProjectsPath)/\(projectDir)/\(sessionId).jsonl"
@@ -225,11 +239,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
 
         // Codex: exact match first
-        let codexPath = home + "/.codex/sessions/\(sessionId).jsonl"
+        let codexPath = "\(sessionSourceResolution.codexSessionsPath)/\(sessionId).jsonl"
         if fm.fileExists(atPath: codexPath) { return URL(fileURLWithPath: codexPath) }
 
         // Codex: session files may have prefixed names (e.g. rollout-...-<uuid>.jsonl)
-        let codexRoot = URL(fileURLWithPath: home + "/.codex/sessions", isDirectory: true)
+        let codexRoot = URL(fileURLWithPath: sessionSourceResolution.codexSessionsPath, isDirectory: true)
         if let enumerator = fm.enumerator(
             at: codexRoot,
             includingPropertiesForKeys: [.isRegularFileKey],
@@ -248,24 +262,34 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     private func refreshResults(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let liveOnlySearch = Self.effectiveLiveOnlyMode(for: trimmed, isLiveOnlyMode: isLiveOnlyMode)
+        lastSearchWasLiveOnly = liveOnlySearch
+
         guard let sessionIndex else {
-            pushResults([], query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+            updateVisibleRefreshTimer(query: trimmed, liveOnlySearch: liveOnlySearch, results: [])
+            pushResults([], query: trimmed)
             return
         }
 
         do {
-            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let effectiveLiveOnly = trimmed.isEmpty ? true : isLiveOnlyMode
-            let matches = try sessionIndex.search(query: trimmed, liveOnly: effectiveLiveOnly)
+            let matches = try sessionIndex.search(
+                query: trimmed,
+                liveOnly: liveOnlySearch
+            )
             let command = Self.parseNewSessionCommand(from: trimmed)
+            let nextResults: [SearchResult]
             if Self.looksLikeNewSessionIntent(trimmed) || command != nil {
                 let actionRows = makeNewSessionActionRows(for: trimmed, command: command)
-                pushResults(actionRows + matches, query: trimmed)
+                nextResults = actionRows + matches
             } else {
-                pushResults(matches, query: trimmed)
+                nextResults = matches
             }
+            updateVisibleRefreshTimer(query: trimmed, liveOnlySearch: liveOnlySearch, results: nextResults)
+            pushResults(nextResults, query: trimmed)
         } catch {
-            pushResults([], query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+            updateVisibleRefreshTimer(query: trimmed, liveOnlySearch: liveOnlySearch, results: [])
+            pushResults([], query: trimmed)
             print("SearchPanelController search failed: \(error)")
         }
     }
@@ -286,6 +310,38 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     static func resultsRenderSignature(resultsJSON: String, query: String) -> String {
         "\(query)\u{1F}\(resultsJSON)"
+    }
+
+    nonisolated static func effectiveLiveOnlyMode(for query: String, isLiveOnlyMode: Bool) -> Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? true : isLiveOnlyMode
+    }
+
+    nonisolated static func shouldArmVisibleLiveRefresh(
+        query: String,
+        liveOnlySearch: Bool,
+        results: [SearchResult]
+    ) -> Bool {
+        guard liveOnlySearch else { return false }
+
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let liveResults = results.filter { $0.status == "live" }
+        guard !liveResults.isEmpty else { return false }
+
+        if trimmed.isEmpty {
+            return liveResults.count == results.count
+        }
+
+        return liveResults.count == results.count
+    }
+
+    nonisolated static func mergeVisibleLiveRefreshResults(
+        currentResults: [SearchResult],
+        refreshedResultsBySessionID: [String: SearchResult]
+    ) -> [SearchResult] {
+        currentResults.map { result in
+            guard result.status == "live" else { return result }
+            return refreshedResultsBySessionID[result.sessionId] ?? result
+        }
     }
 
     static func panelResizePlan(
@@ -769,6 +825,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             guard let self else { return }
             isWebViewReady = true
             flushPendingWebViewState()
+            pushMode()
         }
     }
 
@@ -832,35 +889,64 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         return NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
     }
 
+    private func updateVisibleRefreshTimer(query: String, liveOnlySearch: Bool, results: [SearchResult]) {
+        guard panel.isVisible else {
+            visibleRefreshTimer?.invalidate()
+            visibleRefreshTimer = nil
+            return
+        }
+
+        guard Self.shouldArmVisibleLiveRefresh(query: query, liveOnlySearch: liveOnlySearch, results: results) else {
+            visibleRefreshTimer?.invalidate()
+            visibleRefreshTimer = nil
+            return
+        }
+
+        startVisibleRefreshTimer()
+    }
+
     private func startVisibleRefreshTimer() {
         visibleRefreshTimer?.invalidate()
         visibleRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshVisibleResults()
+                self?.refreshVisibleLiveRows()
             }
         }
     }
 
-    private func refreshVisibleResults() {
+    private func refreshVisibleLiveRows() {
         guard panel.isVisible else { return }
-        guard sessionIndex != nil else {
-            pushResults([], query: lastSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+        let trimmedQuery = lastSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard let sessionIndex else {
+            updateVisibleRefreshTimer(query: trimmedQuery, liveOnlySearch: lastSearchWasLiveOnly, results: [])
+            pushResults([], query: trimmedQuery)
             return
         }
 
-        guard isWebViewReady else {
-            refreshResults(query: lastSearchQuery ?? "")
+        let liveSessionIDs = results
+            .filter { $0.status == "live" }
+            .map(\.sessionId)
+
+        guard !liveSessionIDs.isEmpty else {
+            visibleRefreshTimer?.invalidate()
+            visibleRefreshTimer = nil
             return
         }
 
-        webView.evaluateJavaScript("document.getElementById('searchInput')?.value ?? ''") { [weak self] value, _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard self.panel.isVisible else { return }
-                let currentQuery = (value as? String) ?? self.lastSearchQuery ?? ""
-                self.lastSearchQuery = currentQuery
-                self.refreshResults(query: currentQuery)
-            }
+        do {
+            let refreshedResults = try sessionIndex.results(matchingSessionIDs: liveSessionIDs)
+            let refreshedResultsBySessionID = Dictionary(
+                uniqueKeysWithValues: refreshedResults.map { ($0.sessionId, $0) }
+            )
+            let mergedResults = Self.mergeVisibleLiveRefreshResults(
+                currentResults: results,
+                refreshedResultsBySessionID: refreshedResultsBySessionID
+            )
+            updateVisibleRefreshTimer(query: trimmedQuery, liveOnlySearch: lastSearchWasLiveOnly, results: mergedResults)
+            pushResults(mergedResults, query: trimmedQuery)
+        } catch {
+            print("SearchPanelController visible live refresh failed: \(error)")
         }
     }
 }
