@@ -234,7 +234,32 @@
       row.classList.toggle('row--selected', i === selectedIndex);
     });
     if (rows[selectedIndex]) {
-      rows[selectedIndex].scrollIntoView({ block: 'nearest' });
+      ensureSelectedRowVisible(rows[selectedIndex]);
+    }
+  }
+
+  function ensureSelectedRowVisible(row) {
+    if (!resultsContainer || !row) return;
+
+    var containerHeight = resultsContainer.clientHeight || resultsContainer.offsetHeight || computeResultsViewportHeight();
+    if (!containerHeight || containerHeight <= 0) return;
+
+    var rowTop = typeof row.offsetTop === 'number' ? row.offsetTop : 0;
+    var rowHeight = row.offsetHeight || 0;
+    var rowBottom = rowTop + rowHeight;
+    var scrollTop = typeof resultsContainer.scrollTop === 'number' ? resultsContainer.scrollTop : 0;
+    var nextScrollTop = scrollTop;
+
+    if (rowTop < scrollTop) {
+      nextScrollTop = rowTop;
+    } else if (rowBottom > scrollTop + containerHeight) {
+      nextScrollTop = rowBottom - containerHeight;
+    }
+
+    if (nextScrollTop < 0) nextScrollTop = 0;
+
+    if (nextScrollTop !== scrollTop) {
+      resultsContainer.scrollTop = nextScrollTop;
     }
   }
 
@@ -855,7 +880,11 @@
   function computeResultsViewportHeight() {
     var minHeight = numericStyleValue(resultsContainer, 'paddingTop', 8) +
       numericStyleValue(resultsContainer, 'paddingBottom', 12);
-    var maxHeight = numericStyleValue(resultsContainer, 'maxHeight', minHeight);
+    var maxHeight = numericStyleValue(resultsContainer, 'maxHeight', 488);
+    var hasActiveQuery = !!(searchInput && searchInput.value && searchInput.value.trim());
+    if (hasActiveQuery && currentResults.length > 0) {
+      return Math.max(minHeight, maxHeight);
+    }
     var scrollHeight = resultsContainer && typeof resultsContainer.scrollHeight === 'number'
       ? resultsContainer.scrollHeight
       : minHeight;

@@ -213,6 +213,25 @@ func resultsRenderSignatureChangesWhenOnlyQueryChanges() {
 }
 
 @MainActor
+@Test("panel resize plan clamps the panel within the visible frame and avoids animation for live search resizing")
+func panelResizePlanClampsWithinVisibleFrameAndAvoidsAnimation() {
+    let currentFrame = CGRect(x: 200, y: 700, width: 720, height: 118)
+    let visibleFrame = CGRect(x: 0, y: 0, width: 1512, height: 780)
+
+    let plan = SearchPanelController.panelResizePlan(
+        currentFrame: currentFrame,
+        requestedHeight: 260,
+        isPreviewVisible: false,
+        visibleFrame: visibleFrame
+    )
+
+    #expect(plan != nil)
+    #expect(plan?.frame.height == 262)
+    #expect(plan?.frame.maxY == visibleFrame.maxY)
+    #expect(plan?.animates == false)
+}
+
+@MainActor
 @Test("new-session command parser keeps allowlisted flags and turns the rest into prompt")
 func newSessionCommandParserKeepsFlagsAndPrompt() {
     let codex = SearchPanelController.parseNewSessionCommand(from: "new codex --yolo fix auth bug")

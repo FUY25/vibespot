@@ -9,6 +9,11 @@ struct NewSessionCommand: Equatable, Sendable {
 
 @MainActor
 final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDelegate {
+    struct PanelResizePlan: Equatable {
+        let frame: CGRect
+        let animates: Bool
+    }
+
     var onSelect: ((SearchResult) -> Void)?
     var onLaunchAction: ((String, String) -> Void)?
     var sessionIndex: SessionIndex?
@@ -36,10 +41,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var pendingResultsJSON: String?
     private var iconBaseURL: String?
 
-    private let panelWidth: CGFloat = 720
-    private let previewExtraWidth: CGFloat = 470
-    private let minPanelHeight: CGFloat = 118
-    private let panelResizeEpsilon: CGFloat = 0.5
+    private static let panelWidth: CGFloat = 720
+    private static let previewExtraWidth: CGFloat = 470
+    private static let minPanelHeight: CGFloat = 118
+    private static let panelResizeEpsilon: CGFloat = 0.5
     private var isPreviewVisible = false
     private var isLiveOnlyMode = false
 
@@ -55,7 +60,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     override init() {
         self.panel = SearchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: minPanelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.minPanelHeight),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -148,17 +153,15 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     func webBridge(_ bridge: WebBridge, didRequestResize height: CGFloat) {
-        guard height > 0 else { return }
-        var frame = panel.frame
-        let maxY = frame.maxY
-        let newHeight = max(minPanelHeight, ceil(height + 2)) // +2 for border
-        let currentWidth = isPreviewVisible ? panelWidth + previewExtraWidth : panelWidth
-        let heightDelta = abs(frame.height - newHeight)
-        let widthDelta = abs(frame.width - currentWidth)
-        guard heightDelta >= panelResizeEpsilon || widthDelta >= panelResizeEpsilon else { return }
-        frame.size = NSSize(width: currentWidth, height: newHeight)
-        frame.origin.y = maxY - newHeight
-        panel.setFrame(frame, display: true, animate: panel.isVisible)
+        let currentFrame = panel.frame
+        let visibleFrame = activeScreen()?.visibleFrame
+        guard let plan = Self.panelResizePlan(
+            currentFrame: currentFrame,
+            requestedHeight: height,
+            isPreviewVisible: isPreviewVisible,
+            visibleFrame: visibleFrame
+        ) else { return }
+        panel.setFrame(plan.frame, display: true, animate: plan.animates)
     }
 
     func webBridge(_ bridge: WebBridge, didRequestPreview sessionId: String) {
@@ -183,7 +186,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     func webBridge(_ bridge: WebBridge, didChangePreviewVisibility visible: Bool) {
         isPreviewVisible = visible
         var frame = panel.frame
-        let targetWidth = visible ? panelWidth + previewExtraWidth : panelWidth
+        let targetWidth = visible ? Self.panelWidth + Self.previewExtraWidth : Self.panelWidth
         frame.size.width = targetWidth
         panel.setFrame(frame, display: true, animate: false)
     }
@@ -283,6 +286,45 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     static func resultsRenderSignature(resultsJSON: String, query: String) -> String {
         "\(query)\u{1F}\(resultsJSON)"
+    }
+
+    static func panelResizePlan(
+        currentFrame: CGRect,
+        requestedHeight: CGFloat,
+        isPreviewVisible: Bool,
+        visibleFrame: CGRect?
+    ) -> PanelResizePlan? {
+        guard requestedHeight > 0 else { return nil }
+
+        let newHeight = max(Self.minPanelHeight, ceil(requestedHeight + 2)) // +2 for border
+        let newWidth = isPreviewVisible ? Self.panelWidth + Self.previewExtraWidth : Self.panelWidth
+        let heightDelta = abs(currentFrame.height - newHeight)
+        let widthDelta = abs(currentFrame.width - newWidth)
+        guard heightDelta >= Self.panelResizeEpsilon || widthDelta >= Self.panelResizeEpsilon else {
+            return nil
+        }
+
+        let preferredTop = min(currentFrame.maxY, visibleFrame?.maxY ?? currentFrame.maxY)
+        var nextFrame = CGRect(
+            x: currentFrame.origin.x,
+            y: preferredTop - newHeight,
+            width: newWidth,
+            height: newHeight
+        )
+
+        if let visibleFrame {
+            let minVisibleY = visibleFrame.minY + 24
+            let maxVisibleY = visibleFrame.maxY - nextFrame.height
+            if maxVisibleY < minVisibleY {
+                nextFrame.origin.y = maxVisibleY
+            } else {
+                nextFrame.origin.y = min(max(nextFrame.origin.y, minVisibleY), maxVisibleY)
+            }
+        }
+
+        // Search-result resizing happens on nearly every keystroke. Animating those
+        // frame changes causes visible jitter and transient top-edge clipping.
+        return PanelResizePlan(frame: nextFrame, animates: false)
     }
 
     private func pushResultsJSONIfNeeded() {
@@ -779,7 +821,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         let visibleFrame = screen.visibleFrame
         let topOffset = max(visibleFrame.height * 0.18, 96)
         let origin = NSPoint(
-            x: visibleFrame.midX - panelWidth / 2,
+            x: visibleFrame.midX - Self.panelWidth / 2,
             y: max(visibleFrame.minY + 24, visibleFrame.maxY - panel.frame.height - topOffset)
         )
         panel.setFrameOrigin(origin)

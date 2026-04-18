@@ -429,6 +429,35 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("__hasClass(__els.results.children[1], 'row--selected')", in: context))
     }
 
+    @Test("keyboard selection scrolls only the results viewport without using scrollIntoView")
+    func keyboardSelectionScrollsOnlyResultsViewport() throws {
+        let context = try makePanelScriptContext()
+        let payload = #"""
+        [
+          { "sessionId": "sess-1", "tool": "claude", "title": "One", "project": "/tmp/1", "projectName": "1", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-2", "tool": "claude", "title": "Two", "project": "/tmp/2", "projectName": "2", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-3", "tool": "claude", "title": "Three", "project": "/tmp/3", "projectName": "3", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-4", "tool": "claude", "title": "Four", "project": "/tmp/4", "projectName": "4", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" }
+        ]
+        """#
+
+        _ = context.evaluateScript(
+            """
+            __els.results.clientHeight = 120;
+            __els.results.offsetHeight = 120;
+            __els.results.scrollTop = 0;
+            window.__scrollIntoViewCalls = 0;
+            window.updateResults(\(payload));
+            window.__scrollIntoViewCalls = 0;
+            window.moveSelection(3);
+            """
+        )
+
+        #expect(try invokeInt("__els.results.scrollTop", in: context) > 0)
+        #expect(try invokeInt("window.__scrollIntoViewCalls", in: context) == 0)
+        #expect(try invokeInt("document.body.scrollTop", in: context) == 0)
+    }
+
     @Test("mouseenter on already selected finished row still schedules preview dwell")
     func mouseEnterOnAlreadySelectedFinishedRowStillSchedulesPreviewDwell() throws {
         let context = try makePanelScriptContext()
@@ -773,6 +802,64 @@ struct SearchPanelScriptTests {
         #expect(try invokeBool("window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; })[0].height >= 110", in: context))
     }
 
+    @Test("non-empty queries keep the panel height stable as result counts change")
+    func nonEmptyQueriesKeepPanelHeightStableAsResultCountsChange() throws {
+        let context = try makePanelScriptContext()
+        let singlePayload = #"""
+        [{
+          "sessionId": "sess-one",
+          "tool": "claude",
+          "title": "One",
+          "project": "/tmp/one",
+          "projectName": "one",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let manyPayload = #"""
+        [
+          { "sessionId": "sess-1", "tool": "claude", "title": "One", "project": "/tmp/1", "projectName": "1", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-2", "tool": "claude", "title": "Two", "project": "/tmp/2", "projectName": "2", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-3", "tool": "claude", "title": "Three", "project": "/tmp/3", "projectName": "3", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-4", "tool": "claude", "title": "Four", "project": "/tmp/4", "projectName": "4", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-5", "tool": "claude", "title": "Five", "project": "/tmp/5", "projectName": "5", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" },
+          { "sessionId": "sess-6", "tool": "claude", "title": "Six", "project": "/tmp/6", "projectName": "6", "gitBranch": "", "status": "closed", "startedAt": "2026-03-28T09:30:00Z", "tokenCount": 0, "lastActivityAt": "2026-03-28T09:42:00Z", "activityStatus": "closed", "relativeTime": "2m ago", "healthStatus": "ok", "healthDetail": "" }
+        ]
+        """#
+
+        _ = context.evaluateScript(
+            """
+            __els.searchInput.value = 'v';
+            document.getElementById('searchBar').offsetHeight = 64;
+            document.getElementById('separator').offsetHeight = 6;
+            document.getElementById('keyboardHints').offsetHeight = 26;
+            """
+        )
+
+        _ = context.evaluateScript("window.updateResults(\(singlePayload));")
+        _ = context.evaluateScript("window.updateResults(\(manyPayload));")
+
+        #expect(try invokeInt("window.__bridgeMessages.filter(function(msg) { return msg.type === 'resize'; }).length", in: context) == 1)
+        #expect(try invokeBool(
+            """
+            (function() {
+              var heights = window.__bridgeMessages
+                .filter(function(msg) { return msg.type === 'resize'; })
+                .map(function(msg) { return msg.height; });
+              return heights.length === 1 && heights[0] > 500;
+            })()
+            """,
+            in: context
+        ))
+    }
+
     @Test("preview card clamps upward instead of hanging below the panel")
     func previewCardClampsUpwardInsteadOfHangingBelowThePanel() throws {
         let context = try makePanelScriptContext()
@@ -1085,7 +1172,10 @@ private func makePanelScriptContext() throws -> JSContext {
         __listeners: {},
         offsetHeight: 0,
         offsetWidth: 0,
+        offsetTop: 0,
+        clientHeight: 0,
         scrollHeight: 0,
+        scrollTop: 0,
         selectionStart: 0,
         classList: null,
         addEventListener: function(type, handler){
@@ -1096,6 +1186,8 @@ private func makePanelScriptContext() throws -> JSContext {
         blur: function(){},
         appendChild: function(child){
           child.parentNode = this;
+          child.offsetTop = this.children.length * 56;
+          if (!child.offsetHeight) child.offsetHeight = 56;
           this.children.push(child);
           this.scrollHeight = this.children.length * 56;
         },
@@ -1107,7 +1199,7 @@ private func makePanelScriptContext() throws -> JSContext {
           if (selector.charAt(0) !== '.') return [];
           return __queryByClass(this, selector.slice(1), false);
         },
-        scrollIntoView: function(){},
+        scrollIntoView: function(){ window.__scrollIntoViewCalls += 1; },
         getBoundingClientRect: function(){ return { top: 0, bottom: 0, height: 0 }; },
         removeAttribute: function(name){ delete this.attributes[name]; },
         setAttribute: function(name, value){ this.attributes[name] = value; }
@@ -1160,13 +1252,16 @@ private func makePanelScriptContext() throws -> JSContext {
         this.__listeners[type].push(handler);
       },
       createElement: function(tagName){ return __registerBaseClass(__makeEl(tagName)); },
-      body: { appendChild: function(){} }
+      body: { appendChild: function(){}, scrollTop: 0 },
+      documentElement: { scrollTop: 0 }
     };
+    document.scrollingElement = document.body;
     __els.results = document.getElementById('results');
     __els.panel = document.getElementById('panel');
     __els.panel.offsetHeight = 500;
     __els.searchInput = document.getElementById('searchInput');
     __els.actionHint = document.getElementById('actionHint');
+    window.__scrollIntoViewCalls = 0;
     function getComputedStyle() { return { fontFamily: 'monospace' }; }
     window.__timeoutCallbacks = {};
     window.__nextTimeoutId = 1;

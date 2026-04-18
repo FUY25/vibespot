@@ -108,6 +108,7 @@
 body {
   background: transparent;
   overflow: hidden;
+  overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
   font-family: var(--font-ui);
@@ -301,6 +302,7 @@ body {
   padding: 8px var(--results-h-pad) var(--results-bottom-pad);
   max-height: calc(var(--max-visible-rows) * var(--row-h-closed) + var(--results-bottom-pad));
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   position: relative;
   z-index: 3;
 }
