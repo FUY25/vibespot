@@ -36,10 +36,8 @@ final class PreferencesWindowController: NSWindowController {
     private let contentStack = NSStackView()
     private var shortcutCaptureWindowController: ShortcutCaptureWindowController?
 
-    private let windowWidth: CGFloat = 648
-    private let windowHeight: CGFloat = 612
-    private let contentColumnWidth: CGFloat = 560
-    private let rowWidth: CGFloat = 520
+    private let windowWidth: CGFloat = 534
+    private let windowHeight: CGFloat = 508
 
     init(
         settingsStore: SettingsStore,
@@ -60,13 +58,14 @@ final class PreferencesWindowController: NSWindowController {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Preferences"
         window.titlebarAppearsTransparent = false
         window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 500, height: 460)
         if #available(macOS 13.0, *) {
             window.toolbarStyle = .preference
         }
@@ -119,7 +118,7 @@ final class PreferencesWindowController: NSWindowController {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 18
+        contentStack.spacing = 14
 
         documentView.addSubview(contentStack)
         contentView.addSubview(scrollView)
@@ -129,11 +128,11 @@ final class PreferencesWindowController: NSWindowController {
             scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 26),
-            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -26),
-            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 26),
-            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -26),
-            contentStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -52),
+            contentStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 18),
+            contentStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -18),
+            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 18),
+            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -18),
+            contentStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -36),
         ])
 
         launchAtLoginToggle.target = self
@@ -156,7 +155,6 @@ final class PreferencesWindowController: NSWindowController {
 
     private func buildContent() {
         let views = [
-            makeHeaderView(),
             makeSystemSection(),
             makeSourceSection(),
             makeMaintenanceSection(),
@@ -164,33 +162,14 @@ final class PreferencesWindowController: NSWindowController {
             makeStatusView(),
         ]
 
-        views.forEach { contentStack.addArrangedSubview($0) }
+        views.forEach { view in
+            contentStack.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        }
     }
-
-    private func makeHeaderView() -> NSView {
-        let kicker = makeKickerLabel("PREFERENCES")
-        kicker.textColor = .controlAccentColor
-
-        let title = NSTextField(labelWithString: "Preferences")
-        title.font = NSFont.systemFont(ofSize: 26, weight: .semibold)
-
-        let subtitle = NSTextField(
-            wrappingLabelWithString: "A compact single-page window for app behavior, staged session sources, and local build details."
-        )
-        subtitle.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.maximumNumberOfLines = 3
-
-        let stack = NSStackView(views: [kicker, title, subtitle])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        return stack
-    }
-
     private func makeSystemSection() -> NSView {
         makeSectionCard(
-            title: "SYSTEM",
+            title: "System",
             rows: [
                 makeToggleRow(
                     title: "Launch at login",
@@ -213,13 +192,13 @@ final class PreferencesWindowController: NSWindowController {
     private func makeSourceSection() -> NSView {
         sourceWarningLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         sourceWarningLabel.textColor = .systemYellow
-        sourceWarningLabel.maximumNumberOfLines = 3
+        sourceWarningLabel.maximumNumberOfLines = 2
         sourceWarningLabel.isHidden = true
 
         sourceApplyButton.bezelStyle = .rounded
 
         let footnote = makeFootnote("Source edits stay local in this window until you click Apply.")
-        let sourceStack = NSStackView(views: [
+        let sourceStack = makeSeparatedContentStack(views: [
             footnote,
             makeToolSourceEditor(
                 title: SourceTool.claude.rawValue,
@@ -239,20 +218,20 @@ final class PreferencesWindowController: NSWindowController {
                 subtitle: "Apply only when the edited configuration is valid.",
                 control: sourceApplyButton
             ),
-        ])
-        sourceStack.orientation = .vertical
-        sourceStack.alignment = .leading
-        sourceStack.spacing = 12
+        ], separatorFromIndex: 1)
+        sourceStack.arrangedSubviews.forEach { view in
+            view.widthAnchor.constraint(equalTo: sourceStack.widthAnchor).isActive = true
+        }
 
         return makeSectionCard(
-            title: "SESSION SOURCES",
+            title: "Session Sources",
             customBody: sourceStack
         )
     }
 
     private func makeMaintenanceSection() -> NSView {
         makeSectionCard(
-            title: "MAINTENANCE",
+            title: "Maintenance",
             rows: [
                 makeActionRow(
                     title: "Reindex sessions",
@@ -272,7 +251,7 @@ final class PreferencesWindowController: NSWindowController {
 
     private func makeAboutSection() -> NSView {
         makeSectionCard(
-            title: "ABOUT",
+            title: "About",
             rows: [
                 makeValueRow(title: "Version", value: bundleShortVersion),
                 makeValueRow(title: "Build", value: bundleBuildVersion),
@@ -295,8 +274,11 @@ final class PreferencesWindowController: NSWindowController {
 
         rows.enumerated().forEach { index, row in
             bodyStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: bodyStack.widthAnchor).isActive = true
             if index < rows.count - 1 {
-                bodyStack.addArrangedSubview(makeSeparator())
+                let separator = makeSeparator()
+                bodyStack.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalTo: bodyStack.widthAnchor).isActive = true
             }
         }
 
@@ -304,34 +286,48 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     private func makeSectionCard(title: String, customBody: NSView) -> NSView {
-        let card = makeCard()
-        let heading = makeKickerLabel(title)
+        let group = NSView()
+        group.translatesAutoresizingMaskIntoConstraints = false
+        let heading = makeSectionLabel(title)
         let stack = NSStackView(views: [heading, customBody])
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 9
 
-        card.addSubview(stack)
+        group.addSubview(stack)
         NSLayoutConstraint.activate([
-            card.widthAnchor.constraint(equalToConstant: contentColumnWidth),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+            customBody.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: group.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: group.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: group.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: group.bottomAnchor),
         ])
-        return card
+        return group
     }
 
-    private func makeCard() -> NSView {
-        let card = NSView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.72).cgColor
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.10).cgColor
-        return card
+    private func makeSeparatedContentStack(
+        views: [NSView],
+        separatorFromIndex: Int = 0
+    ) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+
+        views.enumerated().forEach { index, view in
+            stack.addArrangedSubview(view)
+            if index > 0 {
+                view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+            if index >= separatorFromIndex, index < views.count - 1 {
+                let separator = makeSeparator()
+                stack.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
+        }
+
+        return stack
     }
 
     private func makeToggleRow(title: String, subtitle: String, toggle: NSSwitch) -> NSView {
@@ -343,7 +339,7 @@ final class PreferencesWindowController: NSWindowController {
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
         subtitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.maximumNumberOfLines = 3
+        subtitleLabel.maximumNumberOfLines = 2
 
         let textStack = makeRowTextStack(titleLabel: titleLabel, subtitleLabel: subtitleLabel)
         toggle.translatesAutoresizingMaskIntoConstraints = false
@@ -395,16 +391,17 @@ final class PreferencesWindowController: NSWindowController {
         shortcutValueLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
         shortcutValueLabel.alignment = .center
         shortcutValueLabel.wantsLayer = true
-        shortcutValueLabel.layer?.cornerRadius = 8
-        shortcutValueLabel.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
-        shortcutValueLabel.textColor = .controlAccentColor
+        shortcutValueLabel.layer?.cornerRadius = 6
+        shortcutValueLabel.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+        shortcutValueLabel.textColor = .labelColor
         shortcutValueLabel.translatesAutoresizingMaskIntoConstraints = false
         if shortcutValueLabel.constraints.isEmpty {
             NSLayoutConstraint.activate([
-                shortcutValueLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 128),
-                shortcutValueLabel.heightAnchor.constraint(equalToConstant: 30),
+                shortcutValueLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 114),
+                shortcutValueLabel.heightAnchor.constraint(equalToConstant: 28),
             ])
         }
+        shortcutValueLabel.alphaValue = 0.88
     }
 
     private func makeToolSourceEditor(
@@ -426,8 +423,8 @@ final class PreferencesWindowController: NSWindowController {
         statusLabel.lineBreakMode = .byTruncatingMiddle
         statusLabel.maximumNumberOfLines = 2
 
-        let heading = makeKickerLabel(title.uppercased())
-        let stack = NSStackView(views: [
+        let heading = makeSubsectionLabel(title)
+        let stack = makeSeparatedContentStack(views: [
             heading,
             makeTrailingControlRow(
                 title: "Mode",
@@ -439,10 +436,11 @@ final class PreferencesWindowController: NSWindowController {
                 subtitleLabel: statusLabel,
                 button: rootButton
             ),
-        ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
+        ], separatorFromIndex: 1)
+
+        stack.arrangedSubviews.dropFirst().forEach { view in
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
 
         return stack
     }
@@ -495,7 +493,7 @@ final class PreferencesWindowController: NSWindowController {
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
         subtitleLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.maximumNumberOfLines = 3
+        subtitleLabel.maximumNumberOfLines = 2
         subtitleLabel.isHidden = includeSubtitle == false
 
         let textStack = makeRowTextStack(titleLabel: titleLabel, subtitleLabel: subtitleLabel, includeSubtitle: includeSubtitle)
@@ -539,10 +537,7 @@ final class PreferencesWindowController: NSWindowController {
     private func makeBaseRow() -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            row.widthAnchor.constraint(equalToConstant: rowWidth),
-            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
-        ])
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
         return row
     }
 
@@ -564,17 +559,28 @@ final class PreferencesWindowController: NSWindowController {
         let line = NSView()
         line.translatesAutoresizingMaskIntoConstraints = false
         line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.10).cgColor
-        NSLayoutConstraint.activate([
-            line.widthAnchor.constraint(equalToConstant: rowWidth),
-            line.heightAnchor.constraint(equalToConstant: 1),
-        ])
+        line.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.16).cgColor
+        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return line
+    }
+
+    private func makeSectionLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        label.textColor = .labelColor
+        return label
     }
 
     private func makeKickerLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        label.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
+    private func makeSubsectionLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .secondaryLabelColor
         return label
     }
@@ -618,9 +624,9 @@ final class PreferencesWindowController: NSWindowController {
         )
 
         claudeRootPathButton.isEnabled = sourceDraft.claude.mode == .custom
-        claudeRootPathButton.alphaValue = sourceDraft.claude.mode == .custom ? 1 : 0.55
+        claudeRootPathButton.alphaValue = sourceDraft.claude.mode == .custom ? 1 : 0.72
         codexRootPathButton.isEnabled = sourceDraft.codex.mode == .custom
-        codexRootPathButton.alphaValue = sourceDraft.codex.mode == .custom ? 1 : 0.55
+        codexRootPathButton.alphaValue = sourceDraft.codex.mode == .custom ? 1 : 0.72
 
         let warning = sourceWarningMessage(for: resolution)
         sourceWarningLabel.stringValue = warning ?? ""

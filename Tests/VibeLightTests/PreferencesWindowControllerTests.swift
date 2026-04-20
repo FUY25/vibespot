@@ -155,6 +155,31 @@ struct PreferencesWindowControllerTests {
         #expect(findStaticText(containing: "Build", in: window.contentView) != nil)
         #expect(findButton(titled: "About", in: window.contentView) == nil)
         #expect(findButton(titled: "Settings", in: window.contentView) == nil)
+        #expect(findStaticText(containing: "compact single-page window", in: window.contentView) == nil)
+        #expect(findStaticText(containing: "PREFERENCES", in: window.contentView) == nil)
+    }
+
+    @Test("preferences window defaults to a compact size")
+    func preferencesWindowDefaultsToACompactSize() throws {
+        let controller = makeController()
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        #expect(window.frame.width < 648)
+        #expect(window.frame.height < 612)
+        #expect(window.frame.width <= 600)
+        #expect(window.frame.height <= 540)
+    }
+
+    @Test("preferences window is resizable")
+    func preferencesWindowIsResizable() throws {
+        let controller = makeController()
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        #expect(window.styleMask.contains(.resizable))
+        #expect(window.minSize.width >= 500)
+        #expect(window.minSize.height >= 460)
     }
 
     @Test("preferences content respects titlebar safe area")
