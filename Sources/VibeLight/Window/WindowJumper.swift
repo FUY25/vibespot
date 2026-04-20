@@ -13,15 +13,23 @@ enum WindowJumper {
     }
 
     @MainActor
-    static func jumpToSession(_ result: SearchResult) {
+    static func jumpToSession(
+        _ result: SearchResult,
+        completion: (@MainActor (String?) -> Void)? = nil
+    ) {
         guard result.status == "live", let pid = result.pid else {
             log("jumpToSession: skipped — status=\(result.status), pid=\(result.pid ?? -1)")
+            completion?("This live session is no longer available.")
             return
         }
 
         log("jumpToSession: session=\(result.sessionId.prefix(8))… tool=\(result.tool) pid=\(pid)")
         jumpQueue.async {
-            performJump(for: pid)
+            let failureMessage = performJump(for: pid)
+            guard let completion else { return }
+            DispatchQueue.main.async {
+                completion(failureMessage)
+            }
         }
     }
 
@@ -34,7 +42,7 @@ enum WindowJumper {
         }
     }
 
-    private static func performJump(for pid: Int) {
+    private static func performJump(for pid: Int) -> String? {
         log("performJump: starting for pid=\(pid)")
 
         // Yield Flare's activation before attempting the jump so the target
@@ -43,18 +51,22 @@ enum WindowJumper {
 
         if jumpViaTerminal(pid: pid) {
             log("performJump: jumpViaTerminal succeeded")
-            return
+            return nil
         }
         log("performJump: jumpViaTerminal failed, trying activateTerminalApplication")
 
         if activateTerminalApplication() {
             log("performJump: activateTerminalApplication succeeded")
-            return
+            return nil
         }
         log("performJump: activateTerminalApplication failed, trying parent chain")
 
         let result = activateFirstAvailableApplication(startingAt: pid)
         log("performJump: activateFirstAvailableApplication result=\(result)")
+        if result {
+            return nil
+        }
+        return "The live terminal window could not be activated."
     }
 
     /// Yield activation to the running app that owns this PID (or its parent chain).

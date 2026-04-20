@@ -487,8 +487,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             panelController.applySettings(settings)
             panelController.sessionIndex = sessionIndex
-            panelController.onSelect = { result in
-                Self.routeSelection(result)
+            panelController.onSelect = { [weak self] result in
+                self?.handleSelection(result)
+            }
+            panelController.onLaunchAction = { [weak self] command, directory in
+                self?.launchSessionAction(command: command, directory: directory)
             }
             panelController.onHistoryModeChanged = { [weak self] historyMode in
                 guard let self else { return }
@@ -577,24 +580,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func routeSelection(
         _ result: SearchResult,
-        launch: (String, String) -> Void = { command, directory in
-            TerminalLauncher.launch(command: command, directory: directory)
+        launch: (String, String, @escaping @MainActor (String?) -> Void) -> Void = { command, directory, completion in
+            TerminalLauncher.launch(command: command, directory: directory, completion: completion)
         },
-        jump: (SearchResult) -> Void = { result in
-            WindowJumper.jumpToSession(result)
+        jump: (SearchResult, @escaping @MainActor (String?) -> Void) -> Void = { result, completion in
+            WindowJumper.jumpToSession(result, completion: completion)
         }
+        ,
+        onFailure: @escaping @MainActor (String) -> Void = { _ in }
     ) {
         let launchDirectory = normalizedLaunchDirectory(from: result.project)
 
         if result.status == "action" {
             let isCodexAction = result.tool == "codex" || result.sessionId == "new-codex"
             let command = isCodexAction ? "codex" : "claude"
-            launch(command, launchDirectory)
+            launch(command, launchDirectory) { failureMessage in
+                guard let failureMessage else { return }
+                onFailure("Could not start a new session: \(failureMessage)")
+            }
             return
         }
 
         if result.status == "live" {
-            jump(result)
+            jump(result) { failureMessage in
+                guard let failureMessage else { return }
+                onFailure("Could not return to the live session: \(failureMessage)")
+            }
             return
         }
 
@@ -604,7 +615,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             command = "claude --resume \(result.sessionId)"
         }
-        launch(command, launchDirectory)
+        launch(command, launchDirectory) { failureMessage in
+            guard let failureMessage else { return }
+            onFailure("Could not resume this session: \(failureMessage)")
+        }
     }
 
     private static func normalizedLaunchDirectory(from project: String) -> String {
@@ -639,6 +653,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             legacyDatabaseURL: legacyDatabaseURL,
             fileManager: fileManager
         )
+    }
+
+    private func handleSelection(_ result: SearchResult) {
+        Self.routeSelection(result, onFailure: { [weak self] message in
+            self?.presentActionFailure(message)
+        })
+    }
+
+    private func launchSessionAction(command: String, directory: String) {
+        TerminalLauncher.launch(command: command, directory: directory) { [weak self] failureMessage in
+            guard let failureMessage else { return }
+            self?.presentActionFailure("Could not start a new session: \(failureMessage)")
+        }
+    }
+
+    private func presentActionFailure(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Action Failed"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func makeUserVisibleErrorMessage(action: String, error: Error) -> String {

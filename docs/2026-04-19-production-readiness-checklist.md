@@ -174,7 +174,11 @@
   - launch-at-login apply failure
   - diagnostics export failure
   - staged source switch failure
-- [ ] 仍待补齐索引不可用 / 索引损坏 / launch action 失败的用户可见恢复提示
+- [x] 搜索面板触发的 action 失败现在会显示原生错误提示
+  - new session launch failure
+  - resume historical session failure
+  - jump back to live session failure
+- [ ] 仍待补齐索引不可用 / 索引损坏的用户可见恢复提示
 
 **验收标准**
 - 用户出错时至少能看到“发生了什么、怎么办、如何反馈”

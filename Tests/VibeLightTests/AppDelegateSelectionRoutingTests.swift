@@ -111,39 +111,63 @@ func routesSelectionByStatusAndTool() {
     var jumped: [SearchResult] = []
     let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
 
-    AppDelegate.routeSelection(actionCodex, launch: { command, directory in
+    AppDelegate.routeSelection(actionCodex, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
 
-    AppDelegate.routeSelection(actionClaude, launch: { command, directory in
+    AppDelegate.routeSelection(actionClaude, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
 
-    AppDelegate.routeSelection(live, launch: { command, directory in
+    AppDelegate.routeSelection(live, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
 
-    AppDelegate.routeSelection(closedCodex, launch: { command, directory in
+    AppDelegate.routeSelection(closedCodex, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
 
-    AppDelegate.routeSelection(closedClaude, launch: { command, directory in
+    AppDelegate.routeSelection(closedClaude, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
-    AppDelegate.routeSelection(closedClaudeNoProject, launch: { command, directory in
+    AppDelegate.routeSelection(closedClaudeNoProject, launch: { command, directory, completion in
         launched.append((command, directory))
-    }, jump: { result in
+        completion(nil)
+    }, jump: { result, completion in
         jumped.append(result)
+        completion(nil)
+    }, onFailure: { _ in
+        Issue.record("Did not expect failure")
     })
 
     #expect(launched.count == 5)
@@ -159,6 +183,84 @@ func routesSelectionByStatusAndTool() {
     #expect(launched[4].directory == homeDirectory)
 
     #expect(jumped.map(\.sessionId) == ["live-session"])
+}
+
+@MainActor
+@Test
+func routeSelectionReportsLaunchFailures() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let closedClaude = SearchResult(
+        sessionId: "claude-999",
+        tool: "claude",
+        title: "Closed Claude",
+        project: "/tmp/proj-d",
+        projectName: "proj-d",
+        gitBranch: "",
+        status: "closed",
+        startedAt: now,
+        pid: nil,
+        tokenCount: 0,
+        lastActivityAt: now,
+        activityPreview: nil,
+        activityStatus: .closed,
+        snippet: nil
+    )
+
+    var failureMessage: String?
+    AppDelegate.routeSelection(
+        closedClaude,
+        launch: { _, _, completion in
+            completion("Terminal access was denied.")
+        },
+        jump: { _, completion in
+            completion(nil)
+        },
+        onFailure: { message in
+            failureMessage = message
+        }
+    )
+
+    #expect(failureMessage?.localizedCaseInsensitiveContains("resume") == true)
+    #expect(failureMessage?.localizedCaseInsensitiveContains("denied") == true)
+}
+
+@MainActor
+@Test
+func routeSelectionReportsJumpFailures() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let live = SearchResult(
+        sessionId: "live-session",
+        tool: "claude",
+        title: "Live Session",
+        project: "/tmp/proj-live",
+        projectName: "proj-live",
+        gitBranch: "",
+        status: "live",
+        startedAt: now,
+        pid: 42,
+        tokenCount: 0,
+        lastActivityAt: now,
+        activityPreview: nil,
+        activityStatus: .closed,
+        snippet: nil
+    )
+
+    var failureMessage: String?
+    AppDelegate.routeSelection(
+        live,
+        launch: { _, _, completion in
+            completion(nil)
+        },
+        jump: { _, completion in
+            completion("The live terminal window could not be activated.")
+        },
+        onFailure: { message in
+            failureMessage = message
+        }
+    )
+
+    #expect(failureMessage?.localizedCaseInsensitiveContains("live session") == true)
+    #expect(failureMessage?.localizedCaseInsensitiveContains("activated") == true)
 }
 
 @MainActor

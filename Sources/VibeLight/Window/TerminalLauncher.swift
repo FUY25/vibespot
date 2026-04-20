@@ -1,10 +1,15 @@
 import Foundation
 
 enum TerminalLauncher {
-    static func launch(command: String, directory: String) {
+    static func launch(
+        command: String,
+        directory: String,
+        completion: (@MainActor (String?) -> Void)? = nil
+    ) {
         let script = buildScript(command: command, directory: directory)
 
         DispatchQueue.global(qos: .userInitiated).async {
+            let failureMessage: String?
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             process.arguments = ["-e", script]
@@ -19,10 +24,19 @@ enum TerminalLauncher {
                         message: "osascript exited with status \(process.terminationStatus)"
                     )
                     print("TerminalLauncher: osascript exited with status \(process.terminationStatus)")
+                    failureMessage = "Terminal access was denied or the command could not be started."
+                } else {
+                    failureMessage = nil
                 }
             } catch {
                 RuntimeIssueStore.shared.record(component: "TerminalLauncher", error: error)
                 print("TerminalLauncher: failed to launch osascript (\(error))")
+                failureMessage = error.localizedDescription
+            }
+
+            guard let completion else { return }
+            DispatchQueue.main.async {
+                completion(failureMessage)
             }
         }
     }
