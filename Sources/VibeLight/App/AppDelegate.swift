@@ -228,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try launchAtLoginManager.setEnabled(settings.launchAtLogin)
         } catch {
+            RuntimeIssueStore.shared.record(component: "LaunchAtLogin", error: error)
             print("AppDelegate failed to update launch-at-login state: \(error)")
         }
     }
@@ -254,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let outputURL = try exporter.export(settings: settings)
             NSWorkspace.shared.activateFileViewerSelecting([outputURL])
         } catch {
+            RuntimeIssueStore.shared.record(component: "DiagnosticsExport", error: error)
             print("AppDelegate failed to export diagnostics: \(error)")
         }
     }
@@ -355,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
+                RuntimeIssueStore.shared.record(component: "SourceSwitch", error: error)
                 await MainActor.run { [weak self] in
                     guard let self, generation == self.sourceSwitchGeneration else { return }
                     self.settingsStore.save(self.settings)
@@ -489,6 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             indexer.start()
             runtimeServicesStarted = true
         } catch {
+            RuntimeIssueStore.shared.record(component: "RuntimeServices", error: error)
             print("AppDelegate failed to initialize runtime services: \(error)")
             refreshStatusItemTitle()
         }
@@ -601,25 +605,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     nonisolated private static func makeSessionIndexWorkspace() throws -> SessionIndexWorkspace {
         let fileManager = FileManager.default
-        let applicationSupportURL = try fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let flareSupportURL = applicationSupportURL.appendingPathComponent("Flare", isDirectory: true)
-        try fileManager.createDirectory(
-            at: flareSupportURL,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-        let indexesURL = flareSupportURL.appendingPathComponent("Indexes", isDirectory: true)
-        try fileManager.createDirectory(
-            at: indexesURL,
-            withIntermediateDirectories: true,
-            attributes: nil
-        )
-        let legacyDatabaseURL = flareSupportURL.appendingPathComponent("index.sqlite3", isDirectory: false)
+        let runtimePaths = AppRuntimePaths(fileManager: fileManager)
+        let indexesURL = try runtimePaths.indexesRootURL()
+        let legacyDatabaseURL = try runtimePaths.legacyIndexDatabaseURL()
         return SessionIndexWorkspace(
             rootDirectoryURL: indexesURL,
             legacyDatabaseURL: legacyDatabaseURL,

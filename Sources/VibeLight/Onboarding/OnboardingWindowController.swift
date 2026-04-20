@@ -102,10 +102,11 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
             webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
 
-        if let htmlURL = Bundle.module.url(forResource: "onboarding", withExtension: "html", subdirectory: "Web")
-            ?? Bundle.module.url(forResource: "onboarding", withExtension: "html")
+        let resourceBundle = ResourceBundleLocator.current
+        if let htmlURL = resourceBundle.url(forResource: "onboarding", withExtension: "html", subdirectory: "Web")
+            ?? resourceBundle.url(forResource: "onboarding", withExtension: "html")
         {
-            let readAccessRoot = Bundle.module.resourceURL ?? htmlURL.deletingLastPathComponent()
+            let readAccessRoot = resourceBundle.resourceURL ?? htmlURL.deletingLastPathComponent()
             webView.loadFileURL(htmlURL, allowingReadAccessTo: readAccessRoot)
         }
     }

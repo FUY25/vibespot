@@ -135,6 +135,7 @@ enum WindowJumper {
             )
             log("bringAppViaOpen: \(appName) exit=\(result.terminationStatus)")
         } catch {
+            RuntimeIssueStore.shared.record(component: "WindowJumper.\(appName)", error: error)
             log("bringAppViaOpen: \(appName) error: \(error)")
         }
     }
@@ -216,6 +217,7 @@ enum WindowJumper {
             }
             return result.trimmedStdout
         } catch {
+            RuntimeIssueStore.shared.record(component: "WindowJumper.AppleScript", error: error)
             log("runAppleScript: launch error: \(error)")
             return nil
         }

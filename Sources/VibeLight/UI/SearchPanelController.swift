@@ -290,6 +290,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         } catch {
             updateVisibleRefreshTimer(query: trimmed, liveOnlySearch: liveOnlySearch, results: [])
             pushResults([], query: trimmed)
+            RuntimeIssueStore.shared.record(component: "SearchPanel.Search", error: error)
             print("SearchPanelController search failed: \(error)")
         }
     }
@@ -823,13 +824,14 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         isWebViewReady = false
 
         // Load panel.html from bundle
-        if let htmlURL = Bundle.module.url(forResource: "panel", withExtension: "html", subdirectory: "Web")
-            ?? Bundle.module.url(forResource: "panel", withExtension: "html") {
-            iconBaseURL = Bundle.module.url(forResource: "claude-icon", withExtension: "png")?
+        let resourceBundle = ResourceBundleLocator.current
+        if let htmlURL = resourceBundle.url(forResource: "panel", withExtension: "html", subdirectory: "Web")
+            ?? resourceBundle.url(forResource: "panel", withExtension: "html") {
+            iconBaseURL = resourceBundle.url(forResource: "claude-icon", withExtension: "png")?
                 .deletingLastPathComponent()
                 .absoluteString
 
-            let readAccessRoot = Bundle.module.resourceURL ?? htmlURL.deletingLastPathComponent()
+            let readAccessRoot = resourceBundle.resourceURL ?? htmlURL.deletingLastPathComponent()
             webView.loadFileURL(htmlURL, allowingReadAccessTo: readAccessRoot)
         }
     }
@@ -961,6 +963,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             updateVisibleRefreshTimer(query: trimmedQuery, liveOnlySearch: lastSearchWasLiveOnly, results: mergedResults)
             pushResults(mergedResults, query: trimmedQuery)
         } catch {
+            RuntimeIssueStore.shared.record(component: "SearchPanel.VisibleRefresh", error: error)
             print("SearchPanelController visible live refresh failed: \(error)")
         }
     }

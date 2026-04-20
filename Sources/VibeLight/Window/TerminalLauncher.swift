@@ -14,9 +14,14 @@ enum TerminalLauncher {
                 try process.run()
                 process.waitUntilExit()
                 if process.terminationStatus != 0 {
+                    RuntimeIssueStore.shared.record(
+                        component: "TerminalLauncher",
+                        message: "osascript exited with status \(process.terminationStatus)"
+                    )
                     print("TerminalLauncher: osascript exited with status \(process.terminationStatus)")
                 }
             } catch {
+                RuntimeIssueStore.shared.record(component: "TerminalLauncher", error: error)
                 print("TerminalLauncher: failed to launch osascript (\(error))")
             }
         }

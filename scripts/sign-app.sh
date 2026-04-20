@@ -15,7 +15,6 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
   exit 1
 fi
 
-codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$APP_BUNDLE/Contents/Resources/Flare_Flare.bundle"
 codesign --force --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$APP_BUNDLE/Contents/MacOS/VibeSpot"
 codesign --force --timestamp --options runtime --sign "$SIGNING_IDENTITY" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"

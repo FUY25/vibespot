@@ -12,10 +12,20 @@ func diagnosticsExporterCreatesSnapshotFiles() throws {
 
     let manifestURL = output.appendingPathComponent("manifest.json")
     let settingsURL = output.appendingPathComponent("settings.json")
+    let sourceResolutionURL = output.appendingPathComponent("source-resolution.json")
+    let environmentURL = output.appendingPathComponent("environment-check.json")
+    let workspaceURL = output.appendingPathComponent("index-workspace.json")
+    let issuesURL = output.appendingPathComponent("runtime-issues.json")
+    let readmeURL = output.appendingPathComponent("README.txt")
 
     #expect(output.lastPathComponent.starts(with: "vibespot-diagnostics-"))
     #expect(FileManager.default.fileExists(atPath: manifestURL.path))
     #expect(FileManager.default.fileExists(atPath: settingsURL.path))
+    #expect(FileManager.default.fileExists(atPath: sourceResolutionURL.path))
+    #expect(FileManager.default.fileExists(atPath: environmentURL.path))
+    #expect(FileManager.default.fileExists(atPath: workspaceURL.path))
+    #expect(FileManager.default.fileExists(atPath: issuesURL.path))
+    #expect(FileManager.default.fileExists(atPath: readmeURL.path))
 }
 
 @Test
@@ -28,10 +38,13 @@ func diagnosticsExporterEmbedsTheCurrentSettings() throws {
     settings.historyMode = .liveOnly
     settings.launchAtLogin = false
 
-    let exporter = DiagnosticsExporter()
+    let exporter = DiagnosticsExporter(issueSnapshotProvider: {
+        [RuntimeIssue(recordedAt: Date(timeIntervalSince1970: 0), component: "SearchPanel", message: "Sample issue")]
+    })
     let output = try exporter.export(settings: settings, to: root)
 
     let manifestURL = output.appendingPathComponent("manifest.json")
+    let workspaceURL = output.appendingPathComponent("index-workspace.json")
     let data = try Data(contentsOf: manifestURL)
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
@@ -39,4 +52,10 @@ func diagnosticsExporterEmbedsTheCurrentSettings() throws {
 
     #expect(manifest.settings == settings)
     #expect(manifest.applicationName == "VibeSpot")
+    #expect(manifest.recentIssueCount == 1)
+    #expect(manifest.supportURL.contains("github.com/FUY25/flare/issues"))
+
+    let workspaceData = try Data(contentsOf: workspaceURL)
+    let workspace = try decoder.decode(DiagnosticsIndexWorkspaceSnapshot.self, from: workspaceData)
+    #expect(workspace.activeDatabasePath.contains("active.sqlite3"))
 }

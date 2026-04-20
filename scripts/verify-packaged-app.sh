@@ -19,8 +19,6 @@ echo "Build: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_BUNDLE/
 test -x "$APP_BUNDLE/Contents/MacOS/VibeSpot"
 test -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 test -d "$APP_BUNDLE/Contents/Resources/Flare_Flare.bundle"
-test -L "$APP_BUNDLE/Flare_Flare.bundle"
-
-codesign --verify --deep --strict "$APP_BUNDLE" >/dev/null 2>&1 || true
+codesign --verify --deep --strict "$APP_BUNDLE" >/dev/null
 
 echo "Packaged app structure looks valid."

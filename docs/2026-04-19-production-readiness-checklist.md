@@ -46,9 +46,9 @@
   - About
   - diagnostics 导出命名
   - README / 安装文档 / release 文案
-- [ ] 发布产物命名统一
+- [x] 发布产物命名统一
   - `App` 名称
-  - 压缩包或 DMG 名称
+  - `.dmg` 名称
   - 截图标题与说明
 - [ ] 若需要修改 bundle display name / bundle identifier，明确迁移策略
 
@@ -106,11 +106,10 @@
 - [x] 生成正式 `VibeSpot.app`
 - [ ] code signing 完成
 - [ ] notarization 完成
-- [ ] 最终安装分发形式确定
+- [x] 最终安装分发形式确定
   - `VibeSpot.app`
-  - `.zip`
   - `.dmg`
-  - 或其他明确方案
+  - beta 阶段先接受 `Privacy & Security > Open Anyway`
 - [ ] 在干净机器上验证安装链路
   - 下载
   - 拖进 `/Applications`
@@ -124,11 +123,19 @@
 - [x] 已新增可执行脚本：
   - `scripts/export-app-icon.sh`
   - `scripts/package-app.sh`
+  - `scripts/create-dmg.sh`
   - `scripts/sign-app.sh`
   - `scripts/notarize-app.sh`
   - `scripts/verify-packaged-app.sh`
+  - `scripts/verify-beta-install.sh`
 - [x] 本地已验证可以产出 `dist/VibeSpot.app`
+- [x] 本地已验证可以产出 `dist/VibeSpot.dmg`
 - [x] bundle 级 `Info.plist`、display name、executable name、`AppIcon.icns` 已接入
+- [x] beta 安装验证脚本已在本机跑通
+  - 生成 `.dmg`
+  - 挂载并复制到临时 `/Applications`
+  - 清除 quarantine 模拟 `Open Anyway`
+  - 首次启动 smoke 通过
 - [ ] 签名 identity / notarization profile 仍待接入真实凭据
 
 **验收标准**
@@ -144,7 +151,7 @@
   - diagnostics 导出失败
   - 索引不可用或索引损坏
   - session source 无效
-- [ ] diagnostics 导出增强
+- [x] diagnostics 导出增强
   - 当前 settings
   - 当前 source resolution
   - index workspace 信息
@@ -152,7 +159,7 @@
   - 最近错误摘要
   - 环境检查结果
 - [ ] reindex / source switch / invalid source 的恢复路径清晰
-- [ ] 至少保留一个面向用户的反馈入口
+- [x] 至少保留一个面向用户的反馈入口
   - GitHub issue
   - 邮件
   - 诊断包说明

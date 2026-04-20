@@ -48,6 +48,7 @@ sed \
   -e "s|__BUILD__|$BUILD|g" \
   "$INFO_TEMPLATE" > "$APP_BUNDLE/Contents/Info.plist"
 
-ln -s "Contents/Resources/Flare_Flare.bundle" "$APP_BUNDLE/Flare_Flare.bundle"
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE/Contents/MacOS/$APP_NAME" >/dev/null
+codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_BUNDLE" >/dev/null
 
 echo "Packaged $APP_BUNDLE"
