@@ -374,8 +374,8 @@ enum IndexingHelpers {
         return String(fileName[matchRange])
     }
 
-    static func loadCodexTitleMap(homeDirectoryPath: String) -> [String: String] {
-        let indexURL = URL(fileURLWithPath: homeDirectoryPath + "/.codex/session_index.jsonl")
+    static func loadCodexTitleMap(codexRootPath: String) -> [String: String] {
+        let indexURL = URL(fileURLWithPath: codexRootPath + "/session_index.jsonl")
         let metas = (try? CodexParser.parseSessionIndex(url: indexURL)) ?? []
 
         var titleMap: [String: String] = [:]
@@ -384,5 +384,9 @@ enum IndexingHelpers {
             titleMap[meta.sessionId] = title
         }
         return titleMap
+    }
+
+    static func loadCodexTitleMap(homeDirectoryPath: String) -> [String: String] {
+        loadCodexTitleMap(codexRootPath: homeDirectoryPath + "/.codex")
     }
 }

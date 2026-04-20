@@ -157,6 +157,36 @@ struct PreferencesWindowControllerTests {
         #expect(findButton(titled: "Settings", in: window.contentView) == nil)
     }
 
+    @Test("preferences content respects titlebar safe area")
+    func preferencesContentRespectsTitlebarSafeArea() throws {
+        let controller = makeController()
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        window.layoutIfNeeded()
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let scrollView = try #require(findScrollView(in: window.contentView))
+        #expect(scrollView.frame.maxY <= window.contentLayoutRect.maxY + 1)
+    }
+
+    @Test("reopening preferences clears transient status messages")
+    func reopeningPreferencesClearsTransientStatusMessages() throws {
+        let controller = makeController()
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        let exportButton = try #require(findButton(titled: "Export", in: window.contentView))
+        exportButton.performClick(nil)
+        #expect(findStaticText(containing: "Diagnostics exported", in: window.contentView) != nil)
+
+        window.close()
+        controller.showPreferences()
+
+        #expect(findStaticText(containing: "Diagnostics exported", in: window.contentView) == nil)
+        #expect(findStaticText(containing: "Source changes stay staged until Apply.", in: window.contentView) != nil)
+    }
+
     private func makeController(
         initialSettings: AppSettings = .default,
         sessionSourceLocator: SessionSourceLocator = SessionSourceLocator(),
@@ -269,6 +299,21 @@ struct PreferencesWindowControllerTests {
         for subview in view.subviews {
             if let label = findStaticText(containing: text, in: subview) {
                 return label
+            }
+        }
+
+        return nil
+    }
+
+    private func findScrollView(in view: NSView?) -> NSScrollView? {
+        guard let view else { return nil }
+        if let scrollView = view as? NSScrollView {
+            return scrollView
+        }
+
+        for subview in view.subviews {
+            if let scrollView = findScrollView(in: subview) {
+                return scrollView
             }
         }
 

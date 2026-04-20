@@ -17,6 +17,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     var onSelect: ((SearchResult) -> Void)?
     var onLaunchAction: ((String, String) -> Void)?
     var onHistoryModeChanged: (@MainActor (SearchHistoryMode) -> Void)?
+    var onOpenPreferences: (@MainActor () -> Void)?
     var sessionIndex: SessionIndex?
     var isVisible: Bool { panel.isVisible }
     var hidesOnDeactivate: Bool { panel.hidesOnDeactivate }
@@ -754,7 +755,14 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         // Intercept nav keys at NSPanel level → call JS directly
         // This bypasses WKWebView's IPC event pipeline for snappier navigation
         panel.keyHandler = { [weak self] keyCode, modifiers in
-            guard let self, self.isWebViewReady else { return false }
+            guard let self else { return false }
+            let normalizedModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
+            if keyCode == 43, normalizedModifiers == [.command] {
+                self.hide()
+                self.onOpenPreferences?()
+                return true
+            }
+            guard self.isWebViewReady else { return false }
             switch keyCode {
             case 125: // Arrow Down
                 self.webView.evaluateJavaScript("moveSelection(1)", completionHandler: nil)

@@ -1,13 +1,15 @@
 import AppKit
 
 @MainActor
-final class ShortcutCaptureWindowController: NSWindowController {
+final class ShortcutCaptureWindowController: NSWindowController, NSWindowDelegate {
     private let onSave: @MainActor @Sendable (HotkeyBinding) -> Void
     private let currentBinding: HotkeyBinding
     private let instructionLabel = NSTextField(labelWithString: "")
     private let currentValueLabel = NSTextField(labelWithString: "")
     private let errorLabel = NSTextField(labelWithString: "")
     private var captureView: ShortcutCaptureView?
+    private var onClose: (@MainActor @Sendable () -> Void)?
+    private var isClosing = false
 
     init(
         currentBinding: HotkeyBinding,
@@ -35,15 +37,21 @@ final class ShortcutCaptureWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func presentSheet(for parentWindow: NSWindow) {
+    func presentSheet(for parentWindow: NSWindow, onClose: (@MainActor @Sendable () -> Void)? = nil) {
+        self.onClose = onClose
         parentWindow.beginSheet(window!) { [weak self] _ in
+            self?.onClose?()
+            self?.onClose = nil
             self?.close()
         }
         window?.makeFirstResponder(captureView)
     }
 
     private func configureWindow() {
-        guard let contentView = window?.contentView else { return }
+        guard let window, let contentView = window.contentView else { return }
+        window.delegate = self
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
 
         let root = NSStackView()
         root.translatesAutoresizingMaskIntoConstraints = false
@@ -64,9 +72,14 @@ final class ShortcutCaptureWindowController: NSWindowController {
         errorLabel.textColor = .systemRed
         errorLabel.isHidden = true
 
-        let captureView = ShortcutCaptureView { [weak self] binding in
+        let captureView = ShortcutCaptureView(
+            onCapture: { [weak self] binding in
             self?.handleCapture(binding: binding)
-        }
+            },
+            onCancel: { [weak self] in
+                self?.closeSheet()
+            }
+        )
         captureView.translatesAutoresizingMaskIntoConstraints = false
         captureView.wantsLayer = true
         captureView.layer?.cornerRadius = 14
@@ -83,6 +96,7 @@ final class ShortcutCaptureWindowController: NSWindowController {
 
         let resetButton = NSButton(title: "Reset to Default", target: self, action: #selector(resetAction))
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelAction))
+        cancelButton.keyEquivalent = "\u{1b}"
 
         let buttonRow = NSStackView(views: [resetButton, cancelButton])
         buttonRow.orientation = .horizontal
@@ -121,8 +135,21 @@ final class ShortcutCaptureWindowController: NSWindowController {
     }
 
     private func closeSheet() {
-        guard let window else { return }
-        window.sheetParent?.endSheet(window)
+        guard let window, !isClosing else { return }
+        isClosing = true
+        if let sheetParent = window.sheetParent {
+            sheetParent.endSheet(window)
+        } else {
+            onClose?()
+            onClose = nil
+            window.orderOut(nil)
+        }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender.sheetParent != nil else { return true }
+        closeSheet()
+        return false
     }
 
     @objc private func resetAction() {
@@ -137,9 +164,14 @@ final class ShortcutCaptureWindowController: NSWindowController {
 
 private final class ShortcutCaptureView: NSView {
     private let onCapture: (HotkeyBinding?) -> Void
+    private let onCancel: () -> Void
 
-    init(onCapture: @escaping (HotkeyBinding?) -> Void) {
+    init(
+        onCapture: @escaping (HotkeyBinding?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         self.onCapture = onCapture
+        self.onCancel = onCancel
         super.init(frame: .zero)
     }
 
@@ -156,6 +188,10 @@ private final class ShortcutCaptureView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { // Escape
+            onCancel()
+            return
+        }
         onCapture(HotkeyBinding(event: event))
     }
 }

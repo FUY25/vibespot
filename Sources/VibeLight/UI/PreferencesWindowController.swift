@@ -60,12 +60,12 @@ final class PreferencesWindowController: NSWindowController {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Preferences"
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
         window.isReleasedWhenClosed = false
         if #available(macOS 13.0, *) {
             window.toolbarStyle = .preference
@@ -84,6 +84,8 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func showPreferences() {
+        statusMessage = ""
+        loadControls()
         window?.center()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)

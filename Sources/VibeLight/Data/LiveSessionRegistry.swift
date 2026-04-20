@@ -9,8 +9,11 @@ struct LiveSession {
 }
 
 enum LiveSessionRegistry {
-    private static let sessionsPath: String = {
+    private static let defaultClaudeSessionsPath: String = {
         FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/sessions"
+    }()
+    private static let defaultCodexStatePath: String = {
+        FileManager.default.homeDirectoryForCurrentUser.path + "/.codex/state_5.sqlite"
     }()
     private static let commandTimeout: DispatchTimeInterval = .seconds(2)
 
@@ -23,17 +26,20 @@ enum LiveSessionRegistry {
     /// rollout file, so once both are discovered we can reuse them for its lifetime.
     nonisolated(unsafe) private static var codexProcessFileInfoCache: [Int: CodexProcessFileInfo] = [:]
 
-    static func scan() -> [LiveSession] {
-        scanClaudeSessions() + scanCodexSessions()
+    static func scan(
+        claudeSessionsPath: String = defaultClaudeSessionsPath,
+        codexStatePath: String = defaultCodexStatePath
+    ) -> [LiveSession] {
+        return scanClaudeSessions(claudeSessionsPath: claudeSessionsPath) + scanCodexSessions(codexStatePath: codexStatePath)
     }
 
-    private static func scanClaudeSessions() -> [LiveSession] {
+    private static func scanClaudeSessions(claudeSessionsPath: String) -> [LiveSession] {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: sessionsPath) else { return [] }
+        guard let files = try? fm.contentsOfDirectory(atPath: claudeSessionsPath) else { return [] }
 
         return files.compactMap { filename -> LiveSession? in
             guard filename.hasSuffix(".json") else { return nil }
-            let path = (sessionsPath as NSString).appendingPathComponent(filename)
+            let path = (claudeSessionsPath as NSString).appendingPathComponent(filename)
             let url = URL(fileURLWithPath: path)
             guard let entry = try? ClaudeParser.parsePidFile(url: url) else { return nil }
 
@@ -75,7 +81,7 @@ enum LiveSessionRegistry {
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func scanCodexSessions() -> [LiveSession] {
+    private static func scanCodexSessions(codexStatePath: String) -> [LiveSession] {
         guard let psOutput = runCommand(
             executablePath: "/bin/ps",
             arguments: ["-axo", "uid,pid,comm"]
@@ -114,7 +120,7 @@ enum LiveSessionRegistry {
             }
         }
 
-        let stateDB = CodexStateDB()
+        let stateDB = CodexStateDB(path: codexStatePath)
 
         return alivePids.compactMap { pid in
             guard let processFileInfo = codexProcessFileInfoCache[pid] else { return nil }
@@ -297,9 +303,20 @@ enum LiveSessionRegistry {
     }
 
     private static func isCodexRolloutPath(_ path: String) -> Bool {
-        guard path.contains("/.codex/sessions/"), path.hasSuffix(".jsonl") else {
+        guard path.hasSuffix(".jsonl") else {
             return false
         }
-        return (path as NSString).lastPathComponent.hasPrefix("rollout-")
+
+        let lastPathComponent = (path as NSString).lastPathComponent
+        guard lastPathComponent.hasPrefix("rollout-") else {
+            return false
+        }
+
+        let segments = path.split(separator: "/")
+        guard segments.contains("sessions") else {
+            return false
+        }
+
+        return true
     }
 }

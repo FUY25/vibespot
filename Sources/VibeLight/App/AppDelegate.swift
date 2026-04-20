@@ -460,6 +460,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.applyHistoryMode(historyMode)
             }
+            panelController.onOpenPreferences = { [weak self] in
+                self?.openPreferences()
+            }
 
             let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
                 self?.togglePanel(nil)
