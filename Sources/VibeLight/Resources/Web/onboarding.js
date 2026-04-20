@@ -1,246 +1,180 @@
-let state = {
-  step: 'welcome',
-  launchAtLogin: true,
-  launchAtLoginSupported: true,
-  hotkey: 'Cmd+Shift+Space',
-  checksRunning: false,
-  codexFound: false,
-  claudeFound: false,
-  codexHistoryStatus: 'Unknown',
-  claudeHistoryStatus: 'Unknown',
-  canFinish: false,
-  missingPaths: [],
-  checkedPaths: [],
-};
+let state = null;
 
 function post(message) {
   window.webkit?.messageHandlers?.onboardingBridge?.postMessage(message);
 }
 
-function renderWelcome() {
+function renderDemoPane() {
+  const chipSets = {
+    quickActivation: [state.hotkey, "Panel", "Live state"],
+    fastSwitch: ["Enter", "Jump back", "Current session"],
+    searchSessions: ["Search", "Tab", "Enter"],
+    startNewSession: ["new claude", "new codex", "Launch"],
+  };
+
+  const chips = (chipSets[state.cardID] || []).map((chip) => `<span class="demo-chip">${escapeHtml(chip)}</span>`).join("");
+
   return `
-    <div class="frame">
-      <div class="frame__glow frame__glow--left"></div>
-      <div class="frame__glow frame__glow--right"></div>
-      <section class="hero">
-        <div>
-          <div class="hero__meta">
-            <span class="badge badge--soft">VibeSpot</span>
-            <span class="badge">Native search app</span>
-          </div>
-          <h1>${escapeHtml(state.headline || '')}</h1>
-          <p>${escapeHtml(state.body || '')}</p>
-          <p class="caption">${escapeHtml(state.detail || '')}</p>
-          <div class="hero__metrics">
-            <div class="metric">
-              <span class="metric__value">Live</span>
-              <span class="metric__label">Switch back into active runs before the thread disappears.</span>
-            </div>
-            <div class="metric">
-              <span class="metric__value">Local</span>
-              <span class="metric__label">Indexes session files already on your machine.</span>
-            </div>
-          </div>
+    <div class="pane pane--demo">
+      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+      <div class="demo-placeholder">
+        <div class="demo-placeholder__viewport">
+          <div class="demo-placeholder__glass"></div>
+          <div class="demo-placeholder__copy">${escapeHtml(state.rightPane.placeholderPrompt || "")}</div>
         </div>
-        <div class="hero__cards">
-          <div class="card card--demo">
-            <div class="card__label">Demo</div>
-            <div class="demo-shell">
-              <div class="demo-shell__top">
-                <span class="demo-shell__dot"></span>
-                <span class="demo-shell__pill">task</span>
-                <span class="demo-shell__status">14 matches</span>
-              </div>
-              <div class="demo-shell__list">
-                <div class="demo-row demo-row--active">
-                  <div class="demo-row__icon"></div>
-                  <div class="demo-row__body">
-                    <strong>resume the streaming parser fix</strong>
-                    <span>live Codex session · updated now</span>
-                  </div>
-                </div>
-                <div class="demo-row">
-                  <div class="demo-row__icon"></div>
-                  <div class="demo-row__body">
-                    <strong>ship the preferences redesign</strong>
-                    <span>Claude Code · 12 minutes ago</span>
-                  </div>
-                </div>
-                <div class="demo-row">
-                  <div class="demo-row__icon"></div>
-                  <div class="demo-row__body">
-                    <strong>draft the release README</strong>
-                    <span>historical session · yesterday</span>
-                  </div>
-                </div>
-              </div>
-              <div class="demo-shell__footer">Demo GIF placeholder</div>
-            </div>
-            <div class="feature-list">
-              <div class="feature"><span class="feature-dot"></span><span><strong>Switch live sessions fast</strong> with native Spotlight-like search.</span></div>
-              <div class="feature"><span class="feature-dot"></span><span><strong>Search older threads</strong> when you need context, not just what is running now.</span></div>
-              <div class="feature"><span class="feature-dot"></span><span><strong>Stay local</strong> by reading the session files already on your machine.</span></div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <div class="button-row">
-        <div class="button-group">
-          <button class="button-secondary" onclick="post({ type: 'quit' })">Quit</button>
-        </div>
-        <div class="button-group">
-          <button class="button-primary" onclick="post({ type: 'continue' })">Continue</button>
+        <div class="demo-placeholder__footer">
+          <span class="demo-placeholder__label">${escapeHtml(state.rightPane.placeholderLabel || "")}</span>
+          <div class="demo-placeholder__chips">${chips}</div>
         </div>
       </div>
     </div>
   `;
 }
 
-function renderSetup() {
-  const codexStatus = state.codexFound ? 'Found' : 'Missing';
-  const claudeStatus = state.claudeFound ? 'Found' : 'Missing';
-  const launchStatus = state.launchAtLoginSupported ? 'Enabled in this build' : 'Packaged app only';
-  const finishLabel = state.canFinish ? 'Finish' : 'Fix setup first';
-
+function renderShortcutPane() {
   return `
-    <div class="frame">
-      <div class="frame__glow frame__glow--left"></div>
-      <div class="frame__glow frame__glow--right"></div>
-      <section class="hero">
-        <div>
-          <div class="hero__meta">
-            <span class="badge badge--soft">Setup</span>
-            <span class="badge">Default shortcut: ${escapeHtml(state.hotkey)}</span>
-          </div>
-          <h1>${escapeHtml(state.headline || '')}</h1>
-          <p>${escapeHtml(state.body || '')}</p>
-          <p class="caption">${escapeHtml(state.detail || '')}</p>
-        </div>
-        <div class="hero__cards">
-          <div class="card">
-            <div class="card__label">Readiness</div>
-            <div class="checks">
-              <div class="check-pill">
-                <span class="check-pill__label">Launch at login</span>
-                <span class="check-pill__status ${state.launchAtLoginSupported ? 'ok' : 'neutral'}">${launchStatus}</span>
-              </div>
-              <div class="check-pill">
-                <span class="check-pill__label">Codex helper</span>
-                <span class="check-pill__status ${state.codexFound ? 'ok' : 'warn'}">${codexStatus}</span>
-              </div>
-              <div class="check-pill">
-                <span class="check-pill__label">Claude helper</span>
-                <span class="check-pill__status ${state.claudeFound ? 'ok' : 'warn'}">${claudeStatus}</span>
-              </div>
-              <div class="check-pill">
-                <span class="check-pill__label">Codex history</span>
-                <span class="check-pill__status ${statusTone(state.codexHistoryStatus)}">${escapeHtml(state.codexHistoryStatus)}</span>
-              </div>
-              <div class="check-pill">
-                <span class="check-pill__label">Claude history</span>
-                <span class="check-pill__status ${statusTone(state.claudeHistoryStatus)}">${escapeHtml(state.claudeHistoryStatus)}</span>
-              </div>
-            </div>
-            <p class="caption">${state.checksRunning ? 'Running checks...' : escapeHtml(state.detail || describePaths())}</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="settings-grid">
-          <div class="settings-card">
-            <h2>System</h2>
-            <p>Keep setup focused: one shortcut, one launch preference, and one check for first-success readiness.</p>
-            <div class="settings-row">
-              <div class="settings-row__text">
-                <h3>Launch at login</h3>
-                <p>${state.launchAtLoginSupported ? 'Open VibeSpot automatically when you sign in.' : 'This only works from a packaged app build, not while running from source.'}</p>
-              </div>
-              <div
-                class="toggle ${state.launchAtLogin ? 'is-on' : ''} ${state.launchAtLoginSupported ? '' : 'is-disabled'}"
-                onclick="toggleLaunchAtLogin()"
-              ></div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row__text">
-                <h3>Shortcut</h3>
-                <p>Use the default or pick a different global shortcut.</p>
-              </div>
-              <div class="shortcut-box">
-                <span class="shortcut-chip">${escapeHtml(state.hotkey)}</span>
-                <button class="button-secondary" onclick="post({ type: 'changeShortcut' })">Change shortcut</button>
-                <button class="button-link" onclick="post({ type: 'resetShortcut' })">Reset</button>
-              </div>
-            </div>
-            <div class="settings-row">
-              <div class="settings-row__text">
-                <h3>Environment checks</h3>
-                <p>Verify your local files and helper binaries before the first search.</p>
-              </div>
-              <button class="button-secondary" onclick="post({ type: 'runChecks' })">${state.checksRunning ? 'Checking...' : 'Run checks again'}</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div class="button-row">
-        <div class="button-group">
-          <button class="button-secondary" onclick="post({ type: 'back' })">Back</button>
-        </div>
-        <div class="button-group">
-          <button class="button-primary" ${state.canFinish ? '' : 'disabled'} onclick="post({ type: 'finish' })">${finishLabel}</button>
+    <div class="pane">
+      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+      <div class="setting-block">
+        <div class="setting-block__value">${escapeHtml(state.hotkey)}</div>
+        <div class="setting-actions">
+          <button class="button button--secondary" onclick="post({ type: 'changeShortcut' })">${escapeHtml(state.rightPane.shortcutActions?.[0] || "")}</button>
+          <button class="button button--ghost" onclick="post({ type: 'resetShortcut' })">${escapeHtml(state.rightPane.shortcutActions?.[1] || "")}</button>
         </div>
       </div>
     </div>
   `;
 }
 
-function describePaths() {
-  const missing = state.missingPaths || [];
-  if (missing.length === 0) {
-    return 'All expected local session paths are reachable.';
-  }
-  return `Missing: ${missing.join(', ')}`;
+function renderAccessPane() {
+  const statuses = (state.rightPane.accessStatuses || []).map((item) => `
+    <div class="status-row">
+      <span class="status-row__label">${escapeHtml(item.label)}</span>
+      <span class="status-pill status-pill--${escapeHtml(item.tone)}">${escapeHtml(item.value)}</span>
+    </div>
+  `).join("");
+
+  return `
+    <div class="pane">
+      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+      <div class="setting-block setting-block--stacked">
+        <div class="status-list">${statuses}</div>
+        <button class="button button--secondary" onclick="post({ type: 'runChecks' })">${escapeHtml(state.rightPane.accessActionTitle || "")}</button>
+      </div>
+    </div>
+  `;
 }
 
-function statusTone(status) {
-  switch (status) {
-    case 'Ready':
-    case 'Found':
-      return 'ok';
-    case 'Unknown':
-      return 'neutral';
+function renderTerminalPane() {
+  const terminalStatus = state.rightPane.terminalStatus;
+  return `
+    <div class="pane">
+      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+      <div class="setting-block setting-block--stacked">
+        <div class="status-row status-row--single">
+          <span class="status-row__label">${escapeHtml(terminalStatus?.label || "")}</span>
+          <span class="status-pill status-pill--${escapeHtml(terminalStatus?.tone || "neutral")}">${escapeHtml(terminalStatus?.value || "")}</span>
+        </div>
+        <button class="button button--secondary" onclick="post({ type: 'runTerminalCheck' })">${escapeHtml(state.rightPane.terminalActionTitle || "")}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderQuickSetupPane() {
+  const disabledClass = state.rightPane.launchAtLoginSupportedLabel ? "toggle--disabled" : "";
+  const supportText = state.rightPane.launchAtLoginSupportedLabel
+    ? `<div class="setting-note">${escapeHtml(state.rightPane.launchAtLoginSupportedLabel)}</div>`
+    : "";
+
+  return `
+    <div class="pane">
+      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+      <div class="setting-block setting-block--stacked">
+        <div class="status-row status-row--single">
+          <span class="status-row__label">${escapeHtml(state.rightPane.launchAtLoginLabel || "")}</span>
+          <button class="toggle ${state.launchAtLogin ? 'toggle--on' : ''} ${disabledClass}" onclick="toggleLaunchAtLogin()">
+            <span class="toggle__knob"></span>
+          </button>
+        </div>
+        ${supportText}
+      </div>
+    </div>
+  `;
+}
+
+function renderRightPane() {
+  switch (state.rightPane.kind) {
+    case "shortcut":
+      return renderShortcutPane();
+    case "access":
+      return renderAccessPane();
+    case "terminal":
+      return renderTerminalPane();
+    case "quickSetup":
+      return renderQuickSetupPane();
+    case "demo":
     default:
-      return 'warn';
+      return renderDemoPane();
   }
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+function renderCard() {
+  const primaryType = state.cardID === "quickSetup" ? "finish" : "next";
+  return `
+    <div class="frame">
+      <div class="card-shell">
+        <div class="card-shell__header">
+          <button class="text-button" onclick="post({ type: 'quit' })">${escapeHtml(state.quitLabel)}</button>
+          <div class="progress">${escapeHtml(state.progressLabel)}</div>
+        </div>
+        <div class="card-shell__body">
+          <section class="copy-pane">
+            <p class="copy-pane__sentence">${escapeHtml(state.sentence)}</p>
+          </section>
+          <section class="visual-pane">
+            ${renderRightPane()}
+          </section>
+        </div>
+        <div class="card-shell__footer">
+          <button class="button button--ghost ${state.canGoBack ? '' : 'button--hidden'}" onclick="post({ type: 'back' })">${escapeHtml(state.backLabel)}</button>
+          <button
+            class="button button--primary"
+            ${primaryType === "finish" && !state.canFinish ? "disabled" : ""}
+            onclick="post({ type: '${primaryType}' })"
+          >${escapeHtml(state.primaryActionTitle)}</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function toggleLaunchAtLogin() {
-  if (!state.launchAtLoginSupported) {
+  if (state.rightPane.launchAtLoginSupportedLabel) {
     return;
   }
-  const nextValue = !state.launchAtLogin;
-  post({ type: 'setLaunchAtLogin', enabled: nextValue });
+  post({ type: "setLaunchAtLogin", enabled: !state.launchAtLogin });
 }
 
 function notifyResize() {
   const height = document.documentElement.scrollHeight;
-  post({ type: 'resize', height });
+  post({ type: "resize", height });
+}
+
+function escapeHtml(text) {
+  return String(text ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 window.updateOnboardingState = function updateOnboardingState(stateJSON) {
   state = JSON.parse(stateJSON);
-  document.getElementById('app').innerHTML = state.step === 'setup' ? renderSetup() : renderWelcome();
+  document.documentElement.lang = state.languageCode || "en";
+  document.getElementById("app").innerHTML = renderCard();
   requestAnimationFrame(notifyResize);
 };
 
-window.addEventListener('load', notifyResize);
+window.addEventListener("load", notifyResize);

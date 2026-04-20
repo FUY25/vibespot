@@ -3,7 +3,6 @@ import AppKit
 enum VibeSpotBranding {
     static let productName = "VibeSpot"
     static let legacyProductName = "Flare"
-    static let welcomeTitle = "Welcome to VibeSpot"
 
     static func quitMenuTitle() -> String {
         "Quit \(productName)"

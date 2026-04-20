@@ -3,19 +3,20 @@ import WebKit
 
 @MainActor
 final class OnboardingWindowController: NSWindowController, WKNavigationDelegate, OnboardingBridgeDelegate {
-    enum Step {
-        case welcome
-        case setup
-    }
-
     private let settingsStore: SettingsStore
     private let launchAtLoginSupported: Bool
     private let environmentCheckService: EnvironmentCheckService
+    private let terminalAutomationChecker: any TerminalAutomationChecking
     private let onFinish: @MainActor @Sendable () -> Void
+
     private var settings: AppSettings
     private var environmentResult: EnvironmentCheckResult?
+    private var terminalAutomationResult = TerminalAutomationCheckResult(status: .unknown)
     private var environmentCheckTask: Task<Void, Never>?
-    private(set) var step: Step = .welcome
+    private var terminalCheckTask: Task<Void, Never>?
+
+    private let language: OnboardingLanguage
+    private(set) var currentCard: OnboardingCard = .quickActivation
 
     private let webView: WKWebView
     private let bridge = OnboardingBridge()
@@ -26,13 +27,17 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         settingsStore: SettingsStore,
         launchAtLoginSupported: Bool = LaunchAtLoginManager().isSupportedRuntime,
         environmentCheckService: EnvironmentCheckService = EnvironmentCheckService(),
+        terminalAutomationChecker: any TerminalAutomationChecking = TerminalAutomationCheckService(),
+        preferredLanguageCodeProvider: @escaping @Sendable () -> String? = { Locale.preferredLanguages.first },
         onFinish: @escaping @MainActor @Sendable () -> Void
     ) {
         self.settingsStore = settingsStore
         self.launchAtLoginSupported = launchAtLoginSupported
         self.environmentCheckService = environmentCheckService
+        self.terminalAutomationChecker = terminalAutomationChecker
         self.onFinish = onFinish
         self.settings = settingsStore.load()
+        self.language = OnboardingLanguage(preferredLanguageCode: preferredLanguageCodeProvider())
 
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
@@ -40,12 +45,12 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         self.webView = WKWebView(frame: .zero, configuration: config)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = VibeSpotBranding.welcomeTitle
+        window.title = language.windowTitle
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         if #available(macOS 13.0, *) {
@@ -68,6 +73,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
 
     deinit {
         environmentCheckTask?.cancel()
+        terminalCheckTask?.cancel()
     }
 
     func showOnboarding() {
@@ -75,6 +81,10 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func makeViewStateForTesting() -> OnboardingViewState {
+        makeViewState()
     }
 
     private func configureWindow() {
@@ -124,51 +134,207 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
     }
 
     private func makeStateJSON() -> String {
-        var payload: [String: Any] = [
-            "step": step == .welcome ? "welcome" : "setup",
-            "launchAtLogin": settings.launchAtLogin,
-            "launchAtLoginSupported": launchAtLoginSupported,
-            "hotkey": settings.hotkeyBinding.displayString,
-        ]
-
-        switch step {
-        case .welcome:
-            payload["headline"] = "Spotlight for Claude Code and Codex."
-            payload["body"] = "Jump back into live agent runs and past threads from one fast native search surface."
-            payload["detail"] = "Everything stays local. VibeSpot reads the session data already on your machine and helps you switch context before you lose it."
-        case .setup:
-            payload["body"] = "VibeSpot is ready once it can either search local session history or help you start a first session."
-            payload["checksRunning"] = environmentCheckTask != nil && environmentResult == nil
-            if let environmentResult {
-                payload["headline"] = environmentResult.readinessHeadline
-                payload["detail"] = environmentResult.readinessDetail
-                payload["codexFound"] = environmentResult.codex.isAvailable
-                payload["claudeFound"] = environmentResult.claude.isAvailable
-                payload["codexHistoryStatus"] = environmentResult.codexData.statusLabel
-                payload["claudeHistoryStatus"] = environmentResult.claudeData.statusLabel
-                payload["canFinish"] = environmentResult.canFinishOnboarding
-                payload["missingPaths"] = environmentResult.missingAccessiblePaths
-                payload["checkedPaths"] = environmentResult.checkedPaths
-            } else {
-                payload["headline"] = "Check your local environment"
-                payload["detail"] = "Run checks so VibeSpot can verify that you either have local session history or at least one supported CLI ready."
-                payload["codexFound"] = false
-                payload["claudeFound"] = false
-                payload["codexHistoryStatus"] = "Unknown"
-                payload["claudeHistoryStatus"] = "Unknown"
-                payload["canFinish"] = false
-                payload["missingPaths"] = []
-                payload["checkedPaths"] = []
-            }
-        }
-
-        guard
-            let data = try? JSONSerialization.data(withJSONObject: payload),
-            let json = String(data: data, encoding: .utf8)
-        else {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        guard let data = try? encoder.encode(makeViewState()),
+              let json = String(data: data, encoding: .utf8) else {
             return "{}"
         }
         return json
+    }
+
+    private func makeViewState() -> OnboardingViewState {
+        let cardIndex = OnboardingCard.allCases.firstIndex(of: currentCard) ?? 0
+        let defaultHotkey = HotkeyBinding.default.displayString
+        let hotkey = settings.hotkeyBinding.displayString
+        let accessStatuses = makeAccessStatuses()
+        let rightPane: OnboardingRightPaneState
+
+        switch currentCard {
+        case .quickActivation, .fastSwitch, .searchSessions, .startNewSession:
+            rightPane = OnboardingRightPaneState(
+                kind: "demo",
+                chromeLabel: language.cardChromeLabel(for: currentCard),
+                placeholderLabel: language.gifPlaceholderLabel,
+                placeholderPrompt: language.demoPlaceholderPrompt,
+                shortcutActions: nil,
+                accessStatuses: nil,
+                accessActionTitle: nil,
+                terminalStatus: nil,
+                terminalActionTitle: nil,
+                launchAtLoginLabel: nil,
+                launchAtLoginSupportedLabel: nil
+            )
+        case .shortcutSetup:
+            rightPane = OnboardingRightPaneState(
+                kind: "shortcut",
+                chromeLabel: language.cardChromeLabel(for: currentCard),
+                placeholderLabel: nil,
+                placeholderPrompt: nil,
+                shortcutActions: [language.changeShortcutLabel, language.resetShortcutLabel],
+                accessStatuses: nil,
+                accessActionTitle: nil,
+                terminalStatus: nil,
+                terminalActionTitle: nil,
+                launchAtLoginLabel: nil,
+                launchAtLoginSupportedLabel: nil
+            )
+        case .checkAccess:
+            rightPane = OnboardingRightPaneState(
+                kind: "access",
+                chromeLabel: language.cardChromeLabel(for: currentCard),
+                placeholderLabel: nil,
+                placeholderPrompt: nil,
+                shortcutActions: nil,
+                accessStatuses: accessStatuses,
+                accessActionTitle: environmentCheckTask == nil ? language.runChecksLabel : language.checkingLabel,
+                terminalStatus: nil,
+                terminalActionTitle: nil,
+                launchAtLoginLabel: nil,
+                launchAtLoginSupportedLabel: nil
+            )
+        case .allowTerminalControl:
+            rightPane = OnboardingRightPaneState(
+                kind: "terminal",
+                chromeLabel: language.cardChromeLabel(for: currentCard),
+                placeholderLabel: nil,
+                placeholderPrompt: nil,
+                shortcutActions: nil,
+                accessStatuses: nil,
+                accessActionTitle: nil,
+                terminalStatus: makeTerminalStatusPill(),
+                terminalActionTitle: terminalAutomationResult.status == .ready ? language.checkAgainLabel : language.allowTerminalLabel,
+                launchAtLoginLabel: nil,
+                launchAtLoginSupportedLabel: nil
+            )
+        case .quickSetup:
+            rightPane = OnboardingRightPaneState(
+                kind: "quickSetup",
+                chromeLabel: language.cardChromeLabel(for: currentCard),
+                placeholderLabel: nil,
+                placeholderPrompt: nil,
+                shortcutActions: nil,
+                accessStatuses: nil,
+                accessActionTitle: nil,
+                terminalStatus: nil,
+                terminalActionTitle: nil,
+                launchAtLoginLabel: language.openAtLoginLabel,
+                launchAtLoginSupportedLabel: launchAtLoginSupported ? nil : language.unsupportedLaunchAtLoginLabel
+            )
+        }
+
+        return OnboardingViewState(
+            languageCode: language.code,
+            cardID: currentCard.rawValue,
+            cardIndex: cardIndex,
+            cardCount: OnboardingCard.allCases.count,
+            progressLabel: "\(cardIndex + 1) / \(OnboardingCard.allCases.count)",
+            sentence: language.sentence(for: currentCard, defaultHotkey: defaultHotkey),
+            hotkey: hotkey,
+            defaultHotkey: defaultHotkey,
+            canGoBack: cardIndex > 0,
+            canFinish: currentCard == .quickSetup && (environmentResult?.canFinishOnboarding ?? false),
+            quitLabel: language.quitLabel,
+            backLabel: language.backLabel,
+            primaryActionTitle: currentCard == .quickSetup ? language.finishLabel : language.nextLabel,
+            rightPane: rightPane,
+            launchAtLogin: settings.launchAtLogin
+        )
+    }
+
+    private func makeAccessStatuses() -> [OnboardingStatusPillState] {
+        guard let environmentResult else {
+            return [
+                OnboardingStatusPillState(label: toolHistoryLabel("Codex"), value: localizedUnknownStatus(), tone: "neutral"),
+                OnboardingStatusPillState(label: toolHistoryLabel("Claude"), value: localizedUnknownStatus(), tone: "neutral"),
+            ]
+        }
+
+        return [
+            makeAccessStatus(label: toolHistoryLabel("Codex"), state: environmentResult.codexData),
+            makeAccessStatus(label: toolHistoryLabel("Claude"), state: environmentResult.claudeData),
+        ]
+    }
+
+    private func toolHistoryLabel(_ tool: String) -> String {
+        switch language {
+        case .english:
+            return "\(tool) history"
+        case .chinese:
+            return "\(tool) 历史记录"
+        }
+    }
+
+    private func localizedUnknownStatus() -> String {
+        switch language {
+        case .english:
+            return "Not checked"
+        case .chinese:
+            return "未检查"
+        }
+    }
+
+    private func makeAccessStatus(label: String, state: EnvironmentCheckResult.SessionDataState) -> OnboardingStatusPillState {
+        let value: String
+        let tone: String
+        if state.hasSessionData {
+            value = language == .english ? "Ready" : "已就绪"
+            tone = "ready"
+        } else if state.exists == false {
+            value = language == .english ? "Missing" : "未找到"
+            tone = "warn"
+        } else if state.isReadable == false {
+            value = language == .english ? "Unreadable" : "不可读取"
+            tone = "warn"
+        } else {
+            value = language == .english ? "Empty" : "为空"
+            tone = "neutral"
+        }
+
+        return OnboardingStatusPillState(label: label, value: value, tone: tone)
+    }
+
+    private func makeTerminalStatusPill() -> OnboardingStatusPillState {
+        let tone: String
+        switch terminalAutomationResult.status {
+        case .ready:
+            tone = "ready"
+        case .unknown:
+            tone = "neutral"
+        case .needsAccess, .unavailable:
+            tone = "warn"
+        }
+
+        return OnboardingStatusPillState(
+            label: language == .english ? "Terminal" : "Terminal",
+            value: language.terminalStatusText(for: terminalAutomationResult.status),
+            tone: tone
+        )
+    }
+
+    private func advanceCard() {
+        guard let index = OnboardingCard.allCases.firstIndex(of: currentCard),
+              index < OnboardingCard.allCases.count - 1 else {
+            return
+        }
+        currentCard = OnboardingCard.allCases[index + 1]
+        enterCardIfNeeded()
+        updateWebState()
+    }
+
+    private func goBackCard() {
+        guard let index = OnboardingCard.allCases.firstIndex(of: currentCard),
+              index > 0 else {
+            return
+        }
+        currentCard = OnboardingCard.allCases[index - 1]
+        updateWebState()
+    }
+
+    private func enterCardIfNeeded() {
+        if currentCard == .checkAccess, environmentResult == nil, environmentCheckTask == nil {
+            runEnvironmentChecks()
+        }
     }
 
     private func runEnvironmentChecks() {
@@ -188,8 +354,22 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         }
     }
 
+    private func runTerminalAutomationCheck() {
+        terminalCheckTask?.cancel()
+        let checker = terminalAutomationChecker
+        terminalCheckTask = Task.detached(priority: .utility) { [checker] in
+            let result = await checker.runCheck()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.terminalCheckTask = nil
+                self.terminalAutomationResult = result
+                self.updateWebState()
+            }
+        }
+    }
+
     private func finishOnboarding() {
-        if step == .setup, environmentResult?.canFinishOnboarding == false {
+        guard currentCard == .quickSetup, environmentResult?.canFinishOnboarding == true else {
             return
         }
         settings.onboardingCompleted = true
@@ -210,17 +390,12 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
 
     // MARK: - OnboardingBridgeDelegate
 
-    func onboardingBridgeDidRequestContinue(_ bridge: OnboardingBridge) {
-        step = .setup
-        updateWebState()
-        runEnvironmentChecks()
+    func onboardingBridgeDidRequestNext(_ bridge: OnboardingBridge) {
+        advanceCard()
     }
 
     func onboardingBridgeDidRequestBack(_ bridge: OnboardingBridge) {
-        environmentCheckTask?.cancel()
-        environmentCheckTask = nil
-        step = .welcome
-        updateWebState()
+        goBackCard()
     }
 
     func onboardingBridgeDidRequestQuit(_ bridge: OnboardingBridge) {
@@ -233,6 +408,10 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
 
     func onboardingBridgeDidRequestRunChecks(_ bridge: OnboardingBridge) {
         runEnvironmentChecks()
+    }
+
+    func onboardingBridgeDidRequestRunTerminalCheck(_ bridge: OnboardingBridge) {
+        runTerminalAutomationCheck()
     }
 
     func onboardingBridge(_ bridge: OnboardingBridge, didSetLaunchAtLogin enabled: Bool) {
@@ -258,7 +437,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         guard height > 0, let window else { return }
         var frame = window.frame
         let maxY = frame.maxY
-        let newHeight = max(560, min(height + 44, 700))
+        let newHeight = max(540, min(height + 44, 720))
         frame.size.height = newHeight
         frame.origin.y = maxY - newHeight
         window.setFrame(frame, display: true, animate: true)

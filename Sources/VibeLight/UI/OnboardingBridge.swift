@@ -3,11 +3,12 @@ import WebKit
 
 @MainActor
 protocol OnboardingBridgeDelegate: AnyObject {
-    func onboardingBridgeDidRequestContinue(_ bridge: OnboardingBridge)
+    func onboardingBridgeDidRequestNext(_ bridge: OnboardingBridge)
     func onboardingBridgeDidRequestBack(_ bridge: OnboardingBridge)
     func onboardingBridgeDidRequestQuit(_ bridge: OnboardingBridge)
     func onboardingBridgeDidRequestFinish(_ bridge: OnboardingBridge)
     func onboardingBridgeDidRequestRunChecks(_ bridge: OnboardingBridge)
+    func onboardingBridgeDidRequestRunTerminalCheck(_ bridge: OnboardingBridge)
     func onboardingBridge(_ bridge: OnboardingBridge, didSetLaunchAtLogin enabled: Bool)
     func onboardingBridgeDidRequestShortcutChange(_ bridge: OnboardingBridge)
     func onboardingBridgeDidRequestShortcutReset(_ bridge: OnboardingBridge)
@@ -17,11 +18,12 @@ protocol OnboardingBridgeDelegate: AnyObject {
 @MainActor
 final class OnboardingBridge: NSObject, WKScriptMessageHandler {
     enum Message: Equatable {
-        case `continue`
+        case next
         case back
         case quit
         case finish
         case runChecks
+        case runTerminalCheck
         case setLaunchAtLogin(Bool)
         case changeShortcut
         case resetShortcut
@@ -30,8 +32,10 @@ final class OnboardingBridge: NSObject, WKScriptMessageHandler {
         static func parse(_ body: [String: Any]) -> Message? {
             guard let type = body["type"] as? String else { return nil }
             switch type {
+            case "next":
+                return .next
             case "continue":
-                return .continue
+                return .next
             case "back":
                 return .back
             case "quit":
@@ -40,6 +44,8 @@ final class OnboardingBridge: NSObject, WKScriptMessageHandler {
                 return .finish
             case "runChecks":
                 return .runChecks
+            case "runTerminalCheck":
+                return .runTerminalCheck
             case "setLaunchAtLogin":
                 guard let enabled = body["enabled"] as? Bool else { return nil }
                 return .setLaunchAtLogin(enabled)
@@ -66,8 +72,8 @@ final class OnboardingBridge: NSObject, WKScriptMessageHandler {
             guard let self else { return }
             guard let body = message.body as? [String: Any], let parsed = Message.parse(body) else { return }
             switch parsed {
-            case .continue:
-                delegate?.onboardingBridgeDidRequestContinue(self)
+            case .next:
+                delegate?.onboardingBridgeDidRequestNext(self)
             case .back:
                 delegate?.onboardingBridgeDidRequestBack(self)
             case .quit:
@@ -76,6 +82,8 @@ final class OnboardingBridge: NSObject, WKScriptMessageHandler {
                 delegate?.onboardingBridgeDidRequestFinish(self)
             case .runChecks:
                 delegate?.onboardingBridgeDidRequestRunChecks(self)
+            case .runTerminalCheck:
+                delegate?.onboardingBridgeDidRequestRunTerminalCheck(self)
             case .setLaunchAtLogin(let enabled):
                 delegate?.onboardingBridge(self, didSetLaunchAtLogin: enabled)
             case .changeShortcut:
