@@ -19,6 +19,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
     var onSelect: ((SearchResult) -> Void)?
     var onLaunchAction: ((String, String) -> Void)?
+    var onSearchFailure: (@MainActor (String) -> Void)?
     var onHistoryModeChanged: (@MainActor (SearchHistoryMode) -> Void)?
     var onOpenPreferences: (@MainActor () -> Void)?
     var sessionIndex: SessionIndex?
@@ -43,6 +44,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var appearanceObservation: NSKeyValueObservation?
     private var lastPushedResultsSignature: String = ""
     private var lastSearchQuery: String?
+    private var lastSearchFailureMessage: String?
     private var isWebViewReady = false
     private var webViewReadyOverrideForTesting: Bool?
     private var pendingResetAndFocus = false
@@ -54,6 +56,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var pendingWarmupQuery = ""
     private var isWarmupFlushInFlight = false
     private var javaScriptEvaluatorOverride: JavaScriptEvaluator?
+    #if DEBUG
+    var searchExecutorOverrideForTesting: ((_ query: String, _ liveOnly: Bool) throws -> [SearchResult])?
+    #endif
 
     private static let panelWidth: CGFloat = 720
     private static let previewExtraWidth: CGFloat = 470
@@ -273,10 +278,17 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
 
         do {
+            #if DEBUG
+            let matches = try searchExecutorOverrideForTesting?(trimmed, liveOnlySearch) ?? sessionIndex.search(
+                query: trimmed,
+                liveOnly: liveOnlySearch
+            )
+            #else
             let matches = try sessionIndex.search(
                 query: trimmed,
                 liveOnly: liveOnlySearch
             )
+            #endif
             let command = Self.parseNewSessionCommand(from: trimmed)
             let nextResults: [SearchResult]
             if Self.looksLikeNewSessionIntent(trimmed) || command != nil {
@@ -285,6 +297,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             } else {
                 nextResults = matches
             }
+            lastSearchFailureMessage = nil
             updateVisibleRefreshTimer(query: trimmed, liveOnlySearch: liveOnlySearch, results: nextResults)
             pushResults(nextResults, query: trimmed)
         } catch {
@@ -292,6 +305,11 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             pushResults([], query: trimmed)
             RuntimeIssueStore.shared.record(component: "SearchPanel.Search", error: error)
             print("SearchPanelController search failed: \(error)")
+            let message = Self.makeIndexRecoveryMessage(error)
+            if lastSearchFailureMessage != message {
+                lastSearchFailureMessage = message
+                onSearchFailure?(message)
+            }
         }
     }
 
@@ -608,6 +626,14 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             return FileManager.default.homeDirectoryForCurrentUser.path
         }
         return trimmed
+    }
+
+    private static func makeIndexRecoveryMessage(_ error: Error) -> String {
+        let detail = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if detail.isEmpty {
+            return "VibeSpot could not read the local index. Open Preferences and click Reindex sessions to rebuild it."
+        }
+        return "VibeSpot could not read the local index. Open Preferences and click Reindex sessions to rebuild it. Details: \(detail)"
     }
 
     nonisolated static func mergePreviewState(

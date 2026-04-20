@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SessionSourceResolution,
         @escaping @MainActor (SessionIndex) -> Void
     ) async throws -> Void
+    typealias SessionIndexFactory = @MainActor () throws -> SessionIndex
+    typealias FailurePresenter = @MainActor (String, String) -> Void
 
     private struct RuntimeBehavior {
         let startsRuntimeServices: Bool
@@ -20,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsStore: SettingsStore
     private let launchAtLoginManager: any LaunchAtLoginManaging
     private let sourceSwitchHandler: SourceSwitchHandler
+    private let sessionIndexFactoryOverride: SessionIndexFactory?
+    private let failurePresenter: FailurePresenter
     private var settings: AppSettings
     private var statusItem: NSStatusItem?
     private var sessionIndex: SessionIndex?
@@ -41,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsStore = SettingsStore()
         self.launchAtLoginManager = LaunchAtLoginManager()
         self.sourceSwitchHandler = Self.defaultSourceSwitchHandler
+        self.sessionIndexFactoryOverride = nil
+        self.failurePresenter = Self.defaultFailurePresenter
         self.settings = settingsStore.load()
         self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
@@ -50,12 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startsRuntimeServices: Bool,
         settingsStore: SettingsStore = SettingsStore(),
         launchAtLoginManager: any LaunchAtLoginManaging = LaunchAtLoginManager(),
-        sourceSwitchHandler: @escaping SourceSwitchHandler = AppDelegate.defaultSourceSwitchHandler
+        sourceSwitchHandler: @escaping SourceSwitchHandler = AppDelegate.defaultSourceSwitchHandler,
+        sessionIndexFactory: SessionIndexFactory? = nil,
+        failurePresenter: @escaping FailurePresenter = AppDelegate.defaultFailurePresenter
     ) {
         self.runtimeBehavior = RuntimeBehavior(startsRuntimeServices: startsRuntimeServices)
         self.settingsStore = settingsStore
         self.launchAtLoginManager = launchAtLoginManager
         self.sourceSwitchHandler = sourceSwitchHandler
+        self.sessionIndexFactoryOverride = sessionIndexFactory
+        self.failurePresenter = failurePresenter
         self.settings = settingsStore.load()
         self.sessionSourceResolution = SessionSourceLocator().resolve(for: self.settings)
         super.init()
@@ -493,6 +503,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panelController.onLaunchAction = { [weak self] command, directory in
                 self?.launchSessionAction(command: command, directory: directory)
             }
+            panelController.onSearchFailure = { [weak self] message in
+                self?.presentFailure(title: "Index Unavailable", message: message)
+            }
             panelController.onHistoryModeChanged = { [weak self] historyMode in
                 guard let self else { return }
                 self.applyHistoryMode(historyMode)
@@ -523,6 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             RuntimeIssueStore.shared.record(component: "RuntimeServices", error: error)
             print("AppDelegate failed to initialize runtime services: \(error)")
+            presentFailure(title: "Index Unavailable", message: makeIndexRecoveryMessage(error))
             refreshStatusItemTitle()
         }
     }
@@ -630,6 +644,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeSessionIndex() throws -> SessionIndex {
+        if let sessionIndexFactoryOverride {
+            return try sessionIndexFactoryOverride()
+        }
         let dbURL = try Self.makeSessionIndexWorkspace()
             .activeDatabaseURL(for: sessionSourceResolution.effectiveFingerprint)
         return try SessionIndex(dbPath: dbURL.path)
@@ -669,13 +686,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentActionFailure(_ message: String) {
+        presentFailure(title: "Action Failed", message: message)
+    }
+
+    private func presentFailure(title: String, message: String) {
+        failurePresenter(title, message)
+    }
+
+    private static func defaultFailurePresenter(title: String, message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Action Failed"
+        alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+
+    private func makeIndexRecoveryMessage(_ error: Error) -> String {
+        let detail = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if detail.isEmpty {
+            return "VibeSpot could not open the local index. Open Preferences and click Reindex sessions to rebuild it."
+        }
+        return "VibeSpot could not open the local index. Open Preferences and click Reindex sessions to rebuild it. Details: \(detail)"
     }
 
     private func makeUserVisibleErrorMessage(action: String, error: Error) -> String {

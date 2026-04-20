@@ -178,7 +178,10 @@
   - new session launch failure
   - resume historical session failure
   - jump back to live session failure
-- [ ] 仍待补齐索引不可用 / 索引损坏的用户可见恢复提示
+- [x] 索引不可用 / 索引损坏现在会显示恢复提示
+  - app 启动时本地索引打不开
+  - 搜索过程中索引读取失败
+  - 都会明确引导到 `Preferences > Reindex sessions`
 
 **验收标准**
 - 用户出错时至少能看到“发生了什么、怎么办、如何反馈”

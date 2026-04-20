@@ -89,6 +89,34 @@ struct SearchPanelControllerRefreshTests {
         #expect(refreshed.first?.snippet == nil)
     }
 
+    @MainActor
+    @Test("search failures surface recovery guidance")
+    func searchFailuresSurfaceRecoveryGuidance() throws {
+        struct SearchFailure: LocalizedError {
+            var errorDescription: String? { "database disk image is malformed" }
+        }
+
+        let controller = SearchPanelController()
+        let dbPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-failure-\(UUID().uuidString).sqlite3")
+            .path
+        controller.sessionIndex = try SessionIndex(dbPath: dbPath)
+        controller.searchExecutorOverrideForTesting = { _, _ in
+            throw SearchFailure()
+        }
+
+        var receivedMessage: String?
+        controller.onSearchFailure = { message in
+            receivedMessage = message
+        }
+
+        let bridge = WebBridge()
+        controller.webBridge(bridge, didReceiveSearch: "broken index")
+
+        #expect(receivedMessage?.localizedCaseInsensitiveContains("reindex sessions") == true)
+        #expect(receivedMessage?.localizedCaseInsensitiveContains("malformed") == true)
+    }
+
     private func makeResult(
         sessionId: String,
         status: String,

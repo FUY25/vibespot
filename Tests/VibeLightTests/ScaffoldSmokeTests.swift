@@ -177,6 +177,42 @@ func appShowsOnboardingWhenNotCompleted() {
 
 @MainActor
 @Test
+func appDelegatePresentsRecoveryGuidanceWhenIndexStartupFails() {
+    struct IndexFailure: LocalizedError {
+        var errorDescription: String? { "database disk image is malformed" }
+    }
+
+    var presentedTitle: String?
+    var presentedMessage: String?
+    let suite = UserDefaults(suiteName: "AppDelegate.indexStartupFailure.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var settings = store.load()
+    settings.onboardingCompleted = true
+    store.save(settings)
+    let delegate = AppDelegate(
+        startsRuntimeServices: true,
+        settingsStore: store,
+        sessionIndexFactory: {
+            throw IndexFailure()
+        },
+        failurePresenter: { title, message in
+            presentedTitle = title
+            presentedMessage = message
+        }
+    )
+    defer {
+        delegate.removeStatusItem()
+    }
+
+    delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+    #expect(presentedTitle == "Index Unavailable")
+    #expect(presentedMessage?.localizedCaseInsensitiveContains("reindex sessions") == true)
+    #expect(presentedMessage?.localizedCaseInsensitiveContains("malformed") == true)
+}
+
+@MainActor
+@Test
 func restoresSharedApplicationStateAfterConfigurationCheck() {
     let app = NSApplication.shared
     let originalActivationPolicy = app.activationPolicy()
