@@ -70,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.image
     }
 
+    var statusItemToolTipForTesting: String? {
+        statusItem?.button?.toolTip
+    }
+
     var isOnboardingVisible: Bool {
         onboardingWindowController?.window?.isVisible == true
     }
@@ -83,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.applicationIconImage = VibeSpotBranding.makeApplicationIcon()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
             button.image = MenuBarLogo.makeImage()
@@ -183,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(darkItem)
         menu.addItem(autoItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Flare", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: VibeSpotBranding.quitMenuTitle(), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         return menu
     }
 
@@ -537,7 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makeStatusItemToolTip(count: Int) -> String {
-        "Flare • \(count) live session\(count == 1 ? "" : "s")"
+        VibeSpotBranding.liveSessionsToolTip(count: count)
     }
 
     static func routeSelection(

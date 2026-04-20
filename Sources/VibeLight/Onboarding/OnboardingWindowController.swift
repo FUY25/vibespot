@@ -45,7 +45,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Flare"
+        window.title = VibeSpotBranding.welcomeTitle
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         if #available(macOS 13.0, *) {
@@ -135,10 +135,10 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         case .welcome:
             payload["headline"] = "Spotlight for Claude Code and Codex."
             payload["body"] = "Jump back into live agent runs and past threads from one fast native search surface."
-            payload["detail"] = "Everything stays local. Flare reads the session data already on your machine and helps you switch context before you lose it."
+            payload["detail"] = "Everything stays local. VibeSpot reads the session data already on your machine and helps you switch context before you lose it."
         case .setup:
             payload["headline"] = "Finish setup"
-            payload["body"] = "Check your local environment, keep the default shortcut or change it, and choose whether Flare should start with your Mac."
+            payload["body"] = "Check your local environment, keep the default shortcut or change it, and choose whether VibeSpot should start with your Mac."
             payload["detail"] = "Warnings do not block setup. You can rerun checks and change the shortcut later from Settings."
             payload["checksRunning"] = environmentCheckTask != nil && environmentResult == nil
             if let environmentResult {

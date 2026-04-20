@@ -174,7 +174,7 @@ final class PreferencesWindowController: NSWindowController {
                 makeToggleRow(
                     title: "Launch at login",
                     subtitle: launchAtLoginSupported
-                        ? "Open Flare automatically when you sign in."
+                        ? "Open VibeSpot automatically when you sign in."
                         : "Available in packaged app builds. It is disabled while running from source.",
                     toggle: launchAtLoginToggle
                 ),
@@ -362,7 +362,7 @@ final class PreferencesWindowController: NSWindowController {
         configurePopup(themePopup, items: ["System", "Light", "Dark"])
         return makeTrailingControlRow(
             title: "Appearance",
-            subtitle: "Match the system or pin Flare to a single appearance.",
+            subtitle: "Match the system or pin VibeSpot to a single appearance.",
             control: themePopup
         )
     }
@@ -382,7 +382,7 @@ final class PreferencesWindowController: NSWindowController {
 
         return makeTrailingControlRow(
             title: "Shortcut",
-            subtitle: "Choose the global shortcut that opens Flare anywhere.",
+            subtitle: "Choose the global shortcut that opens VibeSpot anywhere.",
             control: trailing
         )
     }

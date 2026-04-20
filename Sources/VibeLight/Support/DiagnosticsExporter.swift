@@ -19,12 +19,12 @@ struct DiagnosticsExporter {
     }
 
     func export(settings: AppSettings, to rootDirectory: URL = FileManager.default.temporaryDirectory) throws -> URL {
-        let exportDirectory = rootDirectory.appendingPathComponent("flare-diagnostics-\(Self.timestampString())", isDirectory: true)
+        let exportDirectory = rootDirectory.appendingPathComponent("vibespot-diagnostics-\(Self.timestampString())", isDirectory: true)
         try fileManager.createDirectory(at: exportDirectory, withIntermediateDirectories: true, attributes: nil)
 
         let manifest = DiagnosticsExportManifest(
             generatedAt: Date(),
-            applicationName: Self.infoValue("CFBundleDisplayName", default: "Flare"),
+            applicationName: Self.infoValue("CFBundleDisplayName", default: VibeSpotBranding.productName),
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
             version: Self.infoValue("CFBundleShortVersionString", default: "unknown"),
             build: Self.infoValue("CFBundleVersion", default: "unknown"),

@@ -76,6 +76,16 @@ func appContextMenuContainsPreferencesAction() {
 
 @MainActor
 @Test
+func appContextMenuUsesVibeSpotQuitBranding() {
+    let delegate = AppDelegate(startsRuntimeServices: false)
+    let menu = delegate.makeContextMenuForTesting()
+
+    #expect(menu.items.contains { $0.title == "Quit VibeSpot" })
+    #expect(menu.items.contains { $0.title == "Quit Flare" } == false)
+}
+
+@MainActor
+@Test
 func appDelegateOpensPreferencesWindow() {
     let delegate = AppDelegate(startsRuntimeServices: false)
 

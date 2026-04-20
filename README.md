@@ -1,8 +1,8 @@
-# Flare
+# VibeSpot
 
-Flare is Spotlight for Claude Code and Codex: a native search app that helps you find and jump between live and historical AI sessions in seconds.
+VibeSpot is Spotlight for Claude Code and Codex: a native search app that helps you find and jump between live and historical AI sessions in seconds.
 
-Flare watches the session data already on your machine and turns it into a native Spotlight-like switcher for active runs, recent context, unfinished work, and older threads. Resuming history is supported, but the core job is faster search and faster switching across live sessions. It is macOS-first, local by default, and built for people who live inside terminal-based AI tools.
+VibeSpot watches the session data already on your machine and turns it into a native Spotlight-like switcher for active runs, recent context, unfinished work, and older threads. Resuming history is supported, but the core job is faster search and faster switching across live sessions. It is macOS-first, local by default, and built for people who live inside terminal-based AI tools.
 
 ## What It Does
 
@@ -22,13 +22,7 @@ cd vibelight
 ./scripts/dev-run.sh
 ```
 
-Direct equivalent:
-
-```bash
-swift run -c debug Flare
-```
-
-If you publish a release build later, the public install flow should stay just as short: download `Flare.app`, move it to `/Applications`, launch it once, then finish onboarding.
+If you publish a release build later, the public install flow should stay just as short: download `VibeSpot.app`, move it to `/Applications`, launch it once, then finish onboarding.
 
 ## Requirements
 

@@ -1,4 +1,4 @@
-# Flare Beta Release Checklist
+# VibeSpot Beta Release Checklist
 
 - [ ] All targeted tests pass.
 - [ ] `README.md` matches the shipped product behavior and install path.

@@ -22,7 +22,7 @@ function renderWelcome() {
       <section class="hero">
         <div>
           <div class="hero__meta">
-            <span class="badge badge--soft">Flare</span>
+            <span class="badge badge--soft">VibeSpot</span>
             <span class="badge">Native search app</span>
           </div>
           <h1>${escapeHtml(state.headline || '')}</h1>
@@ -147,7 +147,7 @@ function renderSetup() {
             <div class="settings-row">
               <div class="settings-row__text">
                 <h3>Launch at login</h3>
-                <p>${state.launchAtLoginSupported ? 'Open Flare automatically when you sign in.' : 'This only works from a packaged app build, not while running from source.'}</p>
+                <p>${state.launchAtLoginSupported ? 'Open VibeSpot automatically when you sign in.' : 'This only works from a packaged app build, not while running from source.'}</p>
               </div>
               <div
                 class="toggle ${state.launchAtLogin ? 'is-on' : ''} ${state.launchAtLoginSupported ? '' : 'is-disabled'}"

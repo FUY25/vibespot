@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VibeSpot Brand Exploration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #08100f;
+      --bg-elevated: rgba(14, 24, 23, 0.9);
+      --surface: rgba(18, 29, 28, 0.88);
+      --surface-strong: rgba(26, 38, 37, 0.96);
+      --line: rgba(188, 208, 204, 0.16);
+      --line-ghost: rgba(188, 208, 204, 0.08);
+      --text: #e8f0ef;
+      --text-secondary: rgba(232, 240, 239, 0.7);
+      --text-tertiary: rgba(232, 240, 239, 0.48);
+      --accent: #b9ffde;
+      --accent-dim: #7cd8b8;
+      --icon: #e2e8f0;
+      --icon-soft: rgba(226, 232, 240, 0.84);
+      --icon-dim: rgba(226, 232, 240, 0.72);
+      --hole-a1: #1b3534;
+      --hole-a2: #173130;
+      --hole-a3: #12201f;
+      --hole-mini: #14201f;
+      --shadow: 0 28px 70px rgba(0, 0, 0, 0.45);
+      --radius-xl: 26px;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(130, 170, 255, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(185, 255, 222, 0.12), transparent 26%),
+        linear-gradient(180deg, #0b1312 0%, var(--bg) 58%, #060909 100%);
+      color: var(--text);
+      font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .shell {
+      width: min(1320px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.86fr);
+      gap: 28px;
+      align-items: stretch;
+      margin-bottom: 28px;
+    }
+
+    .hero-card,
+    .summary-card,
+    .variant {
+      background: linear-gradient(180deg, rgba(24, 36, 35, 0.82), rgba(12, 20, 19, 0.92));
+      border: 1px solid var(--line-ghost);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .hero-card {
+      padding: 30px 32px 32px;
+      position: relative;
+    }
+
+    .summary-card {
+      padding: 30px 28px 28px;
+    }
+
+    .eyebrow,
+    .chip,
+    .variant-tag {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(38px, 5vw, 62px);
+      line-height: 0.94;
+      letter-spacing: -0.05em;
+    }
+
+    .hero-copy {
+      margin: 16px 0 22px;
+      max-width: 56ch;
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .hero-note {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(185, 255, 222, 0.08);
+      border: 1px solid rgba(185, 255, 222, 0.12);
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .hero-logo {
+      margin-top: 28px;
+      width: min(100%, 620px);
+      padding: 22px 24px;
+      border-radius: 20px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+        rgba(7, 12, 12, 0.72);
+      border: 1px solid var(--line-ghost);
+    }
+
+    .summary-card h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .summary-card p {
+      margin: 0 0 16px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+
+    .summary-block {
+      padding-top: 16px;
+      margin-top: 16px;
+      border-top: 1px solid var(--line-ghost);
+    }
+
+    .summary-label {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      margin-bottom: 10px;
+    }
+
+    .summary-value {
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .variants {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 24px;
+    }
+
+    .variant {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    .variant-top {
+      padding: 22px 22px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--line-ghost);
+    }
+
+    .variant-tag {
+      color: var(--accent-dim);
+    }
+
+    .chip {
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(185, 255, 222, 0.06);
+      color: var(--text-secondary);
+      border: 1px solid rgba(185, 255, 222, 0.1);
+      letter-spacing: 0.08em;
+    }
+
+    .variant-body {
+      padding: 22px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .brand-headline {
+      margin: 0 0 4px;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-subtitle {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .panel {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line-ghost);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
+        rgba(6, 10, 10, 0.7);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-ghost);
+      color: var(--text-tertiary);
+      font-size: 12px;
+    }
+
+    .panel-stage {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      padding: 26px;
+      position: relative;
+    }
+
+    .icon-card-svg {
+      display: block;
+      margin: 0 auto;
+      filter: drop-shadow(0 22px 38px rgba(0, 0, 0, 0.36));
+    }
+
+    .icon-card-svg.a1 {
+      width: 210px;
+    }
+
+    .icon-card-svg.a2 {
+      width: 196px;
+    }
+
+    .icon-card-svg.a3 {
+      width: 182px;
+    }
+
+    .menu-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
+        rgba(10, 16, 16, 0.76);
+      border: 1px solid var(--line-ghost);
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .menu-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .menu-left span:last-child {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .scale-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .scale-box {
+      border-radius: 12px;
+      border: 1px solid var(--line-ghost);
+      background: rgba(255, 255, 255, 0.02);
+      padding: 10px;
+      display: grid;
+      place-items: center;
+      gap: 8px;
+      min-height: 94px;
+    }
+
+    .scale-label {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    .variant-footer {
+      padding: 0 22px 22px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .variant-footer strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .menu-svg {
+      width: 20px;
+      flex: 0 0 auto;
+    }
+
+    .mini-svg {
+      width: 14px;
+    }
+
+    .scale-mark-lg { width: 18px; }
+    .scale-mark-xl { width: 22px; }
+
+    .caption {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      margin-top: 10px;
+    }
+
+    @media (max-width: 1120px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .variants {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-card">
+        <div class="eyebrow">Brand Exploration</div>
+        <h1>VibeSpot</h1>
+        <p class="hero-copy">
+          Three dark-mode brand studies based on the same fixed master artwork. This round no longer repositions the symbol; it only compares scale, containment, and small-size readability.
+        </p>
+        <div class="hero-note">
+          <span>Current exploration goal</span>
+          <strong>Main logo + app icon + menu bar mark</strong>
+        </div>
+        <div class="hero-logo">
+          <svg viewBox="0 0 352 244" aria-label="VibeSpot master symbol">
+            <path d="M8 8L122 122L8 236" stroke="#E2E8F0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M224.25 167.6C249.434 167.6 269.85 147.184 269.85 122C269.85 96.8158 249.434 76.4 224.25 76.4C199.066 76.4 178.65 96.8158 178.65 122C178.65 147.184 199.066 167.6 224.25 167.6Z" stroke="#E2E8F0" stroke-width="16"/>
+            <path opacity="0.8" d="M340.25 133.4C346.546 133.4 351.65 128.296 351.65 122C351.65 115.704 346.546 110.6 340.25 110.6C333.954 110.6 328.85 115.704 328.85 122C328.85 128.296 333.954 133.4 340.25 133.4Z" fill="#E2E8F0"/>
+          </svg>
+        </div>
+      </div>
+
+      <aside class="summary-card">
+        <h2>Shared constraints</h2>
+        <p>These concepts now keep the submitted symbol geometry fixed. The only thing changing across the studies is overall proportion, containment, and how the same mark behaves at tiny sizes.</p>
+
+        <div class="summary-block">
+          <div class="summary-label">Name lock</div>
+          <div class="summary-value">VibeSpot</div>
+        </div>
+
+        <div class="summary-block">
+          <div class="summary-label">Direction lock</div>
+          <div class="summary-value">Dark app icon base, pale signal mark, macOS-native menu bar companion</div>
+        </div>
+
+        <div class="summary-block">
+          <div class="summary-label">What to choose</div>
+          <div class="summary-value">Pick the direction whose app icon feels strongest and whose menu bar mark still reads clearly at tiny sizes.</div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="variants">
+      <article class="variant">
+        <div class="variant-top">
+          <div class="variant-tag">A1</div>
+          <div class="chip">Most faithful</div>
+        </div>
+        <div class="variant-body">
+          <div>
+            <h2 class="brand-headline">Original mark, production-cleaned</h2>
+            <p class="brand-subtitle">Closest to your uploaded SVG. Best if you want the brand to feel authored and slightly raw.</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span>App icon</span>
+              <span>Dark rounded square</span>
+            </div>
+            <div class="panel-stage">
+              <svg class="icon-card-svg a1" viewBox="0 0 512 512" aria-label="A1 app icon">
+                <path d="M397 0H115C51.4873 0 0 51.4873 0 115V397C0 460.513 51.4873 512 115 512H397C460.513 512 512 460.513 512 397V115C512 51.4873 460.513 0 397 0Z" fill="#0A0B10"/>
+                <path d="M85 151L199 265L85 379" stroke="#E2E8F0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="#E2E8F0" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="#E2E8F0"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="menu-bar">
+            <div class="menu-left">
+              <svg class="menu-svg" viewBox="68 142 370 246" aria-label="A1 menu bar mark">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon)"/>
+              </svg>
+              <span>VibeSpot in the menu bar</span>
+            </div>
+            <span>18px target</span>
+          </div>
+
+          <div class="scale-row">
+            <div class="scale-box">
+              <svg class="mini-svg" viewBox="68 142 370 246" aria-label="A1 14px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">14 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="menu-svg" viewBox="68 142 370 246" aria-label="A1 18px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">18 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="scale-mark-xl" viewBox="68 142 370 246" aria-label="A1 24px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">24 px</div>
+            </div>
+          </div>
+        </div>
+        <div class="variant-footer">
+          <strong>When to pick it:</strong> you want the strongest continuity with the submitted logo and are comfortable with a slightly more illustrative feel.
+        </div>
+      </article>
+
+      <article class="variant">
+        <div class="variant-top">
+          <div class="variant-tag">A2</div>
+          <div class="chip">Recommended</div>
+        </div>
+        <div class="variant-body">
+          <div>
+            <h2 class="brand-headline">Same geometry, tighter product feel</h2>
+            <p class="brand-subtitle">Keeps the symbol intact, but tunes balance for icon use and small-size menu bar readability.</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span>App icon</span>
+              <span>Balanced center mass</span>
+            </div>
+            <div class="panel-stage">
+              <svg class="icon-card-svg a2" viewBox="0 0 512 512" aria-label="A2 app icon">
+                <path d="M397 0H115C51.4873 0 0 51.4873 0 115V397C0 460.513 51.4873 512 115 512H397C460.513 512 512 460.513 512 397V115C512 51.4873 460.513 0 397 0Z" fill="#0A0B10"/>
+                <path d="M85 151L199 265L85 379" stroke="#E2E8F0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="#E2E8F0" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="#E2E8F0"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="menu-bar">
+            <div class="menu-left">
+              <svg class="menu-svg" viewBox="68 142 370 246" aria-label="A2 menu bar mark">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon)"/>
+              </svg>
+              <span>VibeSpot in the menu bar</span>
+            </div>
+            <span>18px target</span>
+          </div>
+
+          <div class="scale-row">
+            <div class="scale-box">
+              <svg class="mini-svg" viewBox="68 142 370 246" aria-label="A2 14px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">14 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="scale-mark-lg" viewBox="68 142 370 246" aria-label="A2 18px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">18 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="scale-mark-xl" viewBox="68 142 370 246" aria-label="A2 24px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">24 px</div>
+            </div>
+          </div>
+        </div>
+        <div class="variant-footer">
+          <strong>When to pick it:</strong> you want the submitted symbol to survive shipping with the least compromise, but still feel intentional in Dock, Finder, and the menu bar.
+        </div>
+      </article>
+
+      <article class="variant">
+        <div class="variant-top">
+          <div class="variant-tag">A3</div>
+          <div class="chip">Most refined</div>
+        </div>
+        <div class="variant-body">
+          <div>
+            <h2 class="brand-headline">Sharper icon posture, quieter menu bar</h2>
+            <p class="brand-subtitle">Still derived from the same mark, but pushed toward a calmer, more finished system-product tone.</p>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span>App icon</span>
+              <span>Most polished silhouette</span>
+            </div>
+            <div class="panel-stage">
+              <svg class="icon-card-svg a3" viewBox="0 0 512 512" aria-label="A3 app icon">
+                <path d="M397 0H115C51.4873 0 0 51.4873 0 115V397C0 460.513 51.4873 512 115 512H397C460.513 512 512 460.513 512 397V115C512 51.4873 460.513 0 397 0Z" fill="#0A0B10"/>
+                <path d="M85 151L199 265L85 379" stroke="#E2E8F0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="#E2E8F0" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="#E2E8F0"/>
+              </svg>
+            </div>
+          </div>
+
+          <div class="menu-bar">
+            <div class="menu-left">
+              <svg class="menu-svg" viewBox="68 142 370 246" aria-label="A3 menu bar mark">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon)"/>
+              </svg>
+              <span>VibeSpot in the menu bar</span>
+            </div>
+            <span>18px target</span>
+          </div>
+
+          <div class="scale-row">
+            <div class="scale-box">
+              <svg class="mini-svg" viewBox="68 142 370 246" aria-label="A3 14px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">14 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="scale-mark-lg" viewBox="68 142 370 246" aria-label="A3 18px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">18 px</div>
+            </div>
+            <div class="scale-box">
+              <svg class="scale-mark-xl" viewBox="68 142 370 246" aria-label="A3 24px preview">
+                <path d="M85 151L199 265L85 379" stroke="var(--icon-soft)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M301.6 310.2C326.784 310.2 347.2 289.784 347.2 264.6C347.2 239.416 326.784 219 301.6 219C276.416 219 256 239.416 256 264.6C256 289.784 276.416 310.2 301.6 310.2Z" stroke="var(--icon-soft)" stroke-width="16"/>
+                <path opacity="0.8" d="M415.4 276.8C421.696 276.8 426.8 271.696 426.8 265.4C426.8 259.104 421.696 254 415.4 254C409.104 254 404 259.104 404 265.4C404 271.696 409.104 276.8 415.4 276.8Z" fill="var(--icon-soft)"/>
+              </svg>
+              <div class="scale-label">24 px</div>
+            </div>
+          </div>
+        </div>
+        <div class="variant-footer">
+          <strong>When to pick it:</strong> you want a more productized identity, especially if the app icon matters more than maximum fidelity to the uploaded SVG.
+        </div>
+      </article>
+    </section>
+  </div>
+</body>
+</html>

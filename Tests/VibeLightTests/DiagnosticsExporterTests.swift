@@ -13,6 +13,7 @@ func diagnosticsExporterCreatesSnapshotFiles() throws {
     let manifestURL = output.appendingPathComponent("manifest.json")
     let settingsURL = output.appendingPathComponent("settings.json")
 
+    #expect(output.lastPathComponent.starts(with: "vibespot-diagnostics-"))
     #expect(FileManager.default.fileExists(atPath: manifestURL.path))
     #expect(FileManager.default.fileExists(atPath: settingsURL.path))
 }
@@ -37,5 +38,5 @@ func diagnosticsExporterEmbedsTheCurrentSettings() throws {
     let manifest = try decoder.decode(DiagnosticsExportManifest.self, from: data)
 
     #expect(manifest.settings == settings)
-    #expect(manifest.applicationName.isEmpty == false)
+    #expect(manifest.applicationName == "VibeSpot")
 }
