@@ -212,10 +212,43 @@ struct PreferencesWindowControllerTests {
         #expect(findStaticText(containing: "Source changes stay staged until Apply.", in: window.contentView) != nil)
     }
 
+    @Test("apply failure surfaces an error instead of success status")
+    func applyFailureSurfacesAnErrorInsteadOfSuccessStatus() throws {
+        let controller = makeController(onApply: { _ in
+            "Launch at login could not be updated."
+        })
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        let toggle = try #require(findSwitch(in: window.contentView))
+        let originalState = toggle.state
+        toggle.performClick(nil)
+
+        #expect(toggle.state != originalState)
+        #expect(controller.currentStatusMessageForTesting == "Launch at login could not be updated.")
+        #expect(findStaticText(containing: "Launch setting updated", in: window.contentView) == nil)
+    }
+
+    @Test("diagnostics export failure surfaces an error instead of success status")
+    func diagnosticsExportFailureSurfacesAnErrorInsteadOfSuccessStatus() throws {
+        let controller = makeController(onExportDiagnostics: {
+            "Diagnostics export failed."
+        })
+        controller.showPreferences()
+
+        let window = try #require(controller.window)
+        let exportButton = try #require(findButton(titled: "Export", in: window.contentView))
+        exportButton.performClick(nil)
+
+        #expect(controller.currentStatusMessageForTesting == "Diagnostics export failed.")
+        #expect(findStaticText(containing: "Diagnostics exported", in: window.contentView) == nil)
+    }
+
     private func makeController(
         initialSettings: AppSettings = .default,
         sessionSourceLocator: SessionSourceLocator = SessionSourceLocator(),
-        onApply: @escaping @MainActor @Sendable (AppSettings) -> Void = { _ in }
+        onApply: @escaping @MainActor @Sendable (AppSettings) -> String? = { _ in nil },
+        onExportDiagnostics: @escaping @MainActor @Sendable () -> String? = { nil }
     ) -> PreferencesWindowController {
         let suiteName = "PreferencesWindowControllerTests.\(UUID().uuidString)"
         let suite = UserDefaults(suiteName: suiteName)!
@@ -228,7 +261,7 @@ struct PreferencesWindowControllerTests {
             sessionSourceLocator: sessionSourceLocator,
             onApplySettings: onApply,
             onReindex: {},
-            onExportDiagnostics: {}
+            onExportDiagnostics: onExportDiagnostics
         )
     }
 
@@ -344,13 +377,29 @@ struct PreferencesWindowControllerTests {
 
         return nil
     }
+
+    private func findSwitch(in view: NSView?) -> NSSwitch? {
+        guard let view else { return nil }
+        if let toggle = view as? NSSwitch {
+            return toggle
+        }
+
+        for subview in view.subviews {
+            if let toggle = findSwitch(in: subview) {
+                return toggle
+            }
+        }
+
+        return nil
+    }
 }
 
 @MainActor
 private final class ApplyRecorder {
     private(set) var appliedSettings: [AppSettings] = []
 
-    func record(_ settings: AppSettings) {
+    func record(_ settings: AppSettings) -> String? {
         appliedSettings.append(settings)
+        return nil
     }
 }

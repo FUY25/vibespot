@@ -7,16 +7,22 @@ private enum SourceTool: String {
 
 @MainActor
 final class PreferencesWindowController: NSWindowController {
+    private enum StatusTone {
+        case normal
+        case error
+    }
+
     private let settingsStore: SettingsStore
     private let launchAtLoginSupported: Bool
     private let sessionSourceLocator: SessionSourceLocator
-    private let onApplySettings: @MainActor @Sendable (AppSettings) -> Void
+    private let onApplySettings: @MainActor @Sendable (AppSettings) -> String?
     private let onReindex: @MainActor @Sendable () -> Void
-    private let onExportDiagnostics: @MainActor @Sendable () -> Void
+    private let onExportDiagnostics: @MainActor @Sendable () -> String?
 
     private var settings: AppSettings
     private var sourceDraft: PreferencesSourceDraft
     private var statusMessage: String = ""
+    private var statusTone: StatusTone = .normal
 
     private let themePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginToggle = NSSwitch(frame: .zero)
@@ -43,9 +49,9 @@ final class PreferencesWindowController: NSWindowController {
         settingsStore: SettingsStore,
         launchAtLoginSupported: Bool = LaunchAtLoginManager().isSupportedRuntime,
         sessionSourceLocator: SessionSourceLocator = SessionSourceLocator(),
-        onApplySettings: @escaping @MainActor @Sendable (AppSettings) -> Void,
+        onApplySettings: @escaping @MainActor @Sendable (AppSettings) -> String?,
         onReindex: @escaping @MainActor @Sendable () -> Void,
-        onExportDiagnostics: @escaping @MainActor @Sendable () -> Void
+        onExportDiagnostics: @escaping @MainActor @Sendable () -> String?
     ) {
         self.settingsStore = settingsStore
         self.launchAtLoginSupported = launchAtLoginSupported
@@ -83,7 +89,7 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func showPreferences() {
-        statusMessage = ""
+        clearStatus()
         loadControls()
         window?.center()
         showWindow(nil)
@@ -97,6 +103,12 @@ final class PreferencesWindowController: NSWindowController {
         if hadDirtyDraft == false {
             sourceDraft = PreferencesSourceDraft(settings: newSettings)
         }
+        loadControls()
+    }
+
+    func presentStatus(_ message: String, isError: Bool = false) {
+        statusMessage = message
+        statusTone = isError ? .error : .normal
         loadControls()
     }
 
@@ -644,6 +656,7 @@ final class PreferencesWindowController: NSWindowController {
 
     private func refreshStatusLabel() {
         statusLabel.stringValue = statusMessage.isEmpty ? defaultStatusMessage : statusMessage
+        statusLabel.textColor = statusTone == .error ? .systemRed : .secondaryLabelColor
     }
 
     private var defaultStatusMessage: String {
@@ -737,8 +750,12 @@ final class PreferencesWindowController: NSWindowController {
 
     private func saveSettings(status: String) {
         settingsStore.save(settings)
-        onApplySettings(settings)
+        if let errorMessage = onApplySettings(settings) {
+            presentStatus(errorMessage, isError: true)
+            return
+        }
         statusMessage = status
+        statusTone = .normal
         loadControls()
     }
 
@@ -760,13 +777,13 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func claudeSourceModeChanged() {
         sourceDraft.claude.mode = claudeSourceModePopup.titleOfSelectedItem == "Custom" ? .custom : .automatic
-        statusMessage = ""
+        clearStatus()
         loadControls()
     }
 
     @objc private func codexSourceModeChanged() {
         sourceDraft.codex.mode = codexSourceModePopup.titleOfSelectedItem == "Custom" ? .custom : .automatic
-        statusMessage = ""
+        clearStatus()
         loadControls()
     }
 
@@ -805,7 +822,7 @@ final class PreferencesWindowController: NSWindowController {
                 sourceDraft.codex.customRoot = selectedPath
             }
 
-            statusMessage = ""
+            clearStatus()
             loadControls()
         }
     }
@@ -814,8 +831,7 @@ final class PreferencesWindowController: NSWindowController {
         let stagedSettings = stagedSourceSettings()
         let resolution = sessionSourceLocator.resolve(for: stagedSettings)
         guard sourceDraft.isDirty(comparedTo: settings), sourceWarningMessage(for: resolution) == nil else {
-            statusMessage = "Choose valid source settings before applying."
-            loadControls()
+            presentStatus("Choose valid source settings before applying.", isError: true)
             return
         }
 
@@ -871,9 +887,18 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func exportDiagnosticsAction() {
-        onExportDiagnostics()
+        if let errorMessage = onExportDiagnostics() {
+            presentStatus(errorMessage, isError: true)
+            return
+        }
         statusMessage = "Diagnostics exported"
+        statusTone = .normal
         loadControls()
+    }
+
+    private func clearStatus() {
+        statusMessage = ""
+        statusTone = .normal
     }
 
     private var selectedTheme: AppTheme {
@@ -910,8 +935,12 @@ final class PreferencesWindowController: NSWindowController {
 
     func updateSourceDraftForTesting(_ update: (inout PreferencesSourceDraft) -> Void) {
         update(&sourceDraft)
-        statusMessage = ""
+        clearStatus()
         loadControls()
+    }
+
+    var currentStatusMessageForTesting: String {
+        statusLabel.stringValue
     }
     #endif
 }

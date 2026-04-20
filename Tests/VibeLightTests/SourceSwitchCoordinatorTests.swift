@@ -52,6 +52,7 @@ struct SourceSwitchCoordinatorTests {
 
         #expect(delegate.currentSessionSourceFingerprintForTesting == originalFingerprint)
         #expect(store.load().sessionSourceConfiguration == initialSettings.sessionSourceConfiguration)
+        #expect(delegate.preferencesStatusMessageForTesting?.localizedCaseInsensitiveContains("switch session sources") == true)
         #expect(findStaticText(containing: currentClaudeRoot, in: preferencesWindow.contentView) != nil)
         #expect(findStaticText(containing: nextClaudeRoot, in: preferencesWindow.contentView) == nil)
     }

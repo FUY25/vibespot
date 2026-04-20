@@ -131,6 +131,10 @@
 - [x] 本地已验证可以产出 `dist/VibeSpot.app`
 - [x] 本地已验证可以产出 `dist/VibeSpot.dmg`
 - [x] bundle 级 `Info.plist`、display name、executable name、`AppIcon.icns` 已接入
+- [x] packaged app runtime 现在会自检 `launch at login` eligibility
+  - `VibeSpot --print-launch-at-login-support`
+  - `scripts/verify-packaged-app.sh`
+  - `scripts/verify-launch-at-login-runtime.sh`
 - [x] beta 安装验证脚本已在本机跑通
   - 生成 `.dmg`
   - 挂载并复制到临时 `/Applications`
@@ -163,6 +167,14 @@
   - GitHub issue
   - 邮件
   - 诊断包说明
+
+当前进度补充：
+
+- [x] `Preferences` 已能直接显示这几类失败
+  - launch-at-login apply failure
+  - diagnostics export failure
+  - staged source switch failure
+- [ ] 仍待补齐索引不可用 / 索引损坏 / launch action 失败的用户可见恢复提示
 
 **验收标准**
 - 用户出错时至少能看到“发生了什么、怎么办、如何反馈”

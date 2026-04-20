@@ -19,6 +19,11 @@ echo "Build: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_BUNDLE/
 test -x "$APP_BUNDLE/Contents/MacOS/VibeSpot"
 test -f "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 test -d "$APP_BUNDLE/Contents/Resources/Flare_Flare.bundle"
+LAUNCH_AT_LOGIN_STATUS="$("$APP_BUNDLE/Contents/MacOS/VibeSpot" --print-launch-at-login-support | tr -d '[:space:]')"
+if [[ "$LAUNCH_AT_LOGIN_STATUS" != "supported" ]]; then
+  echo "Packaged app did not report launch-at-login support." >&2
+  exit 1
+fi
 codesign --verify --deep --strict "$APP_BUNDLE" >/dev/null
 
 echo "Packaged app structure looks valid."

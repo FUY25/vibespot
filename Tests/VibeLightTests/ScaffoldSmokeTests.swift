@@ -124,6 +124,40 @@ func appDelegateAppliesLaunchAtLoginSettingOnLaunch() {
 
 @MainActor
 @Test
+func appDelegateSurfacesLaunchAtLoginApplyFailuresInPreferences() throws {
+    struct LaunchFailure: LocalizedError {
+        var errorDescription: String? { "ServiceManagement rejected the request." }
+    }
+
+    final class LaunchAtLoginFailingSpy: LaunchAtLoginManaging {
+        var isSupportedRuntime: Bool = true
+        func setEnabled(_ enabled: Bool) throws {
+            throw LaunchFailure()
+        }
+    }
+
+    let suite = UserDefaults(suiteName: "AppDelegate.launchAtLoginFailure.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var initialSettings = store.load()
+    initialSettings.launchAtLogin = false
+    store.save(initialSettings)
+    let delegate = AppDelegate(
+        startsRuntimeServices: false,
+        settingsStore: store,
+        launchAtLoginManager: LaunchAtLoginFailingSpy()
+    )
+    delegate.openPreferences()
+    let window = try #require(delegate.preferencesWindowForTesting)
+
+    let toggle = try #require(findSwitch(in: window.contentView))
+    toggle.performClick(nil)
+
+    #expect(delegate.preferencesStatusMessageForTesting?.localizedCaseInsensitiveContains("launch at login") == true)
+    #expect(delegate.preferencesStatusMessageForTesting?.localizedCaseInsensitiveContains("rejected") == true)
+}
+
+@MainActor
+@Test
 func appShowsOnboardingWhenNotCompleted() {
     let suite = UserDefaults(suiteName: "AppDelegate.onboarding.\(UUID().uuidString)")!
     let store = SettingsStore(defaults: suite)
@@ -161,4 +195,20 @@ func restoresSharedApplicationStateAfterConfigurationCheck() {
 
     #expect(app.activationPolicy() == originalActivationPolicy)
     #expect(app.delegate === originalDelegate)
+}
+
+@MainActor
+private func findSwitch(in view: NSView?) -> NSSwitch? {
+    guard let view else { return nil }
+    if let toggle = view as? NSSwitch {
+        return toggle
+    }
+
+    for subview in view.subviews {
+        if let toggle = findSwitch(in: subview) {
+            return toggle
+        }
+    }
+
+    return nil
 }

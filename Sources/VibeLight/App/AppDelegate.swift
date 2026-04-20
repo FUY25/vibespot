@@ -86,6 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.window
     }
 
+    #if DEBUG
+    var preferencesStatusMessageForTesting: String? {
+        preferencesWindowController?.currentStatusMessageForTesting
+    }
+    #endif
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.applicationIconImage = VibeSpotBranding.makeApplicationIcon()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -148,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.performReindex()
                 },
                 onExportDiagnostics: { [weak self] in
-                    self?.exportDiagnostics()
+                    self?.performDiagnosticsExport()
                 }
             )
         }
@@ -224,12 +230,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeServicesStarted = false
     }
 
-    private func syncLaunchAtLogin() {
+    @discardableResult
+    private func syncLaunchAtLogin() -> String? {
         do {
             try launchAtLoginManager.setEnabled(settings.launchAtLogin)
+            return nil
         } catch {
             RuntimeIssueStore.shared.record(component: "LaunchAtLogin", error: error)
             print("AppDelegate failed to update launch-at-login state: \(error)")
+            return makeUserVisibleErrorMessage(action: "update launch at login", error: error)
         }
     }
 
@@ -250,17 +259,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func exportDiagnostics() {
+        if let errorMessage = performDiagnosticsExport() {
+            preferencesWindowController?.presentStatus(errorMessage, isError: true)
+        }
+    }
+
+    private func performDiagnosticsExport() -> String? {
         do {
             let exporter = DiagnosticsExporter()
             let outputURL = try exporter.export(settings: settings)
             NSWorkspace.shared.activateFileViewerSelecting([outputURL])
+            return nil
         } catch {
             RuntimeIssueStore.shared.record(component: "DiagnosticsExport", error: error)
             print("AppDelegate failed to export diagnostics: \(error)")
+            return makeUserVisibleErrorMessage(action: "export diagnostics", error: error)
         }
     }
 
-    private func applySettings(_ newSettings: AppSettings) {
+    @discardableResult
+    private func applySettings(_ newSettings: AppSettings) -> String? {
         let previousSettings = settings
         let previousSourceResolution = sessionSourceResolution
         let newSourceResolution = sessionSourceLocator.resolve(for: newSettings)
@@ -302,11 +320,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if changeSet.launchAtLoginChanged {
-            syncLaunchAtLogin()
+            if let errorMessage = syncLaunchAtLogin() {
+                return errorMessage
+            }
         }
         if changeSet.hotkeyChanged {
             rebuildHotkeyManagerIfNeeded()
         }
+
+        return nil
     }
 
     private func applyHistoryMode(_ historyMode: SearchHistoryMode) {
@@ -362,6 +384,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard let self, generation == self.sourceSwitchGeneration else { return }
                     self.settingsStore.save(self.settings)
                     self.preferencesWindowController?.syncSettings(self.settings)
+                    self.preferencesWindowController?.presentStatus(
+                        self.makeUserVisibleErrorMessage(action: "switch session sources", error: error),
+                        isError: true
+                    )
                 }
                 print("AppDelegate failed to switch session sources: \(error)")
             }
@@ -507,7 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applySettingsForTesting(_ newSettings: AppSettings) {
-        applySettings(newSettings)
+        _ = applySettings(newSettings)
     }
 
     func applyHistoryModeForTesting(_ historyMode: SearchHistoryMode) {
@@ -613,5 +639,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             legacyDatabaseURL: legacyDatabaseURL,
             fileManager: fileManager
         )
+    }
+
+    private func makeUserVisibleErrorMessage(action: String, error: Error) -> String {
+        let detail = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard detail.isEmpty == false else {
+            return "Could not \(action)."
+        }
+        return "Could not \(action): \(detail)"
     }
 }
