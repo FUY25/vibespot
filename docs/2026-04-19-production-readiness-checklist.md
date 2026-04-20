@@ -102,8 +102,8 @@
 
 ### 4. 正式 release pipeline
 
-- [ ] 明确 production build 流程
-- [ ] 生成正式 `VibeSpot.app`
+- [x] 明确 production build 流程
+- [x] 生成正式 `VibeSpot.app`
 - [ ] code signing 完成
 - [ ] notarization 完成
 - [ ] 最终安装分发形式确定
@@ -118,6 +118,18 @@
   - 信任提示
   - 正常运行
 - [ ] launch-at-login 在 packaged build 下真实验证
+
+当前进度补充：
+
+- [x] 已新增可执行脚本：
+  - `scripts/export-app-icon.sh`
+  - `scripts/package-app.sh`
+  - `scripts/sign-app.sh`
+  - `scripts/notarize-app.sh`
+  - `scripts/verify-packaged-app.sh`
+- [x] 本地已验证可以产出 `dist/VibeSpot.app`
+- [x] bundle 级 `Info.plist`、display name、executable name、`AppIcon.icns` 已接入
+- [ ] 签名 identity / notarization profile 仍待接入真实凭据
 
 **验收标准**
 - 非开发者用户无需源码环境即可安装使用

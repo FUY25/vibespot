@@ -119,4 +119,36 @@ struct OnboardingWindowControllerTests {
         #expect(state.cardID == "quickSetup")
         #expect(state.primaryActionTitle == "Start Using VibeSpot")
     }
+
+    @Test("chinese onboarding flow keeps localized copy through all eight cards")
+    func chineseOnboardingFlowKeepsLocalizedCopyThroughAllEightCards() {
+        let suite = UserDefaults(suiteName: "OnboardingWindowControllerTests.zhFlow.\(UUID().uuidString)")!
+        let store = SettingsStore(defaults: suite)
+        let controller = OnboardingWindowController(
+            settingsStore: store,
+            environmentCheckService: EnvironmentCheckService(
+                fileManager: .default,
+                processRunner: LocalMockProcessRunner(paths: [:]),
+                homeDirectoryPath: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+            ),
+            terminalAutomationChecker: MockTerminalAutomationChecker(
+                result: TerminalAutomationCheckResult(status: .unknown)
+            ),
+            preferredLanguageCodeProvider: { "zh-Hans" },
+            onFinish: {}
+        )
+
+        for index in 0..<8 {
+            let state = controller.makeViewStateForTesting()
+            #expect(state.languageCode == "zh-Hans")
+            #expect(state.progressLabel == "\(index + 1) / 8")
+            #expect(state.sentence.isEmpty == false)
+            if index < 7 {
+                controller.onboardingBridgeDidRequestNext(OnboardingBridge())
+            } else {
+                #expect(state.primaryActionTitle == "开始使用 VibeSpot")
+                #expect(state.backLabel == "上一步")
+            }
+        }
+    }
 }
