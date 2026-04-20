@@ -137,18 +137,26 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
             payload["body"] = "Jump back into live agent runs and past threads from one fast native search surface."
             payload["detail"] = "Everything stays local. VibeSpot reads the session data already on your machine and helps you switch context before you lose it."
         case .setup:
-            payload["headline"] = "Finish setup"
-            payload["body"] = "Check your local environment, keep the default shortcut or change it, and choose whether VibeSpot should start with your Mac."
-            payload["detail"] = "Warnings do not block setup. You can rerun checks and change the shortcut later from Settings."
+            payload["body"] = "VibeSpot is ready once it can either search local session history or help you start a first session."
             payload["checksRunning"] = environmentCheckTask != nil && environmentResult == nil
             if let environmentResult {
+                payload["headline"] = environmentResult.readinessHeadline
+                payload["detail"] = environmentResult.readinessDetail
                 payload["codexFound"] = environmentResult.codex.isAvailable
                 payload["claudeFound"] = environmentResult.claude.isAvailable
+                payload["codexHistoryStatus"] = environmentResult.codexData.statusLabel
+                payload["claudeHistoryStatus"] = environmentResult.claudeData.statusLabel
+                payload["canFinish"] = environmentResult.canFinishOnboarding
                 payload["missingPaths"] = environmentResult.missingAccessiblePaths
                 payload["checkedPaths"] = environmentResult.checkedPaths
             } else {
+                payload["headline"] = "Check your local environment"
+                payload["detail"] = "Run checks so VibeSpot can verify that you either have local session history or at least one supported CLI ready."
                 payload["codexFound"] = false
                 payload["claudeFound"] = false
+                payload["codexHistoryStatus"] = "Unknown"
+                payload["claudeHistoryStatus"] = "Unknown"
+                payload["canFinish"] = false
                 payload["missingPaths"] = []
                 payload["checkedPaths"] = []
             }
@@ -181,6 +189,9 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
     }
 
     private func finishOnboarding() {
+        if step == .setup, environmentResult?.canFinishOnboarding == false {
+            return
+        }
         settings.onboardingCompleted = true
         settingsStore.save(settings)
         onFinish()

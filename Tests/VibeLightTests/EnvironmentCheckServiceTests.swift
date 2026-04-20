@@ -18,14 +18,19 @@ struct EnvironmentCheckServiceTests {
             .appendingPathComponent("env-check-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
+        let codexSessions = tempRoot.appendingPathComponent(".codex/sessions/2026/04/20", isDirectory: true)
         try? FileManager.default.createDirectory(
-            at: tempRoot.appendingPathComponent(".codex", isDirectory: true),
+            at: codexSessions,
             withIntermediateDirectories: true
         )
+        try? Data("{\"codex\":true}\n".utf8).write(to: codexSessions.appendingPathComponent("session.jsonl"))
+
+        let claudeProject = tempRoot.appendingPathComponent(".claude/projects/demo", isDirectory: true)
         try? FileManager.default.createDirectory(
-            at: tempRoot.appendingPathComponent(".claude", isDirectory: true),
+            at: claudeProject,
             withIntermediateDirectories: true
         )
+        try? Data("{\"claude\":true}\n".utf8).write(to: claudeProject.appendingPathComponent("thread.jsonl"))
 
         let service = EnvironmentCheckService(
             fileManager: .default,
@@ -44,6 +49,8 @@ struct EnvironmentCheckServiceTests {
         #expect(result.missingAccessiblePaths.isEmpty)
         #expect(result.checkedPaths.contains(tempRoot.path + "/.codex"))
         #expect(result.checkedPaths.contains(tempRoot.path + "/.claude"))
+        #expect(result.firstSuccessState == .readyToSearch)
+        #expect(result.canFinishOnboarding)
     }
 
     @Test("reports missing accessible paths without hardcoded project directories")
@@ -61,5 +68,57 @@ struct EnvironmentCheckServiceTests {
         #expect(result.claude.isAvailable == false)
         #expect(result.checkedPaths == [tempRoot.path + "/.codex", tempRoot.path + "/.claude"])
         #expect(result.missingAccessiblePaths == result.checkedPaths)
+        #expect(result.firstSuccessState == .blocked)
+        #expect(result.canFinishOnboarding == false)
+    }
+
+    @Test("allows onboarding finish when a CLI is installed but history is still empty")
+    func allowsOnboardingFinishWhenCLIPresentButHistoryEmpty() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("env-check-cli-only-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try FileManager.default.createDirectory(
+            at: tempRoot.appendingPathComponent(".codex", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let service = EnvironmentCheckService(
+            fileManager: .default,
+            processRunner: MockProcessRunner(paths: [
+                "codex": "/usr/local/bin/codex",
+            ]),
+            homeDirectoryPath: tempRoot.path
+        )
+
+        let result = await service.runChecks()
+        #expect(result.firstSuccessState == .canCreateFirstSession)
+        #expect(result.canFinishOnboarding)
+    }
+
+    @Test("treats existing local session data as first-success ready even without binaries")
+    func treatsExistingLocalSessionDataAsReadyWithoutBinaries() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("env-check-history-only-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexSessions = tempRoot
+            .appendingPathComponent(".codex/sessions/2026/04/20", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexSessions,
+            withIntermediateDirectories: true
+        )
+        let sessionFile = codexSessions.appendingPathComponent("session.jsonl")
+        try Data("{\"hello\":\"world\"}\n".utf8).write(to: sessionFile)
+
+        let service = EnvironmentCheckService(
+            fileManager: .default,
+            processRunner: MockProcessRunner(paths: [:]),
+            homeDirectoryPath: tempRoot.path
+        )
+
+        let result = await service.runChecks()
+        #expect(result.firstSuccessState == .readyToSearch)
+        #expect(result.canFinishOnboarding)
     }
 }

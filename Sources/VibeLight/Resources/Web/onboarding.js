@@ -6,6 +6,9 @@ let state = {
   checksRunning: false,
   codexFound: false,
   claudeFound: false,
+  codexHistoryStatus: 'Unknown',
+  claudeHistoryStatus: 'Unknown',
+  canFinish: false,
   missingPaths: [],
   checkedPaths: [],
 };
@@ -96,8 +99,8 @@ function renderWelcome() {
 function renderSetup() {
   const codexStatus = state.codexFound ? 'Found' : 'Missing';
   const claudeStatus = state.claudeFound ? 'Found' : 'Missing';
-  const pathStatus = (state.missingPaths || []).length === 0 ? 'Ready' : 'Needs attention';
   const launchStatus = state.launchAtLoginSupported ? 'Enabled in this build' : 'Packaged app only';
+  const finishLabel = state.canFinish ? 'Finish' : 'Fix setup first';
 
   return `
     <div class="frame">
@@ -130,11 +133,15 @@ function renderSetup() {
                 <span class="check-pill__status ${state.claudeFound ? 'ok' : 'warn'}">${claudeStatus}</span>
               </div>
               <div class="check-pill">
-                <span class="check-pill__label">Session paths</span>
-                <span class="check-pill__status ${(state.missingPaths || []).length === 0 ? 'ok' : 'warn'}">${pathStatus}</span>
+                <span class="check-pill__label">Codex history</span>
+                <span class="check-pill__status ${statusTone(state.codexHistoryStatus)}">${escapeHtml(state.codexHistoryStatus)}</span>
+              </div>
+              <div class="check-pill">
+                <span class="check-pill__label">Claude history</span>
+                <span class="check-pill__status ${statusTone(state.claudeHistoryStatus)}">${escapeHtml(state.claudeHistoryStatus)}</span>
               </div>
             </div>
-            <p class="caption">${state.checksRunning ? 'Running checks...' : describePaths()}</p>
+            <p class="caption">${state.checksRunning ? 'Running checks...' : escapeHtml(state.detail || describePaths())}</p>
           </div>
         </div>
       </section>
@@ -143,7 +150,7 @@ function renderSetup() {
         <div class="settings-grid">
           <div class="settings-card">
             <h2>System</h2>
-            <p>Keep the initial setup small: one shortcut, one launch preference, one quick readiness check.</p>
+            <p>Keep setup focused: one shortcut, one launch preference, and one check for first-success readiness.</p>
             <div class="settings-row">
               <div class="settings-row__text">
                 <h3>Launch at login</h3>
@@ -181,7 +188,7 @@ function renderSetup() {
           <button class="button-secondary" onclick="post({ type: 'back' })">Back</button>
         </div>
         <div class="button-group">
-          <button class="button-primary" onclick="post({ type: 'finish' })">Finish</button>
+          <button class="button-primary" ${state.canFinish ? '' : 'disabled'} onclick="post({ type: 'finish' })">${finishLabel}</button>
         </div>
       </div>
     </div>
@@ -194,6 +201,18 @@ function describePaths() {
     return 'All expected local session paths are reachable.';
   }
   return `Missing: ${missing.join(', ')}`;
+}
+
+function statusTone(status) {
+  switch (status) {
+    case 'Ready':
+    case 'Found':
+      return 'ok';
+    case 'Unknown':
+      return 'neutral';
+    default:
+      return 'warn';
+  }
 }
 
 function escapeHtml(text) {

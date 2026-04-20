@@ -438,6 +438,17 @@ button:hover {
   transform: translateY(-1px);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: none;
+}
+
+button:disabled:hover {
+  transform: none;
+}
+
 .button-primary {
   color: white;
   background: linear-gradient(180deg, #22201d, #11100f);
