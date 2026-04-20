@@ -163,6 +163,19 @@
     notifyResize();
   };
 
+  window.setSearchQueryAndFocus = function(query) {
+    searchInput.value = query || '';
+    ghostSuggestion.innerHTML = '';
+    searchInput.focus();
+    searchInput.selectionStart = searchInput.value.length;
+    searchInput.selectionEnd = searchInput.value.length;
+    updateBlockCursor();
+    updateSessionCount();
+    if (bridge) {
+      bridge.postMessage({ type: 'search', query: searchInput.value });
+    }
+  };
+
   window.setIconBaseURL = function(url) {
     iconBaseURL = url;
   };

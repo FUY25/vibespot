@@ -164,6 +164,24 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("window.__bridgeMessages[0].query", in: context) == "co")
     }
 
+    @Test("setSearchQueryAndFocus hydrates the search box and posts search immediately")
+    func setSearchQueryAndFocusHydratesSearchBoxAndPostsSearchImmediately() throws {
+        let context = try makePanelScriptContext()
+        _ = context.evaluateScript(
+            """
+            window.__searchFocusCalls = 0;
+            __els.searchInput.focus = function() { window.__searchFocusCalls += 1; };
+            window.setSearchQueryAndFocus('warmup');
+            """
+        )
+
+        #expect(try invokeString("__els.searchInput.value", in: context) == "warmup")
+        #expect(try invokeInt("window.__searchFocusCalls", in: context) == 1)
+        #expect(try invokeInt("window.__bridgeMessages.length", in: context) == 1)
+        #expect(try invokeString("window.__bridgeMessages[0].type", in: context) == "search")
+        #expect(try invokeString("window.__bridgeMessages[0].query", in: context) == "warmup")
+    }
+
     @Test("filtering away a hovered row cancels its pending preview dwell")
     func filteringAwayHoveredRowCancelsPendingPreviewDwell() throws {
         let context = try makePanelScriptContext()

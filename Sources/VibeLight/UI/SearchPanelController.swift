@@ -14,6 +14,9 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         let animates: Bool
     }
 
+    typealias JavaScriptCompletion = @Sendable (Any?, Error?) -> Void
+    typealias JavaScriptEvaluator = (String, JavaScriptCompletion?) -> Void
+
     var onSelect: ((SearchResult) -> Void)?
     var onLaunchAction: ((String, String) -> Void)?
     var onHistoryModeChanged: (@MainActor (SearchHistoryMode) -> Void)?
@@ -41,11 +44,16 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     private var lastPushedResultsSignature: String = ""
     private var lastSearchQuery: String?
     private var isWebViewReady = false
+    private var webViewReadyOverrideForTesting: Bool?
     private var pendingResetAndFocus = false
     private var pendingTheme: String?
     private var pendingResultsJSON: String?
     private var iconBaseURL: String?
     private var lastSearchWasLiveOnly = true
+    private var initialTypingWarmupActive = false
+    private var pendingWarmupQuery = ""
+    private var isWarmupFlushInFlight = false
+    private var javaScriptEvaluatorOverride: JavaScriptEvaluator?
 
     private static let panelWidth: CGFloat = 720
     private static let previewExtraWidth: CGFloat = 470
@@ -122,6 +130,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     func show() {
         searchDebouncer.cancel()
         isPreviewVisible = false
+        beginInitialTypingWarmup()
 
         if !panel.isVisible {
             centerPanelOnActiveScreen()
@@ -129,6 +138,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        stabilizeWebViewFocus()
 
         requestResetAndFocus()
         pushTheme()
@@ -143,6 +153,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         visibleRefreshTimer?.invalidate()
         visibleRefreshTimer = nil
         isPreviewVisible = false
+        clearInitialTypingWarmup()
         panel.orderOut(nil)
     }
 
@@ -210,7 +221,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
                 guard let self, self.isWebViewReady else { return }
                 guard !Task.isCancelled else { return }
                 let escaped = self.escapeForSingleQuotedJavaScriptString(json)
-                self.webView.evaluateJavaScript("updatePreview('\(escaped)')", completionHandler: nil)
+                self.runJavaScript("updatePreview('\(escaped)')", completion: nil)
             }
         }
     }
@@ -237,10 +248,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
             return
         }
 
-        webView.evaluateJavaScript("document.getElementById('searchInput')?.value ?? ''") { [weak self] value, _ in
+        runJavaScript("document.getElementById('searchInput')?.value ?? ''") { [weak self] value, _ in
+            let currentQuery = (value as? String) ?? fallbackQuery
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let currentQuery = (value as? String) ?? fallbackQuery
                 self.lastSearchQuery = currentQuery
                 self.refreshResults(query: currentQuery)
                 self.pushMode()
@@ -376,7 +387,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         guard let json = pendingResultsJSON else { return }
         pendingResultsJSON = nil
         let escaped = escapeForSingleQuotedJavaScriptString(json)
-        webView.evaluateJavaScript("updateResults('\(escaped)')", completionHandler: nil)
+        runJavaScript("updateResults('\(escaped)')", completion: nil)
         // Ghost suggestion is now computed locally in JS — no round-trip needed
     }
 
@@ -697,29 +708,29 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     }
 
     private func pushMode() {
-        guard isWebViewReady else { return }
+        guard webViewReady else { return }
         let mode = isLiveOnlyMode ? "live" : "all"
-        webView.evaluateJavaScript("setMode('\(mode)')", completionHandler: nil)
+        runJavaScript("setMode('\(mode)')", completion: nil)
     }
 
     private func pushThemeIfNeeded() {
         guard let theme = pendingTheme else { return }
         pendingTheme = nil
-        webView.evaluateJavaScript("setTheme('\(theme)')", completionHandler: nil)
+        runJavaScript("setTheme('\(theme)')", completion: nil)
     }
 
     private func requestResetAndFocus() {
         // resetAndFocus() clears JS-side rows, so force the next push even if JSON is identical.
         lastPushedResultsSignature = ""
         pendingResetAndFocus = true
-        guard isWebViewReady else { return }
+        guard webViewReady else { return }
         flushPendingWebViewState()
     }
 
     private func flushPendingWebViewState() {
         if let iconBaseURL {
             let escapedBaseURL = escapeForSingleQuotedJavaScriptString(iconBaseURL)
-            webView.evaluateJavaScript("setIconBaseURL('\(escapedBaseURL)')", completionHandler: nil)
+            runJavaScript("setIconBaseURL('\(escapedBaseURL)')", completion: nil)
             self.iconBaseURL = nil
         }
 
@@ -727,8 +738,10 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         if pendingResetAndFocus {
             pendingResetAndFocus = false
-            webView.evaluateJavaScript("resetAndFocus()", completionHandler: nil)
+            runJavaScript("resetAndFocus()", completion: nil)
         }
+
+        flushBufferedWarmupQueryIfPossible()
 
         pushResultsJSONIfNeeded()
     }
@@ -754,30 +767,35 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
 
         // Intercept nav keys at NSPanel level → call JS directly
         // This bypasses WKWebView's IPC event pipeline for snappier navigation
-        panel.keyHandler = { [weak self] keyCode, modifiers in
+        panel.keyHandler = { [weak self] event in
             guard let self else { return false }
+            let keyCode = event.keyCode
+            let modifiers = event.modifierFlags
             let normalizedModifiers = modifiers.intersection(.deviceIndependentFlagsMask)
             if keyCode == 43, normalizedModifiers == [.command] {
                 self.hide()
                 self.onOpenPreferences?()
                 return true
             }
-            guard self.isWebViewReady else { return false }
+            if self.handleInitialTypingWarmup(event: event, modifiers: normalizedModifiers) {
+                return true
+            }
+            guard self.webViewReady else { return false }
             switch keyCode {
             case 125: // Arrow Down
-                self.webView.evaluateJavaScript("moveSelection(1)", completionHandler: nil)
+                self.runJavaScript("moveSelection(1)", completion: nil)
                 return true
             case 126: // Arrow Up
-                self.webView.evaluateJavaScript("moveSelection(-1)", completionHandler: nil)
+                self.runJavaScript("moveSelection(-1)", completion: nil)
                 return true
             case 53: // Escape
                 self.hide()
                 return true
             case 36: // Enter
-                self.webView.evaluateJavaScript("activateSelected()", completionHandler: nil)
+                self.runJavaScript("activateSelected()", completion: nil)
                 return true
             case 48: // Tab
-                self.webView.evaluateJavaScript("handleTab()", completionHandler: nil)
+                self.runJavaScript("handleTab()", completion: nil)
                 return true
             default:
                 return false
@@ -820,6 +838,7 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         Task { @MainActor [weak self] in
             guard let self else { return }
             isWebViewReady = true
+            stabilizeWebViewFocus()
             flushPendingWebViewState()
             pushMode()
         }
@@ -946,9 +965,94 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
         }
     }
 
+    private var webViewReady: Bool {
+        webViewReadyOverrideForTesting ?? isWebViewReady
+    }
+
+    private func runJavaScript(_ script: String, completion: JavaScriptCompletion?) {
+        if let javaScriptEvaluatorOverride {
+            javaScriptEvaluatorOverride(script, completion)
+            return
+        }
+        webView.evaluateJavaScript(script, completionHandler: completion)
+    }
+
+    private func stabilizeWebViewFocus() {
+        panel.makeFirstResponder(webView)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.panel.isVisible else { return }
+            self.panel.makeFirstResponder(self.webView)
+        }
+    }
+
+    private func beginInitialTypingWarmup() {
+        initialTypingWarmupActive = true
+        pendingWarmupQuery = ""
+        isWarmupFlushInFlight = false
+    }
+
+    private func clearInitialTypingWarmup() {
+        initialTypingWarmupActive = false
+        pendingWarmupQuery = ""
+        isWarmupFlushInFlight = false
+    }
+
+    private func handleInitialTypingWarmup(event: NSEvent, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let hasBlockingModifier = modifiers.contains(.command) || modifiers.contains(.control) || modifiers.contains(.option)
+        guard !hasBlockingModifier else { return false }
+        guard initialTypingWarmupActive || !webViewReady else { return false }
+
+        if event.keyCode == 51 {
+            guard !pendingWarmupQuery.isEmpty else { return false }
+            pendingWarmupQuery.removeLast()
+            flushBufferedWarmupQueryIfPossible()
+            return true
+        }
+
+        guard let characters = event.characters, !characters.isEmpty else { return false }
+        guard characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return false }
+
+        pendingWarmupQuery.append(characters)
+        flushBufferedWarmupQueryIfPossible()
+        return true
+    }
+
+    private func flushBufferedWarmupQueryIfPossible() {
+        guard !pendingWarmupQuery.isEmpty else { return }
+        guard webViewReady else { return }
+        guard !isWarmupFlushInFlight else { return }
+
+        let query = pendingWarmupQuery
+        let escapedQuery = escapeForSingleQuotedJavaScriptString(query)
+        isWarmupFlushInFlight = true
+        runJavaScript("setSearchQueryAndFocus('\(escapedQuery)')") { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isWarmupFlushInFlight = false
+                if self.pendingWarmupQuery != query {
+                    self.flushBufferedWarmupQueryIfPossible()
+                    return
+                }
+                self.initialTypingWarmupActive = false
+            }
+        }
+    }
+
 #if DEBUG
     func installPreviewTaskForTesting(_ task: Task<Void, Never>) {
         previewTask = task
+    }
+
+    func installJavaScriptEvaluatorForTesting(_ evaluator: @escaping JavaScriptEvaluator) {
+        javaScriptEvaluatorOverride = evaluator
+    }
+
+    func setWebViewReadyForTesting(_ ready: Bool) {
+        webViewReadyOverrideForTesting = ready
+    }
+
+    func flushPendingWebViewStateForTesting() {
+        flushPendingWebViewState()
     }
 #endif
 }
@@ -960,10 +1064,10 @@ private final class SearchPanel: NSPanel {
     /// Intercept arrow/escape/enter/tab at the native level and forward
     /// directly to JS via evaluateJavaScript, bypassing WKWebView's IPC
     /// event pipeline for lower-latency navigation.
-    var keyHandler: ((UInt16, NSEvent.ModifierFlags) -> Bool)?
+    var keyHandler: ((NSEvent) -> Bool)?
 
     override func keyDown(with event: NSEvent) {
-        if let handler = keyHandler, handler(event.keyCode, event.modifierFlags) {
+        if let handler = keyHandler, handler(event) {
             return // consumed
         }
         super.keyDown(with: event)
