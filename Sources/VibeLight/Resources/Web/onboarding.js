@@ -5,26 +5,30 @@ function post(message) {
 }
 
 function renderDemoPane() {
-  const chipSets = {
-    quickActivation: [state.hotkey, "Panel", "Live state"],
-    fastSwitch: ["Enter", "Jump back", "Current session"],
-    searchSessions: ["Search", "Tab", "Enter"],
-    startNewSession: ["new claude", "new codex", "Launch"],
+  const mediaSources = {
+    quickActivation: "onboarding-quick-activation.mp4",
+    fastSwitch: "onboarding-fast-switch.mp4",
+    searchSessions: "onboarding-search-sessions.mp4",
+    startNewSession: "onboarding-start-new-session.mp4",
   };
 
-  const chips = (chipSets[state.cardID] || []).map((chip) => `<span class="demo-chip">${escapeHtml(chip)}</span>`).join("");
+  const mediaSource = mediaSources[state.cardID];
+  const viewportContent = mediaSource
+    ? `
+        <video class="demo-placeholder__video" autoplay muted loop playsinline preload="auto">
+          <source src="${escapeHtml(mediaSource)}" type="video/mp4">
+        </video>
+      `
+    : `
+        <div class="demo-placeholder__glass"></div>
+        <div class="demo-placeholder__copy">${escapeHtml(state.rightPane.placeholderPrompt || "")}</div>
+      `;
 
   return `
     <div class="pane pane--demo">
-      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
       <div class="demo-placeholder">
         <div class="demo-placeholder__viewport">
-          <div class="demo-placeholder__glass"></div>
-          <div class="demo-placeholder__copy">${escapeHtml(state.rightPane.placeholderPrompt || "")}</div>
-        </div>
-        <div class="demo-placeholder__footer">
-          <span class="demo-placeholder__label">${escapeHtml(state.rightPane.placeholderLabel || "")}</span>
-          <div class="demo-placeholder__chips">${chips}</div>
+          ${viewportContent}
         </div>
       </div>
     </div>
@@ -33,13 +37,12 @@ function renderDemoPane() {
 
 function renderShortcutPane() {
   return `
-    <div class="pane">
-      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
-      <div class="setting-block">
+    <div class="pane pane--compact">
+      <div class="setting-block setting-block--shortcut">
         <div class="setting-block__value">${escapeHtml(state.hotkey)}</div>
         <div class="setting-actions">
           <button class="button button--secondary" onclick="post({ type: 'changeShortcut' })">${escapeHtml(state.rightPane.shortcutActions?.[0] || "")}</button>
-          <button class="button button--ghost" onclick="post({ type: 'resetShortcut' })">${escapeHtml(state.rightPane.shortcutActions?.[1] || "")}</button>
+          <button class="button button--secondary" onclick="post({ type: 'resetShortcut' })">${escapeHtml(state.rightPane.shortcutActions?.[1] || "")}</button>
         </div>
       </div>
     </div>
@@ -55,8 +58,7 @@ function renderAccessPane() {
   `).join("");
 
   return `
-    <div class="pane">
-      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+    <div class="pane pane--compact">
       <div class="setting-block setting-block--stacked">
         <div class="status-list">${statuses}</div>
         <button class="button button--secondary" onclick="post({ type: 'runChecks' })">${escapeHtml(state.rightPane.accessActionTitle || "")}</button>
@@ -68,8 +70,7 @@ function renderAccessPane() {
 function renderTerminalPane() {
   const terminalStatus = state.rightPane.terminalStatus;
   return `
-    <div class="pane">
-      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+    <div class="pane pane--compact">
       <div class="setting-block setting-block--stacked">
         <div class="status-row status-row--single">
           <span class="status-row__label">${escapeHtml(terminalStatus?.label || "")}</span>
@@ -88,8 +89,7 @@ function renderQuickSetupPane() {
     : "";
 
   return `
-    <div class="pane">
-      <div class="pane__chrome">${escapeHtml(state.rightPane.chromeLabel)}</div>
+    <div class="pane pane--compact">
       <div class="setting-block setting-block--stacked">
         <div class="status-row status-row--single">
           <span class="status-row__label">${escapeHtml(state.rightPane.launchAtLoginLabel || "")}</span>
@@ -125,7 +125,6 @@ function renderCard() {
     <div class="frame">
       <div class="card-shell">
         <div class="card-shell__header">
-          <button class="text-button" onclick="post({ type: 'quit' })">${escapeHtml(state.quitLabel)}</button>
           <div class="progress">${escapeHtml(state.progressLabel)}</div>
         </div>
         <div class="card-shell__body">
@@ -157,8 +156,31 @@ function toggleLaunchAtLogin() {
 }
 
 function notifyResize() {
-  const height = document.documentElement.scrollHeight;
+  const shell = document.querySelector('.card-shell');
+  const height = shell
+    ? Math.ceil(shell.getBoundingClientRect().height)
+    : document.documentElement.scrollHeight;
   post({ type: "resize", height });
+}
+
+function startDemoVideos() {
+  const videos = document.querySelectorAll('.demo-placeholder__video');
+  videos.forEach((video) => {
+    if (typeof video.play === 'function') {
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    }
+    video.addEventListener('loadeddata', () => {
+      if (typeof video.play === 'function') {
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {});
+        }
+      }
+    }, { once: true });
+  });
 }
 
 function escapeHtml(text) {
@@ -174,7 +196,10 @@ window.updateOnboardingState = function updateOnboardingState(stateJSON) {
   state = JSON.parse(stateJSON);
   document.documentElement.lang = state.languageCode || "en";
   document.getElementById("app").innerHTML = renderCard();
-  requestAnimationFrame(notifyResize);
+  requestAnimationFrame(() => {
+    startDemoVideos();
+    notifyResize();
+  });
 };
 
 window.addEventListener("load", notifyResize);

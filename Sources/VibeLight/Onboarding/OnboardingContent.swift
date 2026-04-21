@@ -30,15 +30,6 @@ enum OnboardingLanguage: String, Sendable, Equatable {
         }
     }
 
-    var quitLabel: String {
-        switch self {
-        case .english:
-            return "Quit"
-        case .chinese:
-            return "退出"
-        }
-    }
-
     var backLabel: String {
         switch self {
         case .english:
@@ -141,9 +132,9 @@ enum OnboardingLanguage: String, Sendable, Equatable {
     var gifPlaceholderLabel: String {
         switch self {
         case .english:
-            return "GIF placeholder"
+            return "Demo"
         case .chinese:
-            return "GIF 占位"
+            return "演示"
         }
     }
 
@@ -159,37 +150,37 @@ enum OnboardingLanguage: String, Sendable, Equatable {
     func sentence(for card: OnboardingCard, defaultHotkey: String) -> String {
         switch (self, card) {
         case (.english, .quickActivation):
-            return "Press your shortcut and VibeSpot appears instantly with your current session state and context."
+            return "Anytime, anywhere. Press your shortcut to see live sessions and recent messages."
         case (.english, .shortcutSetup):
-            return "The default shortcut is \(defaultHotkey), and you can change it here if another combo feels more natural."
+            return "Default: \(defaultHotkey). Change it if you want."
         case (.english, .fastSwitch):
-            return "Press Enter to jump straight back into the conversation that is still running."
+            return "Pick a session. Press Enter to jump back in."
         case (.english, .searchSessions):
-            return "Search sessions or active sessions here, press Tab to switch state, and press Enter to resume history or surface the current active session."
+            return "Fuzzy-search by keyword to find the right window or reopen an old session fast."
         case (.english, .checkAccess):
-            return "VibeSpot needs to find and read your local chat history before session search becomes genuinely useful."
+            return "Let VibeSpot read your local history so search works."
         case (.english, .startNewSession):
-            return "Type new claude or new codex in the search bar to launch a fresh session immediately."
+            return "New sessions at your fingertips. Open VibeSpot and type new."
         case (.english, .allowTerminalControl):
-            return "To launch a new session directly, VibeSpot may need permission to control Terminal."
+            return "Allow Terminal control to start new sessions from VibeSpot."
         case (.english, .quickSetup):
-            return "Choose whether VibeSpot should open automatically whenever you sign in."
+            return "Choose whether VibeSpot opens when you sign in."
         case (.chinese, .quickActivation):
-            return "按下快捷键后，VibeSpot 会立刻出现，并显示你当前的会话状态和上下文。"
+            return "按下快捷键，立刻打开 VibeSpot。"
         case (.chinese, .shortcutSetup):
-            return "默认快捷键是 \(defaultHotkey)，如果你有更顺手的组合，也可以在这里改掉。"
+            return "默认是 \(defaultHotkey)，你也可以现在改。"
         case (.chinese, .fastSwitch):
-            return "按下 Enter 就可以直接回到正在进行中的对话，不用再自己找窗口。"
+            return "按 Enter，直接回到正在进行中的对话。"
         case (.chinese, .searchSessions):
-            return "你可以在这里搜索 session 或现有 session，按 Tab 切换状态，按 Enter 恢复历史对话或调出当前 active session。"
+            return "搜索任意 session。按 Tab 在历史记录和进行中的 session 之间切换，按 Enter 恢复或打开。"
         case (.chinese, .checkAccess):
-            return "VibeSpot 需要先找到并读取你本地的 chat history，session 搜索才会真正有用。"
+            return "先让 VibeSpot 读到本地历史记录，搜索才有用。"
         case (.chinese, .startNewSession):
-            return "在搜索栏输入 new claude 或 new codex，就可以直接唤起一个新的 session。"
+            return "输入 new claude 或 new codex，直接开始新 session。"
         case (.chinese, .allowTerminalControl):
-            return "为了直接启动新的 session，VibeSpot 可能需要获得控制 Terminal 的权限。"
+            return "允许控制 Terminal，直接启动新的 session。"
         case (.chinese, .quickSetup):
-            return "你可以顺手决定是否在登录后自动打开 VibeSpot。"
+            return "选择是否在登录后自动打开 VibeSpot。"
         }
     }
 
@@ -227,6 +218,29 @@ enum OnboardingLanguage: String, Sendable, Equatable {
             return "Terminal 权限"
         case (.chinese, .quickSetup):
             return "快速设置"
+        }
+    }
+
+    func demoChips(for card: OnboardingCard, hotkey: String) -> [String] {
+        switch (self, card) {
+        case (.english, .quickActivation):
+            return [hotkey, "Panel", "Live state"]
+        case (.english, .fastSwitch):
+            return ["Enter", "Jump back", "Current session"]
+        case (.english, .searchSessions):
+            return ["Search", "Tab", "Enter"]
+        case (.english, .startNewSession):
+            return ["new claude", "new codex", "Launch"]
+        case (.chinese, .quickActivation):
+            return [hotkey, "面板", "实时状态"]
+        case (.chinese, .fastSwitch):
+            return ["Enter", "切回", "当前会话"]
+        case (.chinese, .searchSessions):
+            return ["搜索", "Tab", "Enter"]
+        case (.chinese, .startNewSession):
+            return ["new claude", "new codex", "启动"]
+        default:
+            return []
         }
     }
 
@@ -274,6 +288,7 @@ struct OnboardingRightPaneState: Codable, Equatable, Sendable {
     let chromeLabel: String
     let placeholderLabel: String?
     let placeholderPrompt: String?
+    let demoChips: [String]?
     let shortcutActions: [String]?
     let accessStatuses: [OnboardingStatusPillState]?
     let accessActionTitle: String?
@@ -294,7 +309,6 @@ struct OnboardingViewState: Codable, Equatable, Sendable {
     let defaultHotkey: String
     let canGoBack: Bool
     let canFinish: Bool
-    let quitLabel: String
     let backLabel: String
     let primaryActionTitle: String
     let rightPane: OnboardingRightPaneState

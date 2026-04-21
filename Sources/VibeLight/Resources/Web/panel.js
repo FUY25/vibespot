@@ -106,14 +106,10 @@
     }
 
     currentResults = newResults;
+    selectedIndex = preferredSelectedIndex(currentResults, selectedIndex, searchInput.value);
     clearTimeout(dwellTimer);
     dwellTimer = null;
     renderResults();
-    if (currentResults.length > 0) {
-      selectedIndex = Math.min(selectedIndex, currentResults.length - 1);
-    } else {
-      selectedIndex = 0;
-    }
     updateSelection();
     updateActionHint();
     updateSessionCount();
@@ -857,6 +853,38 @@
 
   function displayPathHTML(result) {
     return highlightLiteralMatchHTML(formatSessionPath(result), searchInput.value);
+  }
+
+  function preferredSelectedIndex(results, previousIndex, query) {
+    if (!results || results.length === 0) return 0;
+
+    var preferredActionIndex = preferredActionRowIndex(results, query);
+    if (preferredActionIndex !== null) {
+      return preferredActionIndex;
+    }
+
+    return Math.max(0, Math.min(results.length - 1, previousIndex || 0));
+  }
+
+  function preferredActionRowIndex(results, query) {
+    var normalized = (query || '').trim().toLowerCase();
+    if (!normalized || !looksLikeNewSessionIntent(normalized)) return null;
+
+    var preferredTool = null;
+    if (matchesClaudeLaunchIntent(normalized)) {
+      preferredTool = 'claude';
+    } else if (matchesCodexLaunchIntent(normalized)) {
+      preferredTool = 'codex';
+    }
+
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].status !== 'action') continue;
+      if (!preferredTool || ((results[i].tool || '').toLowerCase() === preferredTool)) {
+        return i;
+      }
+    }
+
+    return null;
   }
 
   function stripMarkdown(text) {

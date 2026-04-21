@@ -182,6 +182,84 @@ struct SearchPanelScriptTests {
         #expect(try invokeString("window.__bridgeMessages[0].query", in: context) == "warmup")
     }
 
+    @Test("new claude intent auto-selects the matching action row")
+    func newClaudeIntentAutoSelectsMatchingActionRow() throws {
+        let context = try makePanelScriptContext()
+        let initialPayload = #"""
+        [{
+          "sessionId": "history-1",
+          "tool": "claude",
+          "title": "History result",
+          "project": "/tmp/history",
+          "projectName": "history",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+        let newSessionPayload = #"""
+        [{
+          "sessionId": "new-claude",
+          "tool": "claude",
+          "title": "New Claude session",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "action",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }, {
+          "sessionId": "new-codex",
+          "tool": "codex",
+          "title": "New Codex session",
+          "project": "/tmp/project",
+          "projectName": "project",
+          "gitBranch": "",
+          "status": "action",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 0,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }, {
+          "sessionId": "history-2",
+          "tool": "claude",
+          "title": "Other result",
+          "project": "/tmp/history",
+          "projectName": "history",
+          "gitBranch": "",
+          "status": "closed",
+          "startedAt": "2026-03-28T09:30:00Z",
+          "tokenCount": 1200,
+          "lastActivityAt": "2026-03-28T09:42:00Z",
+          "activityStatus": "closed",
+          "relativeTime": "2m ago",
+          "healthStatus": "ok",
+          "healthDetail": ""
+        }]
+        """#
+
+        _ = context.evaluateScript("window.updateResults(\(initialPayload));")
+        _ = context.evaluateScript("__dispatch(__els.results.children[1], 'mouseenter');")
+        _ = context.evaluateScript("__els.searchInput.value = 'new claude';")
+        _ = context.evaluateScript("window.updateResults(\(newSessionPayload));")
+
+        #expect(try invokeBool("__els.results.children[0].className.indexOf('row--selected') !== -1", in: context))
+    }
+
     @Test("filtering away a hovered row cancels its pending preview dwell")
     func filteringAwayHoveredRowCancelsPendingPreviewDwell() throws {
         let context = try makePanelScriptContext()

@@ -53,7 +53,7 @@ func diagnosticsExporterEmbedsTheCurrentSettings() throws {
     #expect(manifest.settings == settings)
     #expect(manifest.applicationName == "VibeSpot")
     #expect(manifest.recentIssueCount == 1)
-    #expect(manifest.supportURL.contains("github.com/FUY25/flare/issues"))
+    #expect(manifest.supportURL.contains("github.com/FUY25/vibespot/issues"))
 
     let workspaceData = try Data(contentsOf: workspaceURL)
     let workspace = try decoder.decode(DiagnosticsIndexWorkspaceSnapshot.self, from: workspaceData)

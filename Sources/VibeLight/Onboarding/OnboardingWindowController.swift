@@ -1,8 +1,14 @@
 import AppKit
 import WebKit
 
+private final class WindowDragRegionView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+}
+
 @MainActor
 final class OnboardingWindowController: NSWindowController, WKNavigationDelegate, OnboardingBridgeDelegate {
+    private static let fixedWindowHeight: CGFloat = 520
+
     private let settingsStore: SettingsStore
     private let launchAtLoginSupported: Bool
     private let environmentCheckService: EnvironmentCheckService
@@ -14,12 +20,14 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
     private var terminalAutomationResult = TerminalAutomationCheckResult(status: .unknown)
     private var environmentCheckTask: Task<Void, Never>?
     private var terminalCheckTask: Task<Void, Never>?
+    private var shortcutCaptureWindowController: ShortcutCaptureWindowController?
 
     private let language: OnboardingLanguage
     private(set) var currentCard: OnboardingCard = .quickActivation
 
     private let webView: WKWebView
     private let bridge = OnboardingBridge()
+    private let dragRegionView = WindowDragRegionView(frame: .zero)
     private var isWebViewReady = false
     private var pendingStateJSON: String?
 
@@ -42,17 +50,21 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         let config = WKWebViewConfiguration()
         let contentController = WKUserContentController()
         config.userContentController = contentController
+        config.mediaTypesRequiringUserActionForPlayback = []
         self.webView = WKWebView(frame: .zero, configuration: config)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: Self.fixedWindowHeight),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = language.windowTitle
+        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
+        window.backgroundColor = .white
         if #available(macOS 13.0, *) {
             window.toolbarStyle = .preference
         }
@@ -87,19 +99,43 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
         makeViewState()
     }
 
+    #if DEBUG
+    var hasShortcutCaptureSheetForTesting: Bool {
+        shortcutCaptureWindowController != nil
+    }
+
+    var shortcutCaptureWindowControllerForTesting: ShortcutCaptureWindowController? {
+        shortcutCaptureWindowController
+    }
+
+    var hasDragRegionForTesting: Bool {
+        dragRegionView.superview != nil
+    }
+    #endif
+
     private func configureWindow() {
+        window?.standardWindowButton(.closeButton)?.isHidden = true
+        window?.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window?.standardWindowButton(.zoomButton)?.isHidden = true
+
         guard let contentView = window?.contentView else { return }
 
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
+        dragRegionView.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(webView)
+        contentView.addSubview(dragRegionView)
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             webView.topAnchor.constraint(equalTo: contentView.topAnchor),
             webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            dragRegionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            dragRegionView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            dragRegionView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            dragRegionView.heightAnchor.constraint(equalToConstant: 52),
         ])
 
         let resourceBundle = ResourceBundleLocator.current
@@ -158,6 +194,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
                 chromeLabel: language.cardChromeLabel(for: currentCard),
                 placeholderLabel: language.gifPlaceholderLabel,
                 placeholderPrompt: language.demoPlaceholderPrompt,
+                demoChips: language.demoChips(for: currentCard, hotkey: hotkey),
                 shortcutActions: nil,
                 accessStatuses: nil,
                 accessActionTitle: nil,
@@ -172,6 +209,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
                 chromeLabel: language.cardChromeLabel(for: currentCard),
                 placeholderLabel: nil,
                 placeholderPrompt: nil,
+                demoChips: nil,
                 shortcutActions: [language.changeShortcutLabel, language.resetShortcutLabel],
                 accessStatuses: nil,
                 accessActionTitle: nil,
@@ -186,6 +224,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
                 chromeLabel: language.cardChromeLabel(for: currentCard),
                 placeholderLabel: nil,
                 placeholderPrompt: nil,
+                demoChips: nil,
                 shortcutActions: nil,
                 accessStatuses: accessStatuses,
                 accessActionTitle: environmentCheckTask == nil ? language.runChecksLabel : language.checkingLabel,
@@ -200,6 +239,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
                 chromeLabel: language.cardChromeLabel(for: currentCard),
                 placeholderLabel: nil,
                 placeholderPrompt: nil,
+                demoChips: nil,
                 shortcutActions: nil,
                 accessStatuses: nil,
                 accessActionTitle: nil,
@@ -214,6 +254,7 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
                 chromeLabel: language.cardChromeLabel(for: currentCard),
                 placeholderLabel: nil,
                 placeholderPrompt: nil,
+                demoChips: nil,
                 shortcutActions: nil,
                 accessStatuses: nil,
                 accessActionTitle: nil,
@@ -235,7 +276,6 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
             defaultHotkey: defaultHotkey,
             canGoBack: cardIndex > 0,
             canFinish: currentCard == .quickSetup && (environmentResult?.canFinishOnboarding ?? false),
-            quitLabel: language.quitLabel,
             backLabel: language.backLabel,
             primaryActionTitle: currentCard == .quickSetup ? language.finishLabel : language.nextLabel,
             rightPane: rightPane,
@@ -379,14 +419,17 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
     }
 
     private func openShortcutPicker() {
-        guard let window else { return }
+        guard let window, shortcutCaptureWindowController == nil else { return }
         let controller = ShortcutCaptureWindowController(currentBinding: settings.hotkeyBinding) { [weak self] binding in
             guard let self else { return }
             self.settings.hotkeyKeyCode = binding.keyCode
             self.settings.hotkeyModifiers = binding.modifiers
             self.updateWebState()
         }
-        controller.presentSheet(for: window)
+        shortcutCaptureWindowController = controller
+        controller.presentSheet(for: window) { [weak self] in
+            self?.shortcutCaptureWindowController = nil
+        }
     }
 
     // MARK: - OnboardingBridgeDelegate
@@ -435,12 +478,12 @@ final class OnboardingWindowController: NSWindowController, WKNavigationDelegate
     }
 
     func onboardingBridge(_ bridge: OnboardingBridge, didRequestResize height: CGFloat) {
-        guard height > 0, let window else { return }
+        guard let window else { return }
         var frame = window.frame
         let maxY = frame.maxY
-        let newHeight = max(540, min(height + 44, 720))
+        let newHeight = Self.fixedWindowHeight
         frame.size.height = newHeight
         frame.origin.y = maxY - newHeight
-        window.setFrame(frame, display: true, animate: true)
+        window.setFrame(frame, display: true, animate: false)
     }
 }

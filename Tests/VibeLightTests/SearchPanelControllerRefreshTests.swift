@@ -117,6 +117,62 @@ struct SearchPanelControllerRefreshTests {
         #expect(receivedMessage?.localizedCaseInsensitiveContains("malformed") == true)
     }
 
+    @Test("visible live refresh preserves search snippet while updating runtime fields")
+    func visibleLiveRefreshPreservesSearchSnippetWhileUpdatingRuntimeFields() {
+        let current = [
+            SearchResult(
+                sessionId: "live-1",
+                tool: "codex",
+                title: "Original title",
+                project: "/tmp/live-1",
+                projectName: "live-1",
+                gitBranch: "main",
+                status: "live",
+                startedAt: Date(timeIntervalSince1970: 100),
+                pid: 42,
+                tokenCount: 10,
+                lastActivityAt: Date(timeIntervalSince1970: 200),
+                activityPreview: ActivityPreview(text: "thinking", kind: .assistant),
+                activityStatus: .working,
+                snippet: "matched >>>needle<<< context",
+                healthStatus: "ok",
+                healthDetail: ""
+            )
+        ]
+
+        let refreshedByID = [
+            "live-1": SearchResult(
+                sessionId: "live-1",
+                tool: "codex",
+                title: "Updated title",
+                project: "/tmp/live-1",
+                projectName: "live-1",
+                gitBranch: "main",
+                status: "live",
+                startedAt: Date(timeIntervalSince1970: 100),
+                pid: 77,
+                tokenCount: 99,
+                lastActivityAt: Date(timeIntervalSince1970: 300),
+                activityPreview: ActivityPreview(text: "still working", kind: .assistant),
+                activityStatus: .working,
+                snippet: nil,
+                healthStatus: "ok",
+                healthDetail: ""
+            )
+        ]
+
+        let merged = SearchPanelController.mergeVisibleLiveRefreshResults(
+            currentResults: current,
+            refreshedResultsBySessionID: refreshedByID
+        )
+
+        #expect(merged.count == 1)
+        #expect(merged[0].snippet == "matched >>>needle<<< context")
+        #expect(merged[0].pid == 77)
+        #expect(merged[0].tokenCount == 99)
+        #expect(merged[0].lastActivityAt == Date(timeIntervalSince1970: 300))
+    }
+
     private func makeResult(
         sessionId: String,
         status: String,

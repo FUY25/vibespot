@@ -359,7 +359,33 @@ final class SearchPanelController: NSObject, WebBridgeDelegate, WKNavigationDele
     ) -> [SearchResult] {
         currentResults.map { result in
             guard result.status == "live" else { return result }
-            return refreshedResultsBySessionID[result.sessionId] ?? result
+            guard let refreshed = refreshedResultsBySessionID[result.sessionId] else { return result }
+            return SearchResult(
+                sessionId: result.sessionId,
+                tool: result.tool,
+                title: result.title,
+                project: result.project,
+                projectName: result.projectName,
+                gitBranch: result.gitBranch,
+                status: refreshed.status,
+                startedAt: result.startedAt,
+                pid: refreshed.pid,
+                tokenCount: refreshed.tokenCount,
+                lastActivityAt: refreshed.lastActivityAt,
+                activityPreview: refreshed.activityPreview,
+                activityStatus: refreshed.activityStatus,
+                snippet: result.snippet,
+                healthStatus: refreshed.healthStatus,
+                healthDetail: refreshed.healthDetail,
+                effectiveModel: refreshed.effectiveModel,
+                contextWindowTokens: refreshed.contextWindowTokens,
+                contextUsedEstimate: refreshed.contextUsedEstimate,
+                contextPercentEstimate: refreshed.contextPercentEstimate,
+                contextConfidence: refreshed.contextConfidence,
+                contextSource: refreshed.contextSource,
+                lastContextSampleAt: refreshed.lastContextSampleAt,
+                lastUserPrompt: result.lastUserPrompt
+            )
         }
     }
 

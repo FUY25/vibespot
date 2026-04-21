@@ -160,6 +160,12 @@ final class ShortcutCaptureWindowController: NSWindowController, NSWindowDelegat
     @objc private func cancelAction() {
         closeSheet()
     }
+
+    #if DEBUG
+    func closeSheetForTesting() {
+        closeSheet()
+    }
+    #endif
 }
 
 private final class ShortcutCaptureView: NSView {
