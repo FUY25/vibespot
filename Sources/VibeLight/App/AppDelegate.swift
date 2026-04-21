@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var indexer: Indexer?
     private var sessionCountTimer: Timer?
     private var sourceSwitchTask: Task<Void, Never>?
+    private var recoveryReindexTask: Task<Void, Never>?
     private var sourceSwitchGeneration = 0
     private var runtimeServicesStarted = false
     private let sessionSourceLocator = SessionSourceLocator()
@@ -100,6 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var preferencesStatusMessageForTesting: String? {
         preferencesWindowController?.currentStatusMessageForTesting
     }
+
+    var runtimeServicesStartedForTesting: Bool {
+        runtimeServicesStarted
+    }
+
+    var hasIndexerForTesting: Bool {
+        indexer != nil
+    }
     #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -161,7 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.applySettings(settings)
                 },
                 onReindex: { [weak self] in
-                    self?.performReindex()
+                    self?.performReindex() ?? "Could not start reindex."
                 },
                 onExportDiagnostics: { [weak self] in
                     self?.performDiagnosticsExport()
@@ -220,6 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cleanupRuntimeServices() {
         sourceSwitchTask?.cancel()
         sourceSwitchTask = nil
+        recoveryReindexTask?.cancel()
+        recoveryReindexTask = nil
         sessionCountTimer?.invalidate()
         sessionCountTimer = nil
 
@@ -263,9 +274,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func performReindex() {
-        indexer?.performFullScan()
-        refreshStatusItemTitle()
+    @discardableResult
+    private func performReindex() -> String {
+        if let indexer {
+            indexer.performFullScan()
+            refreshStatusItemTitle()
+            return "Reindex started"
+        }
+
+        guard runtimeBehavior.startsRuntimeServices else {
+            return "Reindex is unavailable while runtime services are disabled."
+        }
+
+        guard recoveryReindexTask == nil else {
+            return "Reindex already in progress"
+        }
+
+        let targetResolution = sessionSourceResolution
+        recoveryReindexTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                try await self?.sourceSwitchHandler(targetResolution) { readyIndex in
+                    guard let self else { return }
+                    self.installRuntimeServices(using: readyIndex)
+                    self.preferencesWindowController?.presentStatus("Reindex finished")
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                RuntimeIssueStore.shared.record(component: "Reindex", error: error)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.preferencesWindowController?.presentStatus(
+                        self.makeUserVisibleErrorMessage(action: "reindex sessions", error: error),
+                        isError: true
+                    )
+                }
+                print("AppDelegate failed to recover via reindex: \(error)")
+            }
+
+            await MainActor.run { [weak self] in
+                self?.recoveryReindexTask = nil
+            }
+        }
+
+        return "Reindex started"
     }
 
     @objc private func exportDiagnostics() {
@@ -422,6 +474,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.register()
     }
 
+    private func installRuntimeServices(using sessionIndex: SessionIndex) {
+        sessionCountTimer?.invalidate()
+        sessionCountTimer = nil
+        hotkeyManager?.unregister()
+        hotkeyManager = nil
+        indexer?.stop()
+        indexer = nil
+        searchPanelController?.hide()
+        searchPanelController = nil
+
+        sessionFileLocator.reset()
+        let panelController = SearchPanelController(
+            sessionSourceResolution: sessionSourceResolution,
+            sessionFileLocator: sessionFileLocator
+        )
+        panelController.applySettings(settings)
+        panelController.sessionIndex = sessionIndex
+        panelController.onSelect = { [weak self] result in
+            self?.handleSelection(result)
+        }
+        panelController.onLaunchAction = { [weak self] command, directory in
+            self?.launchSessionAction(command: command, directory: directory)
+        }
+        panelController.onSearchFailure = { [weak self] message in
+            self?.presentFailure(title: "Index Unavailable", message: message)
+        }
+        panelController.onHistoryModeChanged = { [weak self] historyMode in
+            guard let self else { return }
+            self.applyHistoryMode(historyMode)
+        }
+        panelController.onOpenPreferences = { [weak self] in
+            self?.openPreferences()
+        }
+
+        let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
+            self?.togglePanel(nil)
+        }
+        let indexer = Indexer(
+            sessionIndex: sessionIndex,
+            sourceResolution: sessionSourceResolution,
+            sessionFileLocator: sessionFileLocator
+        )
+
+        self.sessionIndex = sessionIndex
+        self.searchPanelController = panelController
+        self.hotkeyManager = hotkeyManager
+        self.indexer = indexer
+
+        refreshStatusItemTitle()
+        startSessionCountUpdates()
+        hotkeyManager.register()
+        indexer.start()
+        runtimeServicesStarted = true
+    }
+
     @objc private func switchToLight() {
         applySettings(AppSettings(
             hotkeyKeyCode: settings.hotkeyKeyCode,
@@ -490,49 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let sessionIndex = try makeSessionIndex()
-            sessionFileLocator.reset()
-            let panelController = SearchPanelController(
-                sessionSourceResolution: sessionSourceResolution,
-                sessionFileLocator: sessionFileLocator
-            )
-            panelController.applySettings(settings)
-            panelController.sessionIndex = sessionIndex
-            panelController.onSelect = { [weak self] result in
-                self?.handleSelection(result)
-            }
-            panelController.onLaunchAction = { [weak self] command, directory in
-                self?.launchSessionAction(command: command, directory: directory)
-            }
-            panelController.onSearchFailure = { [weak self] message in
-                self?.presentFailure(title: "Index Unavailable", message: message)
-            }
-            panelController.onHistoryModeChanged = { [weak self] historyMode in
-                guard let self else { return }
-                self.applyHistoryMode(historyMode)
-            }
-            panelController.onOpenPreferences = { [weak self] in
-                self?.openPreferences()
-            }
-
-            let hotkeyManager = HotkeyManager(binding: settings.hotkeyBinding) { [weak self] in
-                self?.togglePanel(nil)
-            }
-            let indexer = Indexer(
-                sessionIndex: sessionIndex,
-                sourceResolution: sessionSourceResolution,
-                sessionFileLocator: sessionFileLocator
-            )
-
-            self.sessionIndex = sessionIndex
-            self.searchPanelController = panelController
-            self.hotkeyManager = hotkeyManager
-            self.indexer = indexer
-
-            refreshStatusItemTitle()
-            startSessionCountUpdates()
-            hotkeyManager.register()
-            indexer.start()
-            runtimeServicesStarted = true
+            installRuntimeServices(using: sessionIndex)
         } catch {
             RuntimeIssueStore.shared.record(component: "RuntimeServices", error: error)
             print("AppDelegate failed to initialize runtime services: \(error)")
@@ -563,6 +628,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func waitForSourceSwitchForTesting() async {
         await sourceSwitchTask?.value
+    }
+
+    func performReindexForTesting() -> String {
+        performReindex()
+    }
+
+    func waitForRecoveryReindexForTesting() async {
+        await recoveryReindexTask?.value
     }
 
     private func startSessionCountUpdates() {

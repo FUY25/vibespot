@@ -16,7 +16,7 @@ final class PreferencesWindowController: NSWindowController {
     private let launchAtLoginSupported: Bool
     private let sessionSourceLocator: SessionSourceLocator
     private let onApplySettings: @MainActor @Sendable (AppSettings) -> String?
-    private let onReindex: @MainActor @Sendable () -> Void
+    private let onReindex: @MainActor @Sendable () -> String
     private let onExportDiagnostics: @MainActor @Sendable () -> String?
 
     private var settings: AppSettings
@@ -50,7 +50,7 @@ final class PreferencesWindowController: NSWindowController {
         launchAtLoginSupported: Bool = LaunchAtLoginManager().isSupportedRuntime,
         sessionSourceLocator: SessionSourceLocator = SessionSourceLocator(),
         onApplySettings: @escaping @MainActor @Sendable (AppSettings) -> String?,
-        onReindex: @escaping @MainActor @Sendable () -> Void,
+        onReindex: @escaping @MainActor @Sendable () -> String,
         onExportDiagnostics: @escaping @MainActor @Sendable () -> String?
     ) {
         self.settingsStore = settingsStore
@@ -881,9 +881,7 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func reindexAction() {
-        onReindex()
-        statusMessage = "Reindex started"
-        loadControls()
+        presentStatus(onReindex())
     }
 
     @objc private func exportDiagnosticsAction() {

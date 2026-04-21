@@ -260,7 +260,7 @@ struct PreferencesWindowControllerTests {
             launchAtLoginSupported: true,
             sessionSourceLocator: sessionSourceLocator,
             onApplySettings: onApply,
-            onReindex: {},
+            onReindex: { "Reindex started" },
             onExportDiagnostics: onExportDiagnostics
         )
     }

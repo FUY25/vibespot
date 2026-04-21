@@ -213,6 +213,62 @@ func appDelegatePresentsRecoveryGuidanceWhenIndexStartupFails() {
 
 @MainActor
 @Test
+func appDelegateCanRecoverFromIndexStartupFailureByReindexing() async throws {
+    struct IndexFailure: LocalizedError {
+        var errorDescription: String? { "database disk image is malformed" }
+    }
+
+    let suite = UserDefaults(suiteName: "AppDelegate.indexStartupRecovery.\(UUID().uuidString)")!
+    let store = SettingsStore(defaults: suite)
+    var settings = store.load()
+    settings.onboardingCompleted = true
+    store.save(settings)
+
+    let dbPath = FileManager.default.temporaryDirectory
+        .appendingPathComponent("index-startup-recovery-\(UUID().uuidString).sqlite3")
+        .path
+
+    let delegate = AppDelegate(
+        startsRuntimeServices: true,
+        settingsStore: store,
+        sourceSwitchHandler: { _, onReady in
+            let readyIndex = try SessionIndex(dbPath: dbPath)
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            try readyIndex.upsertSession(
+                id: "recovered-session",
+                tool: "codex",
+                title: "Recovered Session",
+                project: "/tmp/recovered",
+                projectName: "recovered",
+                gitBranch: "main",
+                status: "closed",
+                startedAt: now,
+                pid: nil,
+                lastActivityAt: now
+            )
+            await onReady(readyIndex)
+        },
+        sessionIndexFactory: {
+            throw IndexFailure()
+        }
+    )
+    defer {
+        delegate.removeStatusItem()
+        try? FileManager.default.removeItem(atPath: dbPath)
+    }
+
+    delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+    #expect(delegate.runtimeServicesStartedForTesting == false)
+
+    #expect(delegate.performReindexForTesting() == "Reindex started")
+    await delegate.waitForRecoveryReindexForTesting()
+
+    #expect(delegate.runtimeServicesStartedForTesting)
+    #expect(delegate.hasIndexerForTesting)
+}
+
+@MainActor
+@Test
 func restoresSharedApplicationStateAfterConfigurationCheck() {
     let app = NSApplication.shared
     let originalActivationPolicy = app.activationPolicy()
