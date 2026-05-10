@@ -37,7 +37,16 @@ Claude Code 和 Codex 都会在本地留下很有价值的 session 数据，但�
 
 ## 安装
 
-### 方式一：下载 Release
+### 方式一：Homebrew
+
+```bash
+brew tap FUY25/vibespot https://github.com/FUY25/vibespot.git
+brew install --cask FUY25/vibespot/vibespot
+```
+
+这会通过 Homebrew 安装当前 GitHub Release 里的 DMG。当前打包版还没有接官方 Apple 签名和 notarization，所以 macOS 仍然可能要求你额外确认是否打开。
+
+### 方式二：下载 Release
 
 1. 打开 [最新 Release](https://github.com/FUY25/vibespot/releases)
 2. 下载 `VibeSpot.dmg`
@@ -47,7 +56,7 @@ Claude Code 和 Codex 都会在本地留下很有价值的 session 数据，但�
 
 注意：当前打包版还没有接官方 Apple 签名和 notarization，所以 macOS 可能会要求你额外确认是否打开。
 
-### 方式二：从源码运行
+### 方式三：从源码运行
 
 ```bash
 git clone https://github.com/FUY25/vibespot.git vibespot

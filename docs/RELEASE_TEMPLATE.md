@@ -9,8 +9,18 @@
 ## Downloads
 
 - `VibeSpot.dmg`
+- Homebrew cask: `vibespot`
 
 ## Install
+
+Homebrew:
+
+```bash
+brew tap FUY25/vibespot https://github.com/FUY25/vibespot.git
+brew install --cask FUY25/vibespot/vibespot
+```
+
+Manual:
 
 1. Download `VibeSpot.dmg`
 2. Move `VibeSpot.app` to `/Applications`
