@@ -1,12 +1,16 @@
 # VibeSpot
 
-VibeSpot 是为 Claude Code 和 Codex 做的 macOS Spotlight。它把搜索旧会话、切回正在进行中的会话、预览最近上下文、启动新会话，全部收进一个原生命令面板里。
+当你同时开了好几个 AI session 之后，想找到对的那个就会开始变慢。VibeSpot 不靠多 pane 去管理上下文，而是把搜索变成切换的最快方式，让你从一个原生命令面板里，在 live session 和旧 session 之间快速跳转。
 
 [English](README.md) · [下载最新 Release](https://github.com/FUY25/vibespot/releases) · [发布说明](docs/RELEASING.md)
 
 ## 演示
 
-### 一键唤起
+<video src="docs/readme-media/vibespot-demo.mp4" controls playsinline width="100%" title="VibeSpot 演示视频"></video>
+
+[观看完整演示视频](docs/readme-media/vibespot-demo.mp4)
+
+### 随时唤起
 
 ![Quick activation demo](docs/readme-media/quick-activation.gif)
 
@@ -14,7 +18,7 @@ VibeSpot 是为 Claude Code 和 Codex 做的 macOS Spotlight。它把搜索旧�
 
 ![Fast switch demo](docs/readme-media/fast-switch.gif)
 
-### 模糊搜索历史会话
+### 模糊搜索旧会话
 
 ![Search sessions demo](docs/readme-media/search-sessions.gif)
 
@@ -24,16 +28,16 @@ VibeSpot 是为 Claude Code 和 Codex 做的 macOS Spotlight。它把搜索旧�
 
 ## 为什么做它
 
-Claude Code 和 Codex 都会在本地留下很有价值的 session 数据，但回到正确的上下文仍然太慢。VibeSpot 把这些本地历史变成一个原生、快速的切换器，用来找 live run、旧上下文、未完成工作，以及直接开始新的会话。
+当你同时开了 3 个以上的 agent 或 session，原来的工作流就会开始失效：pane 太多，终端窗口太多，脑子里要记的上下文也太多。VibeSpot 用搜索来代替来回找窗口，让“搜索”本身就变成切换 live session 和找回旧上下文的最快方式。
 
 ## 功能
 
-- 用 Spotlight 风格面板搜索 Claude 和 Codex 的 live / 历史 session
-- 按 `Enter` 直接切回 live session
-- 在恢复前预览最近消息和改动文件
-- 用关键词模糊搜索旧线程
-- 在同一个入口里输入 `new claude` 或 `new codex`
-- 默认只读本地 session 文件，不依赖云端同步
+- 用 Spotlight 风格的面板搜索 Claude Code 和 Codex 的 live / 历史 session
+- 按 `Enter` 直接跳回正在进行中的 live session
+- 在恢复之前预览最近消息和改动过的文件
+- 用关键词模糊搜索旧线程，而不是手动翻一堆窗口
+- 在同一个入口里输入 `new claude` 或 `new codex`，直接开始新 session
+- 默认只读取你机器上的本地 session 文件，不依赖云端同步
 
 ## 安装
 
@@ -92,7 +96,7 @@ swift test
 
 ## 开源状态
 
-VibeSpot 已经开源，也已经可用，但仍然偏早期。核心能力已经在，剩下主要是体验打磨、打包发布、release 流程，以及公开文档整理。
+VibeSpot 已经开源，也已经可以使用，但目前仍然偏早期。核心能力已经具备，剩下主要是体验打磨、打包发布、release 流程，以及面对公开用户的文档整理。
 
 ## License
 
