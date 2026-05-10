@@ -6,9 +6,9 @@
 
 ## 演示
 
-<video src="docs/readme-media/vibespot-demo.mp4" controls playsinline width="100%" title="VibeSpot 演示视频"></video>
+[![观看 VibeSpot 演示视频](docs/readme-media/vibespot-demo-poster.jpg)](https://fuy25.github.io/vibespot/demo.html)
 
-[观看完整演示视频](docs/readme-media/vibespot-demo.mp4)
+[观看完整演示视频](https://fuy25.github.io/vibespot/demo.html)
 
 ### 随时唤起
 

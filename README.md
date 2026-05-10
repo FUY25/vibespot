@@ -8,9 +8,9 @@ When you have more than a few AI sessions open, finding the right one gets slow.
 
 ## Demo
 
-<video src="docs/readme-media/vibespot-demo.mp4" controls playsinline width="100%" title="VibeSpot demo video"></video>
+[![Watch the VibeSpot demo](docs/readme-media/vibespot-demo-poster.jpg)](https://fuy25.github.io/vibespot/demo.html)
 
-[Watch the full demo video](docs/readme-media/vibespot-demo.mp4)
+[Watch the full demo video](https://fuy25.github.io/vibespot/demo.html)
 
 ### Activate anytime, anywhere
 
@@ -116,9 +116,9 @@ VibeSpot is already open source and usable, but it is still early. The core app 
 
 ## 演示
 
-<video src="docs/readme-media/vibespot-demo.mp4" controls playsinline width="100%" title="VibeSpot 演示视频"></video>
+[![观看 VibeSpot 演示视频](docs/readme-media/vibespot-demo-poster.jpg)](https://fuy25.github.io/vibespot/demo.html)
 
-[观看完整演示视频](docs/readme-media/vibespot-demo.mp4)
+[观看完整演示视频](https://fuy25.github.io/vibespot/demo.html)
 
 ### 随时唤起
 
